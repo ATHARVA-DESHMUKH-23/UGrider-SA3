@@ -88,3 +88,4 @@ For Jazzy, source the corresponding Jazzy setup instead.
 **Configuration:** `src/src/sa3_motion/config/ms_sa3_pp.yaml` defines the sequence to execute up to and including the SA3 pick-and-place operation. The sequence order, executable parameters, execution mode, retries, and failure handling are controlled by this YAML file.
 
 **Status:** Under development; cleanup and validation are ongoing.
+
