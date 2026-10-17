@@ -12,9 +12,17 @@
     <group name="robot1_arm">
         <chain base_link="robot1_base_link" tip_link="robot1_end_effactor"/>
     </group>
+    <group name="robot1_tg_arm">
+        <chain base_link="robot1_base_link" tip_link="robot1_tg_end_effactor"/>
+    </group>
     <group name="robot2_arm">
         <chain base_link="robot2_base_link" tip_link="robot2_end_effactor"/>
     </group>
+
+    <group name="robot2_tg_arm">
+        <chain base_link="robot2_base_link" tip_link="robot2_tg_end_effector"/>
+    </group>
+    
     <group name="robot3_arm">
         <chain base_link="robot3_base_link" tip_link="robot3_end_effactor"/>
     </group>

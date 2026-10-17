@@ -111,6 +111,8 @@ constexpr double kMoveLAcceleration = 0.10;
 
 constexpr int kStepsPerPair = 6;
 
+constexpr char kHomeState[] = "home";
+
 
 // ===========================================================================
 // Pose helpers
@@ -681,6 +683,97 @@ bool movel(
 
 
 // ===========================================================================
+// Go to the named home state: plan with OMPL, execute through the controller
+// ===========================================================================
+
+bool goHome(Ctx & ctx)
+{
+  auto & group = *ctx.mg;
+  const auto logger = ctx.node->get_logger();
+  const std::string tag = stepTag(ctx);
+
+  if (!group.getCurrentState(10.0)) {
+    reportFailure(
+      ctx, "OMPL", "current state",
+      MoveItErr::ROBOT_STATE_STALE, 0.0, nullptr);
+    return false;
+  }
+
+  group.setStartStateToCurrentState();
+  group.setPlanningPipelineId("ompl");
+  group.setPlannerId("RRTConnectkConfigDefault");
+  group.setPlanningTime(kPlanningTime);
+  group.setNumPlanningAttempts(kOmplAttempts);
+  group.setMaxVelocityScalingFactor(kMoveJVelocity);
+  group.setMaxAccelerationScalingFactor(kMoveJAcceleration);
+  group.clearPoseTargets();
+  group.clearPathConstraints();
+
+  RCLCPP_INFO(logger, "%sgoing to named state '%s'", tag.c_str(), kHomeState);
+
+  if (!group.setNamedTarget(kHomeState)) {
+    reportFailure(
+      ctx, "OMPL", "set target",
+      MoveItErr::FAILURE, 0.0, nullptr,
+      std::string("Named state '") + kHomeState +
+      "' not found for group '" + kGroup + "' in the SRDF.");
+    return false;
+  }
+
+  moveit::planning_interface::MoveGroupInterface::Plan plan;
+
+  int last_code = MoveItErr::FAILURE;
+  bool planned = false;
+
+  const auto start = std::chrono::steady_clock::now();
+
+  for (int attempt = 1; attempt <= kPlanRetries; ++attempt) {
+    const auto result = group.plan(plan);
+    last_code = result.val;
+
+    if (result == moveit::core::MoveItErrorCode::SUCCESS) {
+      planned = true;
+      break;
+    }
+
+    RCLCPP_WARN(
+      logger, "%shome planning attempt %d/%d failed: %s",
+      tag.c_str(), attempt, kPlanRetries, errStr(last_code).c_str());
+  }
+
+  const double elapsed =
+    std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - start).count();
+
+  if (!planned) {
+    reportFailure(
+      ctx, "OMPL", "planning",
+      last_code, elapsed, nullptr,
+      "Could not plan to the home state.");
+    return false;
+  }
+
+  int exec_code = 0;
+  std::string exec_note;
+
+  if (!sa3_motion::executeDirect(
+      ctx.fjt,
+      plan.trajectory_.joint_trajectory,
+      exec_code,
+      exec_note))
+  {
+    reportFailure(
+      ctx, "OMPL", "direct controller execution",
+      exec_code, elapsed, nullptr, exec_note);
+    return false;
+  }
+
+  RCLCPP_INFO(logger, "%shome reached in %.2f s.", tag.c_str(), elapsed);
+
+  return true;
+}
+
+// ===========================================================================
 // Visit a list of arc poses in order using MoveL
 // ===========================================================================
 
@@ -770,7 +863,7 @@ bool pickPlace(
 
   arc_points = std::max(arc_points, 2);
 
-  ctx.cur.step_total = kStepsPerPair + arc_points;
+  ctx.cur.step_total = kStepsPerPair + arc_points + 1; // +1 for final home
 
   int step = 0;
 
@@ -1129,6 +1222,20 @@ bool pickPlace(
     RCLCPP_ERROR(
       logger,
       "Rebar was placed, but collision checking could not be restored.");
+    return false;
+  }
+
+  // ----------------------------------------------------------
+  // Final step: return the arm to its home state.
+  // ----------------------------------------------------------
+
+  ctx.cur.step_idx = ++step;
+  ctx.cur.step = "go home";
+
+  if (!goHome(ctx)) {
+    RCLCPP_ERROR(
+      logger,
+      "Rebar was placed, but the arm could not return home.");
     return false;
   }
 

@@ -26,12 +26,12 @@ motion_sequence:
       retries: 1
       on_failure: abort
 
-    - name: "Initial home all robots"
-      executables:
-        - home_all_robots
-      mode: sequential
-      retries: 3
-      on_failure: continue
+    # - name: "Initial home all robots"
+    #   executables:
+    #     - home_all_robots
+    #   mode: sequential
+    #   retries: 3
+    #   on_failure: continue
 
     - name: "Pick/place shear clamps and rebars"
       executables:

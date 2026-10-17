@@ -507,67 +507,67 @@ workcell:
       scale: 0.001
 
     rebar_13_1:
-      parent: web_ring
+      parent: 13pf
       child: "13_1"
-      xyz: [0.39, 0.283, 2.107]
-      rpy: [-1.57, 0.0, 0.0]
-      mesh: package://sa2_description/meshes/rebars/13.STL
+      xyz: [0.0, 0.0, 0.0]
+      rpy: [1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/13A_1.stl
       scale: 0.001
 
     rebar_13_2:
-      parent: web_ring
+      parent: 13pf
       child: "13_2"
-      xyz: [0.39, 0.383, 2.107]
-      rpy: [-1.57, 0.0, 0.0]
-      mesh: package://sa2_description/meshes/rebars/13.STL
+      xyz: [0.0, -0.10, 0.0]
+      rpy: [1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/13A_1.stl
       scale: 0.001
 
     rebar_13_3:
-      parent: web_ring
+      parent: 13pf
       child: "13_3"
-      xyz: [0.39, 0.483, 2.107]
-      rpy: [-1.57, 0.0, 0.0]
-      mesh: package://sa2_description/meshes/rebars/13.STL
+      xyz: [0.0, -0.2, 0.0]
+      rpy: [1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/13A_1.stl
       scale: 0.001
 
     rebar_13_4:
-      parent: web_ring
+      parent: 13pf
       child: "13_4"
-      xyz: [0.39, 0.583, 2.107]
-      rpy: [-1.57, 0.0, 0.0]
-      mesh: package://sa2_description/meshes/rebars/13.STL
+      xyz: [0.0, -0.3, 0.0]
+      rpy: [1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/13A_1.stl
       scale: 0.001
 
     rebar_14_1:
-      parent: web_ring
+      parent: 14pf
       child: "14_1"
-      xyz: [0.39, 0.1305, 1.809]
-      rpy: [-1.57, 0.0, 0.0]
-      mesh: package://sa2_description/meshes/rebars/14A1.STL
+      xyz: [0.0, 0.0, 0.0]
+      rpy: [1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/14A1_1.stl
       scale: 0.001
 
     rebar_14_2:
-      parent: web_ring
+      parent: 14pf
       child: "14_2"
-      xyz: [0.39, 0.3305, 1.83]
-      rpy: [-1.57, 0.0, 0.0]
-      mesh: package://sa2_description/meshes/rebars/14A2.STL
+      xyz: [0.0, -0.2, 0.0]
+      rpy: [1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/14A2_1.stl
       scale: 0.001
 
     rebar_14_3:
-      parent: web_ring
+      parent: 14pf
       child: "14_3"
-      xyz: [0.39, 0.5305, 1.85]
-      rpy: [-1.57, 0.0, 0.0]
-      mesh: package://sa2_description/meshes/rebars/14A3.STL
+      xyz: [0.0, -0.4, 0.0]
+      rpy: [1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/14A3_1.stl
       scale: 0.001
 
     rebar_14_4:
-      parent: web_ring
+      parent: 14pf
       child: "14_4"
-      xyz: [0.39, 0.7305, 1.89]
-      rpy: [-1.57, 0.0, 0.0]
-      mesh: package://sa2_description/meshes/rebars/14A4.STL
+      xyz: [0.0, -0.6, 0.0]
+      rpy: [1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/14A4_1.stl
       scale: 0.001
 
     # -----------------------------------------------

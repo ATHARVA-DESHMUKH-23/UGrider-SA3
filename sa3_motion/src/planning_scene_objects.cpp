@@ -11,6 +11,11 @@
 #include <utility>
 #include <vector>
 
+// POSIX file lock (cross-process serialization of ACM updates)
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+
 #include <Eigen/Geometry>
 #include <boost/variant/get.hpp>
 
@@ -44,6 +49,51 @@ namespace
 
 // How long to wait for world -> frame to appear (seconds).
 constexpr double kTfLookupTimeoutSec = 15.0;
+
+// Lock file shared by every node that edits the Allowed Collision Matrix.
+constexpr char kAcmLockPath[] = "/tmp/sa3_acm.lock";
+
+// false: an ACM read-back mismatch is logged as a warning but does not abort the
+// motion. Set true once the mismatch cause is understood.
+constexpr bool kAcmVerifyIsFatal = false;
+
+// ============================================================
+// Cross-process lock for ACM read-modify-write cycles
+//
+// The robot nodes are separate processes, each with its own
+// PlanningSceneObjects and its own mutex_. The ACM is replaced as a
+// whole on every update, so two nodes doing GET -> edit -> APPLY at the
+// same time would overwrite each other's changes. flock() serializes
+// the whole cycle across processes on the same machine.
+// ============================================================
+
+class AcmFileLock
+{
+public:
+  AcmFileLock()
+  {
+    fd_ = ::open(kAcmLockPath, O_CREAT | O_RDWR, 0666);
+    if (fd_ >= 0) {
+      ::flock(fd_, LOCK_EX);   // blocks until the other node releases it
+    }
+  }
+
+  ~AcmFileLock()
+  {
+    if (fd_ >= 0) {
+      ::flock(fd_, LOCK_UN);
+      ::close(fd_);
+    }
+  }
+
+  bool ok() const {return fd_ >= 0;}
+
+  AcmFileLock(const AcmFileLock &) = delete;
+  AcmFileLock & operator=(const AcmFileLock &) = delete;
+
+private:
+  int fd_ = -1;
+};
 
 // ============================================================
 // Pose helper
@@ -1059,6 +1109,10 @@ bool PlanningSceneObjects::detachObjectToWorldPreservingPose(
 
 // ============================================================
 // Set object collision permissions
+//
+// The ACM is replaced as a whole on every update, so this is a
+// read-modify-write cycle. It is wrapped in a cross-process file lock
+// so two robot nodes cannot overwrite each other's changes.
 // ============================================================
 
 bool PlanningSceneObjects::setObjectCollisionsAllowed(
@@ -1067,6 +1121,17 @@ bool PlanningSceneObjects::setObjectCollisionsAllowed(
   bool allowed)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+  // Held until this function returns: covers GET -> edit -> APPLY -> verify.
+  AcmFileLock acm_lock;
+
+  if (!acm_lock.ok()) {
+    RCLCPP_ERROR(
+      node_->get_logger(),
+      "Could not open ACM lock file '%s'.",
+      kAcmLockPath);
+    return false;
+  }
 
   if (object_id.empty() || link_names.empty()) {
     RCLCPP_ERROR(
@@ -1092,17 +1157,34 @@ bool PlanningSceneObjects::setObjectCollisionsAllowed(
   request->components.components =
     moveit_msgs::msg::PlanningSceneComponents::ALLOWED_COLLISION_MATRIX;
 
-  auto future = client->async_send_request(request);
+  // A freshly created client can lose its first request/response while DDS
+  // discovery finishes (wait_for_service() can already be true). Retrying on
+  // the same client fixes that, so retry instead of giving up after one try.
+  moveit_msgs::msg::AllowedCollisionMatrix acm;
+  {
+    bool got_acm = false;
 
-  if (future.wait_for(5s) != std::future_status::ready) {
-    RCLCPP_ERROR(
-      node_->get_logger(),
-      "Timed out retrieving the Allowed Collision Matrix.");
-    return false;
+    for (int attempt = 1; attempt <= 3 && !got_acm; ++attempt) {
+      auto future = client->async_send_request(request);
+
+      if (future.wait_for(3s) == std::future_status::ready) {
+        acm = future.get()->scene.allowed_collision_matrix;
+        got_acm = true;
+      } else {
+        RCLCPP_WARN(
+          node_->get_logger(),
+          "Timed out retrieving the Allowed Collision Matrix (attempt %d/3).",
+          attempt);
+      }
+    }
+
+    if (!got_acm) {
+      RCLCPP_ERROR(
+        node_->get_logger(),
+        "Could not retrieve the Allowed Collision Matrix after 3 attempts.");
+      return false;
+    }
   }
-
-  const auto response = future.get();
-  auto acm = response->scene.allowed_collision_matrix;
 
   if (acm.entry_names.empty() ||
       acm.entry_values.size() != acm.entry_names.size()) {
@@ -1268,9 +1350,100 @@ bool PlanningSceneObjects::setObjectCollisionsAllowed(
     return false;
   }
 
+  // ----------------------------------------------------------
+  // Read back and compare (still under the lock). Retries the apply a
+  // few times and logs exactly what was read, so a mismatch is explained
+  // instead of just aborting the run.
+  // ----------------------------------------------------------
+
+  auto readBackMatches = [&](std::string & detail) -> bool
+  {
+    moveit_msgs::msg::AllowedCollisionMatrix m;
+    bool got = false;
+
+    for (int i = 0; i < 3 && !got; ++i) {
+      auto fut = client->async_send_request(request);
+      if (fut.wait_for(3s) == std::future_status::ready) {
+        m = fut.get()->scene.allowed_collision_matrix;
+        got = true;
+      }
+    }
+
+    if (!got) {
+      detail = "timed out re-reading the ACM";
+      return false;
+    }
+
+    auto idx = [&m](const std::string & name) -> int
+    {
+      const auto it = std::find(m.entry_names.begin(), m.entry_names.end(), name);
+      return it == m.entry_names.end() ?
+             -1 : static_cast<int>(std::distance(m.entry_names.begin(), it));
+    };
+
+    const int oi = idx(object_id);
+
+    for (const auto & link_name : link_names) {
+      const int li = idx(link_name);
+
+      // MoveIt does not necessarily keep an entry for a pair that is not
+      // allowed: a missing entry means "collision checking enabled", which
+      // is the same as false. Only a pair that is still allowed is a mismatch.
+      bool a = false;
+      bool b = false;
+      if (oi >= 0 && li >= 0) {
+        a = m.entry_values[oi].enabled[li];
+        b = m.entry_values[li].enabled[oi];
+      }
+
+      if (a != allowed || b != allowed) {
+        detail = "'" + object_id + "' <-> '" + link_name + "': read [obj][link]=" +
+          (a ? "ALLOWED" : "ENABLED") + " [link][obj]=" + (b ? "ALLOWED" : "ENABLED") +
+          ", wanted " + (allowed ? "ALLOWED" : "ENABLED") +
+          (oi < 0 || li < 0 ? " (entry missing)" : "");
+        return false;
+      }
+    }
+    return true;
+  };
+
+  constexpr int kVerifyAttempts = 3;
+  std::string mismatch;
+  bool matched = false;
+
+  for (int attempt = 1; attempt <= kVerifyAttempts && !matched; ++attempt) {
+    matched = readBackMatches(mismatch);
+    if (matched) {
+      break;
+    }
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "ACM read-back mismatch (attempt %d/%d): %s",
+      attempt, kVerifyAttempts, mismatch.c_str());
+
+    if (attempt < kVerifyAttempts) {
+      planning_scene_interface_.applyPlanningScene(diff);   // re-apply, same ACM
+      rclcpp::sleep_for(100ms);
+    }
+  }
+
+  if (!matched) {
+    if (kAcmVerifyIsFatal) {
+      RCLCPP_ERROR(
+        node_->get_logger(),
+        "ACM verification failed after %d attempts: %s",
+        kVerifyAttempts, mismatch.c_str());
+      return false;
+    }
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "ACM verification still mismatched after %d attempts (continuing): %s",
+      kVerifyAttempts, mismatch.c_str());
+  }
+
   RCLCPP_INFO(
     node_->get_logger(),
-    "Collision checking for '%s' against %zu link(s): %s.",
+    "Collision checking for '%s' against %zu link(s): %s (verified).",
     object_id.c_str(),
     link_names.size(),
     allowed ? "ALLOWED" : "ENABLED");
@@ -1289,5 +1462,7 @@ bool PlanningSceneObjects::setCollisionPairAllowed(
   bool allowed)
 {
   // Same ACM logic as setObjectCollisionsAllowed, with a single partner.
+  // (Do NOT take AcmFileLock here: the callee already holds it, and
+  // flock on a second descriptor in the same process would deadlock.)
   return setObjectCollisionsAllowed(a, {b}, allowed);
 }
