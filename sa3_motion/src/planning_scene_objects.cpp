@@ -230,7 +230,6 @@ moveit_msgs::msg::CollisionObject makeMeshObject(
   return object;
 }
 
-
 // ============================================================
 // YAML-driven definitions (rebars and grippers)
 //
@@ -450,21 +449,25 @@ PlanningSceneObjects::PlanningSceneObjects(
 bool PlanningSceneObjects::addRebarObjects()
 {
   // Spawn everything from workcell.yaml: rebars first, then grippers.
-  return addExtraRebars() && addExtraGrippers();
+  return addExtraRebars()
+      && addMovableRebars()
+      && addExtraGrippers();
 }
-
 
 bool PlanningSceneObjects::addExtraRebars()
 {
   return addFromSection("extra_rebars", false);
 }
 
+bool PlanningSceneObjects::addMovableRebars()
+{
+  return addFromSection("movable_rebars", false);
+}
 
 bool PlanningSceneObjects::addExtraGrippers()
 {
   return addFromSection("extra_grippers", true);
 }
-
 
 // ============================================================
 // Shared spawn logic

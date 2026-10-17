@@ -65,6 +65,8 @@ public:
     moveit::planning_interface::MoveGroupInterface & move_group,
     const std::string & object_id);
 
+  bool addMovableRebars();
+
   // ---- new: allow / restore collision between two named bodies ----
   bool setCollisionPairAllowed(
     const std::string & a, const std::string & b, bool allowed);

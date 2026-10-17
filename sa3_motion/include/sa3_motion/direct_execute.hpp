@@ -79,6 +79,7 @@ inline bool executeDirect(
     return false;
   }
 
+
   const auto result = result_fut.get();
   if (result.code != rclcpp_action::ResultCode::SUCCEEDED) {
     error_code = MoveItErr::CONTROL_FAILED;

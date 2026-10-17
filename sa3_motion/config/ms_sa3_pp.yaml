@@ -1,0 +1,67 @@
+
+# Motion sequence configuration for sa3_motion_sequence.launch.py
+# mode: parallel | sequential
+# on_failure: abort | continue | final_home | finish
+# retries is the total number of attempts, including the first attempt.
+
+motion_sequence:
+  stages:
+    - name: "Pick/place web flanges"
+      executables:
+        - name: robot3_motion
+          parameters:
+            pick_frame: inventory_3a_4a_frame
+            place_frame: place_frame_10
+            object_id: rebar_3c
+
+        - name: robot4_motion
+          parameters:
+            pick_frame: inventory_3a_4a_frame_2
+            place_frame: place_frame_10_l
+            object_id: rebar_4c
+
+        - attach_tool
+      mode: parallel
+      retries: 1
+      on_failure: abort
+
+    - name: "Pick/place shear clamps and rebars"
+      executables:
+        - robot1_motion
+        - robot2_motion
+      mode: parallel
+      retries: 1
+      on_failure: abort
+
+    - name: "Change gripper"
+      executables:
+        - robot1_gripper_change
+      mode: sequential
+      retries: 3
+      on_failure: continue
+
+    - name: "Tie clamps with tying guns"
+      executables:
+        - robot1_tying_gun
+        - robot2_tying_gun
+      mode: parallel
+      retries: 1
+      on_failure: final_home
+
+    - name: "Final home all robots"
+      executables:
+        - home_all_robots
+      mode: sequential
+      retries: 1
+      on_failure: finish
+
+    - name: "Pick/place final assembly"
+      executables:
+        - name: robot3_sa3pp
+          parameters:
+            pick_frame: sa3_pick_point
+            place_frame: sa3_place
+            object_id: rebar_1A
+      mode: sequential
+      retries: 1
+      on_failure: finish

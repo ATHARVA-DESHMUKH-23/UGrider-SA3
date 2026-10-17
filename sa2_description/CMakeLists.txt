@@ -61,6 +61,8 @@ install(
     scripts/arc_frame_base.py
     scripts/rebar_visualizer.py
     scripts/gripper_visualizer.py
+    scripts/movable_rebar_tf.py
+    scripts/movable_rebar_marker.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

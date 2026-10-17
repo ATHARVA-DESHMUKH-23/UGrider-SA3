@@ -82,6 +82,17 @@ def generate_launch_description():
             executable="gripper_visualizer.py",
             output="screen",
         )
+    movable_rebar_tf = Node(
+            package="sa2_description",
+            executable="movable_rebar_tf.py",
+            output="screen",
+        )
+    
+    movable_rebar_marker = Node(
+            package="sa2_description",
+            executable="movable_rebar_marker.py",
+            output="screen",
+        )
 
     # =========================================================
     # 4. ENVIRONMENT COLLISION
@@ -170,6 +181,8 @@ def generate_launch_description():
         workcell_visualizer,
         rebar_visualizer,
         gripper_visualizer,
+        movable_rebar_tf,
+        movable_rebar_marker,
 
         # 4. Environment collision
         environment_collision,

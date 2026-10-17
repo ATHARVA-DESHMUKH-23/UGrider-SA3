@@ -390,6 +390,33 @@ ament_target_dependencies(attach_tool
 )
 
 
+# ============================================================
+# Simple pick/place motion node (single arm, attach/detach)
+# ============================================================
+
+add_executable(robot3_sa3pp
+  src/robot3_sa3pp.cpp
+)
+
+target_include_directories(robot3_sa3pp PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(robot3_sa3pp
+  rclcpp
+  rclcpp_action
+  control_msgs
+  trajectory_msgs
+  moveit_ros_planning_interface
+  moveit_msgs
+  geometry_msgs
+  sensor_msgs
+  tf2
+  tf2_ros
+)
+
+
 
 # ============================================================
 # Link Planning Scene Objects to robot motion nodes
@@ -410,7 +437,9 @@ target_link_libraries(robot3_motion
 target_link_libraries(robot4_motion
   planning_scene_objects
 )
-
+target_link_libraries(robot3_sa3pp
+  planning_scene_objects
+)
 
 # ============================================================
 # Install executables
@@ -433,6 +462,7 @@ install(
     robot1_gripper_change
     planning_scene_objects
     attach_tool
+    robot3_sa3pp
   DESTINATION lib/${PROJECT_NAME}
 )
 

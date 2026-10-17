@@ -24,6 +24,7 @@ public:
   }
 
 private:
+    
   void tryAddRebars()
   {
     if (finished_) {
@@ -37,20 +38,23 @@ private:
 
     RCLCPP_INFO(
       get_logger(),
-      "Attempting to add YAML-defined rebars to the MoveIt planning scene.");
+      "Attempting to add YAML-defined planning-scene objects.");
 
-    if (planning_scene_objects_->addExtraRebars() && planning_scene_objects_->addExtraGrippers()) {
+    if (planning_scene_objects_->addRebarObjects()) {
       finished_ = true;
       startup_timer_->cancel();
+
       RCLCPP_INFO(
         get_logger(),
         "Rebar planning-scene setup completed successfully.");
     } else {
       RCLCPP_WARN(
         get_logger(),
-        "Could not add rebars yet; will retry in 1 second. Check MoveIt, TF parent frames, YAML and mesh paths.");
+        "Could not add planning-scene objects yet; retrying in 1 second. "
+        "Check MoveIt services, TF frames, YAML configuration and mesh paths.");
     }
   }
+
 
   std::shared_ptr<PlanningSceneObjects> planning_scene_objects_;
   rclcpp::TimerBase::SharedPtr startup_timer_;

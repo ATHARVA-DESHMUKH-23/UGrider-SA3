@@ -208,90 +208,90 @@ workcell:
     13_placef1_l_t1:
       parent: 13_placef1_l
       child: 13_placef1_l_t1
-      xyz: [0.01, -0.020, -0.075]
+      xyz: [-0.03, -0.020, -0.075]
       rpy: [3.14, 0.0, 0.0]
     13_placef1_l_t2:
       parent: 13_placef1_l
       child: 13_placef1_l_t2
-      xyz: [0.01, -0.020, 0.0750]
+      xyz: [-0.03, -0.020, 0.0750]
       rpy: [3.14, 0.0, 0.0]
 
     13_placef2_l_t1:
       parent: 13_placef2_l
       child: 13_placef2_l_t1
-      xyz: [0.01,  -0.020, -0.075]
+      xyz: [-0.03,  -0.020, -0.075]
       rpy: [3.14, 0.0, 0.0]
     13_placef2_l_t2:
       parent: 13_placef2_l
       child: 13_placef2_l_t2
-      xyz: [0.01, -0.020, 0.075]
+      xyz: [-0.03, -0.020, 0.075]
       rpy: [3.14, 0.0, 0.0]
 
     13_placef3_l_t1:
       parent: 13_placef3_l
       child: 13_placef3_l_t1
-      xyz: [ 0.0, -0.020, -0.075]
+      xyz: [ -0.03, -0.020, -0.075]
       rpy: [3.14, 0.0, 0.0]
     13_placef3_l_t2:
       parent: 13_placef3_l
       child: 13_placef3_l_t2
-      xyz: [ 0.0,0.020, 0.075]
+      xyz: [ -0.03,0.020, 0.075]
       rpy: [3.14, 0.0, 0.0]
 
     13_placef4_l_t1:
       parent: 13_placef4_l
       child: 13_placef4_l_t1
-      xyz: [ 0.0, -0.020, -0.075]
+      xyz: [ -0.03, -0.020, -0.075]
       rpy: [3.14, 0.0, 0.0]
     13_placef4_l_t2:
       parent: 13_placef4_l
       child: 13_placef4_l_t2
-      xyz: [ 0.0,-0.020, 0.075]
+      xyz: [ -0.03,-0.020, 0.075]
       rpy: [3.14, 0.0, 0.0]
 
     # ---------- type 14 (2 points each) ----------
     14_placef1_l_t1:
       parent: 14_placef1_l
       child: 14_placef1_l_t1
-      xyz: [-0.0,0.020,-0.080]
+      xyz: [-0.03,0.020,-0.080]
       rpy: [3.14, 0.0, 0.0]
     14_placef1_l_t2:
       parent: 14_placef1_l
       child: 14_placef1_l_t2
-      xyz: [0.01,-0.020,0.080]
+      xyz: [-0.03,-0.020,0.080]
       rpy: [3.14, 0.0, 0.0]
 
     14_placef2_l_t1:
       parent: 14_placef2_l
       child: 14_placef2_l_t1
-      xyz: [-0.0,0.020,-0.080]
+      xyz: [-0.03,0.020,-0.080]
       rpy: [3.14, 0.0, 0.0]
     14_placef2_l_t2:
       parent: 14_placef2_l
       child: 14_placef2_l_t2
-      xyz: [0.01,-0.020,0.080]
+      xyz: [-0.03,-0.020,0.080]
       rpy: [3.14, 0.0, 0.0]
 
     14_placef3_l_t1:
       parent: 14_placef3_l
       child: 14_placef3_l_t1
-      xyz: [-0.0,-0.020,-0.080]
+      xyz: [-0.03,-0.020,-0.080]
       rpy: [3.14, 0.0, 0.0]
     14_placef3_l_t2:
       parent: 14_placef3_l
       child: 14_placef3_l_t2
-      xyz: [0.01,-0.020,0.080]
+      xyz: [-0.03,-0.020,0.080]
       rpy: [3.14, 0.0, 0.0]
 
     14_placef4_l_t1:
       parent: 14_placef4_l
       child: 14_placef4_l_t1
-      xyz: [0.01,-0.020,-0.080]
+      xyz: [-0.03,-0.020,-0.080]
       rpy: [3.14, 0.0, 0.0]
     14_placef4_l_t2:
       parent: 14_placef4_l
       child: 14_placef4_l_t2
-      xyz: [0.01, -0.020,0.080]
+      xyz: [-0.03, -0.020,0.080]
       rpy: [3.14, 0.0, 0.0]
 
 
@@ -299,80 +299,93 @@ workcell:
     13_placef1_r_t1:
       parent: 13_placef1_r
       child: 13_placef1_r_t1
-      xyz: [0.01, -0.020, -0.075]
+      xyz: [-0.03, -0.020, -0.075]
       rpy: [3.14, 0.0, 0.0]
     13_placef1_r_t2:
       parent: 13_placef1_r
       child: 13_placef1_r_t2
-      xyz: [0.01, -0.020, 0.0750]
+      xyz: [-0.03, -0.020, 0.0750]
       rpy: [3.14, 0.0, 0.0]
 
     13_placef2_r_t1:
       parent: 13_placef2_r
       child: 13_placef2_r_t1
-      xyz: [0.01,  -0.020, -0.075]
+      xyz: [-0.03,  -0.020, -0.075]
       rpy: [3.14, 0.0, 0.0]
     13_placef2_r_t2:
       parent: 13_placef2_r
       child: 13_placef2_r_t2
-      xyz: [0.01, -0.020, 0.075]
+      xyz: [-0.03, -0.020, 0.075]
       rpy: [3.14, 0.0, 0.0]
 
     13_placef3_r_t1:
       parent: 13_placef3_r
       child: 13_placef3_r_t1
-      xyz: [ 0.0, -0.020, -0.075]
+      xyz: [ 0.05, -0.020, -0.075]
       rpy: [3.14, 0.0, 0.0]
     13_placef3_r_t2:
       parent: 13_placef3_r
       child: 13_placef3_r_t2
-      xyz: [ 0.0,0.020, 0.075]
+      xyz: [ 0.05,0.020, 0.075]
       rpy: [3.14, 0.0, 0.0]
 
     # ---------- type 14 (2 points each) ----------
     14_placef1_r_t1:
       parent: 14_placef1_r
       child: 14_placef1_r_t1
-      xyz: [-0.0,0.020,-0.080]
+      xyz: [-0.03,0.020,-0.080]
       rpy: [3.14, 0.0, 0.0]
     14_placef1_r_t2:
       parent: 14_placef1_r
       child: 14_placef1_r_t2
-      xyz: [0.01,-0.020,0.080]
+      xyz: [-0.03,-0.020,0.080]
       rpy: [3.14, 0.0, 0.0]
 
     14_placef2_r_t1:
       parent: 14_placef2_r
       child: 14_placef2_r_t1
-      xyz: [-0.0,0.020,-0.080]
+      xyz: [-0.03,0.020,-0.080]
       rpy: [3.14, 0.0, 0.0]
     14_placef2_r_t2:
       parent: 14_placef2_r
       child: 14_placef2_r_t2
-      xyz: [0.01,-0.020,0.080]
+      xyz: [-0.03,-0.020,0.080]
       rpy: [3.14, 0.0, 0.0]
 
     14_placef3_r_t1:
       parent: 14_placef3_r
       child: 14_placef3_r_t1
-      xyz: [-0.0,-0.020,-0.080]
+      xyz: [-0.03,-0.020,-0.080]
       rpy: [3.14, 0.0, 0.0]
     14_placef3_r_t2:
       parent: 14_placef3_r
       child: 14_placef3_r_t2
-      xyz: [0.01,-0.020,0.080]
+      xyz: [-0.03,-0.020,0.080]
       rpy: [3.14, 0.0, 0.0]
 
     14_placef4_r_t1:
       parent: 14_placef4_r
       child: 14_placef4_r_t1
-      xyz: [0.01,-0.020,-0.080]
+      xyz: [-0.03,-0.020,-0.080]
       rpy: [3.14, 0.0, 0.0]
     14_placef4_r_t2:
       parent: 14_placef4_r
       child: 14_placef4_r_t2
-      xyz: [0.01, -0.020,0.080]
+      xyz: [-0.03, -0.020,0.080]
       rpy: [3.14, 0.0, 0.0]
+
+        # MANUAL SA3 PICK / PLACE FRAMES
+    sa3_place:
+      parent: world
+      child: sa3_place
+      xyz: [0.029114, 0.846278, 1.502617]
+      rpy: [0.0, 0.0, 1.54]
+
+    sa3_pick_point:
+      parent: world
+      child: sa3_pick_point
+      xyz: [0.134996, 2.545619, 3.169703]
+      rpy: [0.0, 0.34121187, 1.54]
  
   # =========================================================
   # INVENTORY 3A / 4A
@@ -570,19 +583,6 @@ workcell:
       mesh: package://sa2_description/meshes/rebars/14A4_1.stl
       scale: 0.001
 
-    # -----------------------------------------------
-    #  bottom mat 
-    # -----------------------------------------------
-    rebar_1A:
-      parent: jig_clamp
-      child: "1A"
-      xyz: [0.75, 0.46, 1.89]
-      rpy: [1.2288, 0.0, 1.580796]
-      mesh: package://sa2_description/meshes/rebars/1A.STL
-      scale: 0.001
-
-
-    
     # --------------------------------------------------
     # web rack rebars
     # --------------------------------------------------
@@ -653,9 +653,6 @@ workcell:
       mesh: package://sa2_description/meshes/rebars/14A4.STL
       scale: 0.001
      
-
-
-
     rebar_6:
       parent: web_ring_2
       child: "6a"
@@ -663,7 +660,20 @@ workcell:
       rpy: [1.57, 0.0, 1.57]
       mesh: package://sa2_description/meshes/rebars/6A(8).STL
       scale: 0.001
-  
+
+  movable_rebars:
+     # -----------------------------------------------
+    #  bottom mat 
+    # -----------------------------------------------
+    rebar_1A:
+      parent: jig_clamp
+      child: "1A"
+      xyz: [0.75, 0.46, 1.89]
+      rpy: [1.2288, 0.0, 1.580796]
+      mesh: package://sa2_description/meshes/rebars/1A.STL
+      scale: 0.001
+      color: [0.5, 0.5, 0.5, 1.0]
+
   extra_grippers:
     robot1_tying_gun:
       parent: robot1_tyinggun_dock
