@@ -1,0 +1,80 @@
+# This config file is used by ros2_control
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz
+
+    robot1_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+
+    robot2_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+
+    robot3_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+
+    robot4_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+robot1_arm_controller:
+  ros__parameters:
+    joints:
+      - robot1_J1
+      - robot1_J2
+      - robot1_J3
+      - robot1_J4
+      - robot1_J5
+      - robot1_J6
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+robot2_arm_controller:
+  ros__parameters:
+    joints:
+      - robot2_J1
+      - robot2_J2
+      - robot2_J3
+      - robot2_J4
+      - robot2_J5
+      - robot2_J6
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+robot3_arm_controller:
+  ros__parameters:
+    joints:
+      - robot3_J1
+      - robot3_J2
+      - robot3_J3
+      - robot3_J4
+      - robot3_J5
+      - robot3_J6
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+robot4_arm_controller:
+  ros__parameters:
+    joints:
+      - robot4_J1
+      - robot4_J2
+      - robot4_J3
+      - robot4_J4
+      - robot4_J5
+      - robot4_J6
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity

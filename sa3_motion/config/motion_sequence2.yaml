@@ -1,0 +1,62 @@
+# Motion sequence configuration for sa3_motion_sequence.launch.py
+# Entries can be simple executable names or mappings with per-node parameters.
+# mode: parallel | sequential
+# on_failure: abort | continue | final_home | finish
+# retries is the total number of attempts, including the first attempt.
+
+motion_sequence:
+  stages:
+    - name: "Attach tool"
+      executables:
+        - attach_tool
+      mode: sequential
+      retries: 1
+      on_failure: continue
+
+    - name: "Robot 3/4 pick/place and robot 1 gripper change"
+      executables:
+        - name: robot3_motion
+          parameters:
+            pick_frame: inventory_3a_4a_frame
+            place_frame: place_frame_10
+            object_id: rebar_3d
+
+        - name: robot4_motion
+          parameters:
+            pick_frame: inventory_3a_4a_frame_2
+            place_frame: place_frame_10_l
+            object_id: rebar_4d
+
+        - robot1_gripper_change
+      mode: parallel
+      retries: 1
+      on_failure: continue
+
+    - name: "Home all robots"
+      executables:
+        - home_all_robots
+      mode: sequential
+      retries: 3
+      on_failure: continue
+
+    - name: "Tie clamps with tying guns"
+      executables:
+        - name: robot1_tying_gun
+          parameters:
+            clamp_frames: ["1A_l"]
+            tie_counts: [2]
+
+        - name: robot2_tying_gun
+          parameters:
+            clamp_frames: ["1A_r"]
+            tie_counts: [2]
+      mode: parallel
+      retries: 1
+      on_failure: final_home
+
+    - name: "Final home all robots"
+      executables:
+        - home_all_robots
+      mode: sequential
+      retries: 3
+      on_failure: finish

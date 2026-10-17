@@ -1,0 +1,144 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro">
+
+  <!-- ========================================================= -->
+  <!-- ROS 2 CONTROL CONFIGURATION                               -->
+  <!-- ========================================================= -->
+
+  <ros2_control name="SA2System" type="system">
+
+    <hardware>
+
+      <!-- ===================================================== -->
+      <!-- MOCK HARDWARE                                         -->
+      <!-- ===================================================== -->
+
+      <xacro:if value="${hardware_mode == 'mock'}">
+        <plugin>mock_components/GenericSystem</plugin>
+      </xacro:if>
+
+
+      <!-- ===================================================== -->
+      <!-- GAZEBO                                                -->
+      <!-- ===================================================== -->
+
+      <xacro:if value="${hardware_mode == 'gazebo'}">
+        <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+      </xacro:if>
+
+
+      <!-- ===================================================== -->
+      <!-- REAL FANUC HARDWARE                                   -->
+      <!-- ===================================================== -->
+
+      <xacro:if value="${hardware_mode == 'fanuc'}">
+        <plugin>fanuc_robot_driver/FanucHardwareInterface</plugin>
+
+        <param name="robot_ip">192.168.1.100</param>
+        <param name="rmi_port">16000</param>
+        <param name="stream_motion_port">16010</param>
+        <param name="payload_schedule">0</param>
+        <param name="out_cmd_interp_buff_target">4</param>
+        <param name="force_sensor_type">0</param>
+        <param name="motion_control">1</param>
+      </xacro:if>
+
+    </hardware>
+
+
+    <!-- ======================================================= -->
+    <!-- CONTROLLED JOINT MACRO                                  -->
+    <!-- ======================================================= -->
+
+    <xacro:macro name="controlled_joint" params="name">
+
+      <joint name="${name}">
+
+        <command_interface name="position"/>
+
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+
+      </joint>
+
+    </xacro:macro>
+
+
+    <!-- ======================================================= -->
+    <!-- ROBOT 1 : M-20                                         -->
+    <!-- ======================================================= -->
+
+    <xacro:controlled_joint name="robot1_J1"/>
+    <xacro:controlled_joint name="robot1_J2"/>
+    <xacro:controlled_joint name="robot1_J3"/>
+    <xacro:controlled_joint name="robot1_J4"/>
+    <xacro:controlled_joint name="robot1_J5"/>
+    <xacro:controlled_joint name="robot1_J6"/>
+
+
+    <!-- ======================================================= -->
+    <!-- ROBOT 2 : M-20                                         -->
+    <!-- ======================================================= -->
+
+    <xacro:controlled_joint name="robot2_J1"/>
+    <xacro:controlled_joint name="robot2_J2"/>
+    <xacro:controlled_joint name="robot2_J3"/>
+    <xacro:controlled_joint name="robot2_J4"/>
+    <xacro:controlled_joint name="robot2_J5"/>
+    <xacro:controlled_joint name="robot2_J6"/>
+
+
+    <!-- ======================================================= -->
+    <!-- ROBOT 3 : R-2000                                       -->
+    <!-- ======================================================= -->
+
+    <xacro:controlled_joint name="robot3_J1"/>
+    <xacro:controlled_joint name="robot3_J2"/>
+    <xacro:controlled_joint name="robot3_J3"/>
+    <xacro:controlled_joint name="robot3_J4"/>
+    <xacro:controlled_joint name="robot3_J5"/>
+    <xacro:controlled_joint name="robot3_J6"/>
+
+
+    <!-- ======================================================= -->
+    <!-- ROBOT 4 : R-2000                                       -->
+    <!-- ======================================================= -->
+
+    <xacro:controlled_joint name="robot4_J1"/>
+    <xacro:controlled_joint name="robot4_J2"/>
+    <xacro:controlled_joint name="robot4_J3"/>
+    <xacro:controlled_joint name="robot4_J4"/>
+    <xacro:controlled_joint name="robot4_J5"/>
+    <xacro:controlled_joint name="robot4_J6"/>
+
+  </ros2_control>
+
+
+  <!-- ========================================================= -->
+  <!-- GAZEBO ROS 2 CONTROL PLUGIN                              -->
+  <!-- ========================================================= -->
+
+  <xacro:if value="${hardware_mode == 'gazebo'}">
+
+    <gazebo>
+
+      <plugin
+        name="gazebo_ros2_control"
+        filename="libgazebo_ros2_control.so">
+
+        <robot_param>robot_description</robot_param>
+
+        <robot_param_node>robot_state_publisher</robot_param_node>
+
+        <parameters>
+          $(find sa2_description)/config/ros2_controllers.yaml
+        </parameters>
+
+      </plugin>
+
+    </gazebo>
+
+  </xacro:if>
+
+</robot>

@@ -1,0 +1,239 @@
+<?xml version="1.0"?>
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro"
+       name="sa3_environment">
+
+
+  <!-- ========================================================= -->
+  <!-- ENVIRONMENT PARAMETERS                                   -->
+  <!-- Values are supplied from config/workcell.yaml            -->
+  <!-- ========================================================= -->
+
+  <xacro:arg name="sa3_main_jig_xyz" default="0 0 0"/>
+  <xacro:arg name="sa3_main_jig_rpy" default="0 0 0"/>
+
+  <xacro:arg name="inventory_3a_4a_xyz" default="2 -0.85 0"/>
+  <xacro:arg name="inventory_3a_4a_rpy" default="0 0 3.14"/>
+
+  <xacro:arg name="inventory_3a_4a_2_xyz" default="3.89491 -2.10021 0"/>
+  <xacro:arg name="inventory_3a_4a_2_rpy" default="0 0 0"/>
+
+  <xacro:arg name="jig_clamp_xyz" default="0 3.11338 0"/>
+  <xacro:arg name="jig_clamp_rpy" default="0 0 -1.5708"/>
+
+  <xacro:arg name="web_ring_xyz" default="-1.18120 3.31338 0"/>
+  <xacro:arg name="web_ring_rpy" default="0 0 -1.5708"/>
+
+  <xacro:arg name="web_ring_2_xyz" default="5.89757 3.31338 0"/>
+  <xacro:arg name="web_ring_2_rpy" default="0 0 -1.5708"/>
+
+  <!-- ========================================================= -->
+  <!-- WORLD                                                     -->
+  <!-- ========================================================= -->
+
+  <link name="world"/>
+
+  <!-- ========================================================= -->
+  <!-- MATERIALS                                                 -->
+  <!-- ========================================================= -->
+
+  <material name="grey">
+    <color rgba="0.5 0.5 0.5 1.0"/>
+  </material>
+
+  <!-- ========================================================= -->
+  <!-- SA3 MAIN JIG  (frame at origin, x right, y up)            -->
+  <!-- ========================================================= -->
+
+  <link name="sa3_main_jig">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/SA3_MAIN_JIG.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/SA3_MAIN_JIG.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="world_to_sa3_main_jig" type="fixed">
+    <parent link="world"/>
+    <child link="sa3_main_jig"/>
+    <origin xyz="$(arg sa3_main_jig_xyz)" rpy="$(arg sa3_main_jig_rpy)"/>
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- 3A / 4A INVENTORY LEFT  (frame bottom-left, x right, y up)-->
+  <!-- ========================================================= -->
+
+  <link name="inventory_3a_4a">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="world_to_inventory_3a_4a" type="fixed">
+    <parent link="world"/>
+    <child link="inventory_3a_4a"/>
+    <origin
+      xyz="$(arg inventory_3a_4a_xyz)"
+      rpy="$(arg inventory_3a_4a_rpy)"/>
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- 3A / 4A INVENTORY RIGHT  (rotated 180 deg, frame top-right)-->
+  <!-- ========================================================= -->
+
+  <link name="inventory_3a_4a_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="world_to_inventory_3a_4a_2" type="fixed">
+    <parent link="world"/>
+    <child link="inventory_3a_4a_2"/>
+    <origin
+      xyz="$(arg inventory_3a_4a_2_xyz)"
+      rpy="$(arg inventory_3a_4a_2_rpy)"/>
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- JIG CLAMP  (frame top-left, x down, y right)              -->
+  <!-- ========================================================= -->
+
+  <link name="jig_clamp">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/2_SA3_JIG_CLAMP.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/2_SA3_JIG_CLAMP.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="world_to_jig_clamp" type="fixed">
+    <parent link="world"/>
+    <child link="jig_clamp"/>
+    <origin
+      xyz="$(arg jig_clamp_xyz)"
+      rpy="$(arg jig_clamp_rpy)"/>
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- WEB RING LEFT  (frame top-left, x down, y right)          -->
+  <!-- ========================================================= -->
+
+  <link name="web_ring">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/WEB_RACK2.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/WEB_RACK2.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="world_to_web_ring" type="fixed">
+    <parent link="world"/>
+    <child link="web_ring"/>
+    <origin
+      xyz="$(arg web_ring_xyz)"
+      rpy="$(arg web_ring_rpy)"/>
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- WEB RING RIGHT  (frame top-left, x down, y right)         -->
+  <!-- ========================================================= -->
+
+  <link name="web_ring_2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/R_WEB_RING.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/R_WEB_RING.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="world_to_web_ring_2" type="fixed">
+    <parent link="world"/>
+    <child link="web_ring_2"/>
+    <origin
+      xyz="$(arg web_ring_2_xyz)"
+      rpy="$(arg web_ring_2_rpy)"/>
+  </joint>
+
+</robot>

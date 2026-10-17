@@ -1,0 +1,21 @@
+# sa3_motion/config/task.yaml
+# Robot 1 only — initial test configuration.
+#
+# Each entry:
+# "pick_frame,place_frame,rebar_id,pick_offset_x,pick_offset_y,pick_offset_z"
+# Pick/place values are TF frame names relative to "world".
+# XYZ offset is applied to the PICK pose in WORLD coordinates, in metres.
+# Place pose is used directly from its place TF frame.
+
+sa3_pick_place:
+  ros__parameters:
+    pick_place_pairs:
+      - "5pf,5_placef_l,rebar_5a,0.0,0.0,0.0"
+      - "13pf,13_placef1_l,rebar_13_1,0.0,0.0,0.0"
+      - "13pf,13_placef2_l,rebar_13_2,0.10,0.0,0.0"
+      - "13pf,13_placef3_l,rebar_13_3,0.20,0.0,0.0"
+      - "13pf,13_placef4_l,rebar_13_4,0.30,0.0,0.0"
+      - "14pf,14_placef1_l,rebar_14_1,0.0,0.0,0.0"
+      - "14pf,14_placef2_l,rebar_14_2,0.20,0.0,0.0"
+      - "14pf,14_placef3_l,rebar_14_3,0.40,0.0,0.0"
+      - "14pf,14_placef4_l,rebar_14_4,0.60,0.0,0.0"

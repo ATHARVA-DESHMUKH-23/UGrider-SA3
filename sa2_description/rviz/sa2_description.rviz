@@ -1,0 +1,589 @@
+Panels:
+  - Class: rviz_common/Displays
+    Help Height: 70
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /RobotModel2
+      Splitter Ratio: 0.5
+    Tree Height: 783
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.5
+      Cell Size: 1
+      Class: rviz_default_plugins/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.029999999329447746
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 10
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Collision Enabled: false
+      Description File: ""
+      Description Source: Topic
+      Description Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
+      Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+        robot1_J1_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot1_J2_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot1_J3_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot1_J4_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot1_J5_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot1_J6_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot1_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot1_fanuc_flange:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot1_flange:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot1_pedestal:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot1_tool_mount:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot1_wbase:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot2_J1_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot2_J2_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot2_J3_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot2_J4_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot2_J5_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot2_J6_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot2_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot2_fanuc_flange:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot2_flange:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot2_pedestal:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot2_tool_mount:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot2_wbase:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot3_J1_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot3_J2_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot3_J3_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot3_J4_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot3_J5_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot3_J6_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot3_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot3_fanuc_flange:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot3_flange:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot3_gripper_mount:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot3_pedestal:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot3_wbase:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot4_J1_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot4_J2_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot4_J3_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot4_J4_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot4_J5_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot4_J6_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot4_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot4_fanuc_flange:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot4_flange:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot4_gripper_mount:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        robot4_pedestal:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot4_wbase:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        world:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+      Mass Properties:
+        Inertia: false
+        Mass: false
+      Name: RobotModel
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Filter (blacklist): ""
+      Filter (whitelist): ""
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+        inventory_3a_4a:
+          Value: true
+        inventory_3a_4a_2:
+          Value: true
+        jig_clamp:
+          Value: true
+        robot1_J1_link:
+          Value: true
+        robot1_J2_link:
+          Value: true
+        robot1_J3_link:
+          Value: true
+        robot1_J4_link:
+          Value: true
+        robot1_J5_link:
+          Value: true
+        robot1_J6_link:
+          Value: true
+        robot1_base_link:
+          Value: true
+        robot1_fanuc_flange:
+          Value: true
+        robot1_flange:
+          Value: true
+        robot1_pedestal:
+          Value: true
+        robot1_tool_mount:
+          Value: true
+        robot1_wbase:
+          Value: true
+        robot2_J1_link:
+          Value: true
+        robot2_J2_link:
+          Value: true
+        robot2_J3_link:
+          Value: true
+        robot2_J4_link:
+          Value: true
+        robot2_J5_link:
+          Value: true
+        robot2_J6_link:
+          Value: true
+        robot2_base_link:
+          Value: true
+        robot2_fanuc_flange:
+          Value: true
+        robot2_flange:
+          Value: true
+        robot2_pedestal:
+          Value: true
+        robot2_tool_mount:
+          Value: true
+        robot2_wbase:
+          Value: true
+        robot3_J1_link:
+          Value: true
+        robot3_J2_link:
+          Value: true
+        robot3_J3_link:
+          Value: true
+        robot3_J4_link:
+          Value: true
+        robot3_J5_link:
+          Value: true
+        robot3_J6_link:
+          Value: true
+        robot3_base_link:
+          Value: true
+        robot3_fanuc_flange:
+          Value: true
+        robot3_flange:
+          Value: true
+        robot3_gripper_mount:
+          Value: true
+        robot3_pedestal:
+          Value: true
+        robot3_wbase:
+          Value: true
+        robot4_J1_link:
+          Value: true
+        robot4_J2_link:
+          Value: true
+        robot4_J3_link:
+          Value: true
+        robot4_J4_link:
+          Value: true
+        robot4_J5_link:
+          Value: true
+        robot4_J6_link:
+          Value: true
+        robot4_base_link:
+          Value: true
+        robot4_fanuc_flange:
+          Value: true
+        robot4_flange:
+          Value: true
+        robot4_gripper_mount:
+          Value: true
+        robot4_pedestal:
+          Value: true
+        robot4_wbase:
+          Value: true
+        sa3_main_jig:
+          Value: true
+        web_ring:
+          Value: true
+        web_ring_2:
+          Value: true
+        world:
+          Value: true
+      Marker Scale: 1
+      Name: TF
+      Show Arrows: true
+      Show Axes: true
+      Show Names: false
+      Tree:
+        world:
+          inventory_3a_4a:
+            {}
+          inventory_3a_4a_2:
+            {}
+          jig_clamp:
+            {}
+          robot1_pedestal:
+            robot1_base_link:
+              robot1_J1_link:
+                robot1_J2_link:
+                  robot1_J3_link:
+                    robot1_J4_link:
+                      robot1_J5_link:
+                        robot1_J6_link:
+                          robot1_flange:
+                            robot1_fanuc_flange:
+                              {}
+                            robot1_tool_mount:
+                              {}
+              robot1_wbase:
+                {}
+          robot2_pedestal:
+            robot2_base_link:
+              robot2_J1_link:
+                robot2_J2_link:
+                  robot2_J3_link:
+                    robot2_J4_link:
+                      robot2_J5_link:
+                        robot2_J6_link:
+                          robot2_flange:
+                            robot2_fanuc_flange:
+                              {}
+                            robot2_tool_mount:
+                              {}
+              robot2_wbase:
+                {}
+          robot3_pedestal:
+            robot3_base_link:
+              robot3_J1_link:
+                robot3_J2_link:
+                  robot3_J3_link:
+                    robot3_J4_link:
+                      robot3_J5_link:
+                        robot3_J6_link:
+                          robot3_flange:
+                            robot3_fanuc_flange:
+                              {}
+                            robot3_gripper_mount:
+                              {}
+              robot3_wbase:
+                {}
+          robot4_pedestal:
+            robot4_base_link:
+              robot4_J1_link:
+                robot4_J2_link:
+                  robot4_J3_link:
+                    robot4_J4_link:
+                      robot4_J5_link:
+                        robot4_J6_link:
+                          robot4_flange:
+                            robot4_fanuc_flange:
+                              {}
+                            robot4_gripper_mount:
+                              {}
+              robot4_wbase:
+                {}
+          sa3_main_jig:
+            {}
+          web_ring:
+            {}
+          web_ring_2:
+            {}
+      Update Interval: 0
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Collision Enabled: false
+      Description File: ""
+      Description Source: Topic
+      Description Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /environment/robot_description
+      Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+        inventory_3a_4a:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        inventory_3a_4a_2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        jig_clamp:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        sa3_main_jig:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        web_ring:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        web_ring_2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        world:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+      Mass Properties:
+        Inertia: false
+        Mass: false
+      Name: RobotModel
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: world
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 11.628778457641602
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Focal Point:
+        X: -0.6740821003913879
+        Y: 0.7858646512031555
+        Z: 1.730040431022644
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.5153988599777222
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz_default_plugins)
+      Yaw: 4.195369243621826
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 1011
+  Hide Left Dock: false
+  Hide Right Dock: false
+  QMainWindow State: 000000ff00000000fd00000001000000000000015600000395fc0200000001fb000000100044006900730070006c006100790073010000003f00000395000000cc00ffffff000006240000039500000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Width: 1920
+  X: 0
+  Y: 32

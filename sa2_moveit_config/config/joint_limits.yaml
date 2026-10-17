@@ -1,0 +1,130 @@
+# joint_limits.yaml allows the dynamics properties specified in the URDF to be overwritten or augmented as needed
+
+# For beginners, we downscale velocity and acceleration limits.
+# You can always specify higher scaling factors (<= 1.0) in your motion requests.  # Increase the values below to 1.0 to always move at maximum speed.
+default_velocity_scaling_factor: 0.1
+default_acceleration_scaling_factor: 0.1
+
+# Specific joint properties can be changed with the keys [max_position, min_position, max_velocity, max_acceleration]
+# Joint limits can be turned off with [has_velocity_limits, has_acceleration_limits]
+joint_limits:
+  robot1_J1:
+    has_velocity_limits: true
+    max_velocity: 3.6651914291880923
+    has_acceleration_limits: true
+    max_acceleration: 3.6651914291880923
+  robot1_J2:
+    has_velocity_limits: true
+    max_velocity: 3.6651914291880923
+    has_acceleration_limits: true
+    max_acceleration: 3.6651914291880923
+  robot1_J3:
+    has_velocity_limits: true
+    max_velocity: 4.6251225177849733
+    has_acceleration_limits: true
+    max_acceleration: 4.6251225177849733
+  robot1_J4:
+    has_velocity_limits: true
+    max_velocity: 7.3303828583761845
+    has_acceleration_limits: true
+    max_acceleration: 7.3303828583761845
+  robot1_J5:
+    has_velocity_limits: true
+    max_velocity: 7.8539816339744828
+    has_acceleration_limits: true
+    max_acceleration: 7.8539816339744828
+  robot1_J6:
+    has_velocity_limits: true
+    max_velocity: 12.566370614359172
+    has_acceleration_limits: true
+    max_acceleration: 12.566370614359172
+  robot2_J1:
+    has_velocity_limits: true
+    max_velocity: 3.6651914291880923
+    has_acceleration_limits: true
+    max_acceleration: 3.6651914291880923
+  robot2_J2:
+    has_velocity_limits: true
+    max_velocity: 3.6651914291880923
+    has_acceleration_limits: true
+    max_acceleration: 3.6651914291880923
+  robot2_J3:
+    has_velocity_limits: true
+    max_velocity: 4.6251225177849733
+    has_acceleration_limits: true
+    max_acceleration: 4.6251225177849733
+  robot2_J4:
+    has_velocity_limits: true
+    max_velocity: 7.3303828583761845
+    has_acceleration_limits: true
+    max_acceleration: 7.3303828583761845
+  robot2_J5:
+    has_velocity_limits: true
+    max_velocity: 7.8539816339744828
+    has_acceleration_limits: true
+    max_acceleration: 7.8539816339744828
+  robot2_J6:
+    has_velocity_limits: true
+    max_velocity: 12.566370614359172
+    has_acceleration_limits: true
+    max_acceleration: 12.566370614359172
+  robot3_J1:
+    has_velocity_limits: true
+    max_velocity: 1.8325957145940461
+    has_acceleration_limits: true
+    max_acceleration: 1.8325957145940461
+  robot3_J2:
+    has_velocity_limits: true
+    max_velocity: 1.7453292519943295
+    has_acceleration_limits: true
+    max_acceleration: 1.7453292519943295
+  robot3_J3:
+    has_velocity_limits: true
+    max_velocity: 1.9198621771937625
+    has_acceleration_limits: true
+    max_acceleration: 1.9198621771937625
+  robot3_J4:
+    has_velocity_limits: true
+    max_velocity: 2.4434609527920612
+    has_acceleration_limits: true
+    max_acceleration: 2.4434609527920612
+  robot3_J5:
+    has_velocity_limits: true
+    max_velocity: 2.4434609527920612
+    has_acceleration_limits: true
+    max_acceleration: 2.4434609527920612
+  robot3_J6:
+    has_velocity_limits: true
+    max_velocity: 3.839724354387525
+    has_acceleration_limits:  true    
+    max_acceleration: 13.839724354387525
+  robot4_J1:
+    has_velocity_limits: true
+    max_velocity: 1.8325957145940461
+    has_acceleration_limits: true
+    max_acceleration: 1.8325957145940461
+  robot4_J2:
+    has_velocity_limits: true
+    max_velocity: 1.7453292519943295
+    has_acceleration_limits: true
+    max_acceleration: 1.7453292519943295
+  robot4_J3:
+    has_velocity_limits: true
+    max_velocity: 1.9198621771937625
+    has_acceleration_limits: true
+    max_acceleration: 1.9198621771937625
+  robot4_J4:
+    has_velocity_limits: true
+    max_velocity: 2.4434609527920612
+    has_acceleration_limits: true
+    max_acceleration: 2.4434609527920612
+  robot4_J5:
+    has_velocity_limits: true
+    max_velocity: 2.4434609527920612
+    has_acceleration_limits: true
+    max_acceleration: 2.4434609527920612
+  robot4_J6:
+    has_velocity_limits: true
+    max_velocity: 3.839724354387525
+    has_acceleration_limits:  true    
+    max_acceleration: 3.839724354387525

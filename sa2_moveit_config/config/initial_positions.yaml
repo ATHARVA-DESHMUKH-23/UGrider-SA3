@@ -1,0 +1,27 @@
+# Default initial positions for sa3_robots's ros2_control fake system
+
+initial_positions:
+  robot1_J1: 0
+  robot1_J2: 0
+  robot1_J3: 0
+  robot1_J4: 0
+  robot1_J5: 0
+  robot1_J6: 0
+  robot2_J1: 0
+  robot2_J2: 0
+  robot2_J3: 0
+  robot2_J4: 0
+  robot2_J5: 0
+  robot2_J6: 0
+  robot3_J1: 0
+  robot3_J2: 0
+  robot3_J3: 0
+  robot3_J4: 0
+  robot3_J5: 0
+  robot3_J6: 0
+  robot4_J1: 0
+  robot4_J2: 0
+  robot4_J3: 0
+  robot4_J4: 0
+  robot4_J5: 0
+  robot4_J6: 0

@@ -1,0 +1,822 @@
+workcell:
+
+  name: sa3_workcell
+  world_frame: world
+
+  # =========================================================
+  # TFs relative to WEB RING
+  # =========================================================
+  web_ring_frames:
+
+    5pf:
+      parent: web_ring
+      child: 5pf
+      xyz: [0.4, 0.39, 2.455]
+      rpy: [0.0, 0.0, 3.14]
+
+    13pf:
+      parent: web_ring
+      child: 13pf
+      xyz: [0.4, 0.28, 2.03]
+      rpy: [0.0, 0.0, 3.14]
+
+    14pf:
+      parent: web_ring
+      child: 14pf
+      xyz: [0.4, 0.13, 1.72]
+      rpy: [0.0, 0.0, 3.14]
+
+
+  web_ring2_frames:
+
+    6pf:
+      parent: web_ring_2
+      child: 6pf
+      xyz: [0.36, 0.47, 2.38]
+      rpy: [0.0, 0.0, 3.14]
+
+    13_1pf:
+      parent: web_ring_2
+      child: 13_1pf
+      xyz: [0.36, 0.05, 2.4]
+      rpy: [0.0, 0.0, 3.14]
+
+    13_2pf:
+      parent: web_ring_2
+      child: 13_2pf
+      xyz: [0.36, 0.05, 2.22]
+      rpy: [0.0, 0.0, 3.14]
+
+
+    14pf:
+      parent: web_ring_2
+      child: 14_4pf
+      xyz: [0.36, 0.05, 1.96]
+      rpy: [0.0, 0.0, 3.14]
+  # =========================================================
+  # PLACE FRAMES
+  # =========================================================
+  place_frames:
+    # left SIDE FRAMES
+    5_placef_l:
+      parent: jig_clamp
+      child: 5_placef_l
+      xyz: [0.2, 0.45, 3.57]
+      rpy: [0.0, 0.34121187, 3.14]
+
+    13_placef1_l:
+      parent: jig_clamp
+      child: 13_placef1_l
+      xyz: [0.33, 0.36, 3.29]
+      rpy: [-1.57, 0.34121187, 3.14]
+
+    13_placef2_l:
+      parent: jig_clamp
+      child: 13_placef2_l
+      xyz: [0.39, 0.38, 3.1]
+      rpy: [-1.57, 0.34121187, 3.14]
+
+    13_placef3_l:
+      parent: jig_clamp
+      child: 13_placef3_l
+      xyz: [0.46, 0.41, 2.92]
+      rpy: [-1.57, 0.34121187, 3.14]
+
+    13_placef4_l:
+      parent: jig_clamp
+      child: 13_placef4_l
+      xyz: [0.54, 0.43, 2.72]
+      rpy: [-1.57, 0.34121187, 3.14]
+
+    14_placef1_l:
+      parent: jig_clamp
+      child: 14_placef1_l
+      xyz: [0.59, 0.54, 2.54]
+      rpy: [-2.27, 0.341211870, 3.14]
+
+    14_placef2_l:
+      parent: jig_clamp
+      child: 14_placef2_l
+      xyz: [0.65, 0.65, 2.4]
+      rpy: [-2.27, 0.341211870, 3.14]
+
+    14_placef3_l:
+      parent: jig_clamp
+      child: 14_placef3_l
+      xyz: [0.69, 0.76, 2.27]
+      rpy: [-2.27, 0.341211870, 3.14]
+
+    14_placef4_l:
+      parent: jig_clamp
+      child: 14_placef4_l
+      xyz: [0.73, 0.87, 2.16]
+      rpy: [-2.27, 0.341211870, 3.14]
+
+    # RIGHT SIDE FRAMES
+    6_placef_r:
+      parent: jig_clamp
+      child: 6_placef_r
+      xyz: [0.209, 5.187, 3.522]
+      rpy: [0.0, 0.34121187, 3.14]
+
+    13_placef1_r:
+      parent: jig_clamp
+      child: 13_placef1_r
+      xyz: [0.370, 5.107, 3.112]
+      rpy: [-1.57, 0.34121187, 3.14]
+
+    13_placef2_r:
+      parent: jig_clamp
+      child: 13_placef2_r
+      xyz: [0.40, 5.08, 2.96]
+      rpy: [-1.57, 0.34121187, 3.14]
+
+    13_placef3_r:
+      parent: jig_clamp
+      child: 13_placef3_r
+      xyz: [0.49, 5.05, 2.76]
+      rpy: [-1.57, 0.34121187, 3.14]
+
+    14_placef1_r:
+      parent: jig_clamp
+      child: 14_placef1_r
+      xyz: [0.56, 4.96, 2.59]
+      rpy: [-0.87, 0.34121187, 3.14]
+
+    14_placef2_r:
+      parent: jig_clamp
+      child: 14_placef2_r
+      xyz: [0.62, 4.84, 2.42]
+      rpy: [-0.87, 0.34121187, 3.14]
+
+    14_placef3_r:
+      parent: jig_clamp
+      child: 14_placef3_r
+      xyz: [0.66, 4.73, 2.31]
+      rpy: [-0.87, 0.34121187, 3.14]
+
+    14_placef4_r:
+      parent: jig_clamp
+      child: 14_placef4_r
+      xyz: [0.71, 4.62, 2.19]
+      rpy: [-0.87, 0.34121187, 3.14]
+    # SA2 PLACE FRAME
+
+    3_placef_r:
+      parent: jig_clamp
+      child: place_frame_10
+      xyz: [0.69, 0.63, 2.27]
+      rpy: [0.0, 0.34121187, 3.14]
+
+    3_placef_l:
+      parent: jig_clamp
+      child: place_frame_10_l
+      xyz: [0.69, 4.891, 2.35]
+      rpy: [0.0, 0.34121187, 3.14]
+
+    # =========================================================
+  # TYING FRAMES  (parent = clamp frame, offsets in clamp frame)
+  # type 5  -> 4 points, type 13/14 -> 2 points
+  # naming: <clamp_frame>_t<n>
+  # =========================================================
+  tying_frames:
+
+    # # ---------- type 5 (4 points) ----------
+    # 5_placef_l_t1:
+    #   parent: 5_placef_l
+    #   child: 5_placef_l_t1
+    #   xyz: [0.0, -0.20, 0.050]
+    #   rpy: [0.5236, 0.0, 0.0]
+    # 5_placef_l_t2:
+    #   parent: 5_placef_l
+    #   child: 5_placef_l_t2
+    #   xyz: [0.0, -0.10,0.050]
+    #   rpy: [-0.5236, 0.0, 0.0]
+    # 5_placef_l_t3:
+    #   parent: 5_placef_l
+    #   child: 5_placef_l_t3
+    #   xyz: [0.0, -0.10, -0.160]
+    #   rpy: [-0.5236, 0.0, 0.0]
+    # 5_placef_l_t4:
+    #   parent: 5_placef_l
+    #   child: 5_placef_l_t4
+    #   xyz: [0.0,-0.20, 0.160]
+    #   rpy: [0.5236, 0.0, 0.0]
+
+    # ---------- type 13 (2 points each) ----------
+    13_placef1_l_t1:
+      parent: 13_placef1_l
+      child: 13_placef1_l_t1
+      xyz: [0.01, -0.020, -0.075]
+      rpy: [3.14, 0.0, 0.0]
+    13_placef1_l_t2:
+      parent: 13_placef1_l
+      child: 13_placef1_l_t2
+      xyz: [0.01, -0.020, 0.0750]
+      rpy: [3.14, 0.0, 0.0]
+
+    13_placef2_l_t1:
+      parent: 13_placef2_l
+      child: 13_placef2_l_t1
+      xyz: [0.01,  -0.020, -0.075]
+      rpy: [3.14, 0.0, 0.0]
+    13_placef2_l_t2:
+      parent: 13_placef2_l
+      child: 13_placef2_l_t2
+      xyz: [0.01, -0.020, 0.075]
+      rpy: [3.14, 0.0, 0.0]
+
+    13_placef3_l_t1:
+      parent: 13_placef3_l
+      child: 13_placef3_l_t1
+      xyz: [ 0.0, -0.020, -0.075]
+      rpy: [3.14, 0.0, 0.0]
+    13_placef3_l_t2:
+      parent: 13_placef3_l
+      child: 13_placef3_l_t2
+      xyz: [ 0.0,0.020, 0.075]
+      rpy: [3.14, 0.0, 0.0]
+
+    13_placef4_l_t1:
+      parent: 13_placef4_l
+      child: 13_placef4_l_t1
+      xyz: [ 0.0, -0.020, -0.075]
+      rpy: [3.14, 0.0, 0.0]
+    13_placef4_l_t2:
+      parent: 13_placef4_l
+      child: 13_placef4_l_t2
+      xyz: [ 0.0,-0.020, 0.075]
+      rpy: [3.14, 0.0, 0.0]
+
+    # ---------- type 14 (2 points each) ----------
+    14_placef1_l_t1:
+      parent: 14_placef1_l
+      child: 14_placef1_l_t1
+      xyz: [-0.0,0.020,-0.080]
+      rpy: [3.14, 0.0, 0.0]
+    14_placef1_l_t2:
+      parent: 14_placef1_l
+      child: 14_placef1_l_t2
+      xyz: [0.01,-0.020,0.080]
+      rpy: [3.14, 0.0, 0.0]
+
+    14_placef2_l_t1:
+      parent: 14_placef2_l
+      child: 14_placef2_l_t1
+      xyz: [-0.0,0.020,-0.080]
+      rpy: [3.14, 0.0, 0.0]
+    14_placef2_l_t2:
+      parent: 14_placef2_l
+      child: 14_placef2_l_t2
+      xyz: [0.01,-0.020,0.080]
+      rpy: [3.14, 0.0, 0.0]
+
+    14_placef3_l_t1:
+      parent: 14_placef3_l
+      child: 14_placef3_l_t1
+      xyz: [-0.0,-0.020,-0.080]
+      rpy: [3.14, 0.0, 0.0]
+    14_placef3_l_t2:
+      parent: 14_placef3_l
+      child: 14_placef3_l_t2
+      xyz: [0.01,-0.020,0.080]
+      rpy: [3.14, 0.0, 0.0]
+
+    14_placef4_l_t1:
+      parent: 14_placef4_l
+      child: 14_placef4_l_t1
+      xyz: [0.01,-0.020,-0.080]
+      rpy: [3.14, 0.0, 0.0]
+    14_placef4_l_t2:
+      parent: 14_placef4_l
+      child: 14_placef4_l_t2
+      xyz: [0.01, -0.020,0.080]
+      rpy: [3.14, 0.0, 0.0]
+
+
+    # ---------- type 13 (2 points each) ----------
+    13_placef1_r_t1:
+      parent: 13_placef1_r
+      child: 13_placef1_r_t1
+      xyz: [0.01, -0.020, -0.075]
+      rpy: [3.14, 0.0, 0.0]
+    13_placef1_r_t2:
+      parent: 13_placef1_r
+      child: 13_placef1_r_t2
+      xyz: [0.01, -0.020, 0.0750]
+      rpy: [3.14, 0.0, 0.0]
+
+    13_placef2_r_t1:
+      parent: 13_placef2_r
+      child: 13_placef2_r_t1
+      xyz: [0.01,  -0.020, -0.075]
+      rpy: [3.14, 0.0, 0.0]
+    13_placef2_r_t2:
+      parent: 13_placef2_r
+      child: 13_placef2_r_t2
+      xyz: [0.01, -0.020, 0.075]
+      rpy: [3.14, 0.0, 0.0]
+
+    13_placef3_r_t1:
+      parent: 13_placef3_r
+      child: 13_placef3_r_t1
+      xyz: [ 0.0, -0.020, -0.075]
+      rpy: [3.14, 0.0, 0.0]
+    13_placef3_r_t2:
+      parent: 13_placef3_r
+      child: 13_placef3_r_t2
+      xyz: [ 0.0,0.020, 0.075]
+      rpy: [3.14, 0.0, 0.0]
+
+    # ---------- type 14 (2 points each) ----------
+    14_placef1_r_t1:
+      parent: 14_placef1_r
+      child: 14_placef1_r_t1
+      xyz: [-0.0,0.020,-0.080]
+      rpy: [3.14, 0.0, 0.0]
+    14_placef1_r_t2:
+      parent: 14_placef1_r
+      child: 14_placef1_r_t2
+      xyz: [0.01,-0.020,0.080]
+      rpy: [3.14, 0.0, 0.0]
+
+    14_placef2_r_t1:
+      parent: 14_placef2_r
+      child: 14_placef2_r_t1
+      xyz: [-0.0,0.020,-0.080]
+      rpy: [3.14, 0.0, 0.0]
+    14_placef2_r_t2:
+      parent: 14_placef2_r
+      child: 14_placef2_r_t2
+      xyz: [0.01,-0.020,0.080]
+      rpy: [3.14, 0.0, 0.0]
+
+    14_placef3_r_t1:
+      parent: 14_placef3_r
+      child: 14_placef3_r_t1
+      xyz: [-0.0,-0.020,-0.080]
+      rpy: [3.14, 0.0, 0.0]
+    14_placef3_r_t2:
+      parent: 14_placef3_r
+      child: 14_placef3_r_t2
+      xyz: [0.01,-0.020,0.080]
+      rpy: [3.14, 0.0, 0.0]
+
+    14_placef4_r_t1:
+      parent: 14_placef4_r
+      child: 14_placef4_r_t1
+      xyz: [0.01,-0.020,-0.080]
+      rpy: [3.14, 0.0, 0.0]
+    14_placef4_r_t2:
+      parent: 14_placef4_r
+      child: 14_placef4_r_t2
+      xyz: [0.01, -0.020,0.080]
+      rpy: [3.14, 0.0, 0.0]
+
+    1A_l_T1:
+      parent: jig_clamp
+      child: 1A_l_t1
+      xyz: [0.723365, 1.145209, 1.904200]
+      rpy: [0.0, 0.0, 3.14]
+
+    1A_l_T2:
+      parent: jig_clamp
+      child: 1A_l_t2
+      xyz: [0.75518, 1.029860, 1.918198]
+      rpy: [0.0, 0.0, 3.14]
+
+    1A_T3:
+      parent: jig_clamp
+      child: 1A_r_t1
+      xyz: [0.685647, 4.309793, 1.902117]
+      rpy: [0.0, 0.0, 3.14]
+
+    1A_r_T2:
+      parent: jig_clamp
+      child: 1A_r_t2
+      xyz: [0.743487, 4.479645, 1.974880]
+      rpy: [0.0, 0.0, 3.14]
+
+    
+ 
+  # =========================================================
+  # INVENTORY 3A / 4A
+  # =========================================================
+  inventory_frames:
+
+    3pickframe_l:
+      parent: inventory_3a_4a
+      child: inventory_3a_4a_frame
+      xyz: [0.59, -0.02, 1.68]
+      rpy: [0.0, 0.0, 1.57]
+
+    3pickframe_r:
+      parent: inventory_3a_4a_2
+      child: inventory_3a_4a_frame_2
+      xyz: [0.59, 1.02, 1.68]
+      rpy: [0.0, 0.0, -1.57]
+
+  arc_frames:
+
+    r3_arc_start:
+      parent: robot3_base_link
+      child: r3_arc_start
+      xyz: [1.60001, -0.349999, 1.113]
+      rpy: [0.0, 0.0, -1.573200]
+
+    r3_arc_mid:
+      parent: robot3_base_link
+      child: r3_arc_mid
+      xyz: [2.2, 0.786501, 1.113]
+      rpy: [0.0, 0.0, -0.073200]
+
+    r3_arc_end:
+      parent: robot3_base_link
+      child: r3_arc_end
+      xyz: [1.674201, 2.015401, 1.113]
+      rpy: [0.0, 0.0, 1.566799]
+
+    r4_arc_start:
+      parent: robot4_base_link
+      child: r4_arc_start
+      xyz: [1.4900001, 0.349999, 1.113]
+      rpy: [0.0, 0.0, 1.573200]
+
+    r4_arc_mid:
+      parent: robot4_base_link
+      child: r4_arc_mid
+      xyz: [2.069901, -0.786501, 1.113]
+      rpy: [0.0, 0.0, 0.073200]
+
+    r4_arc_end:
+      parent: robot4_base_link
+      child: r4_arc_end
+      xyz: [1.674201, -2.015401, 1.113]
+      rpy: [0.0, 0.0, -1.566799]
+
+  # =========================================================
+  # TOOL DOCKING FRAMES — ROBOT 1
+  # =========================================================
+  tool_dock_frames:
+
+    robot1_tyinggun_dock:
+      parent: world
+      child: robot1_tyinggun_dock
+      xyz: [-1.18, 2.6, 1.3]
+      rpy: [0.0, 1.57, 1.57]
+
+    robot1_shuck_dock:
+      parent: world
+      child: robot1_shuck_dock
+      xyz: [-1.0, 2.6, 1.3]
+      rpy: [0.0, 1.57, 0.0]
+
+    robot2_tyinggun_dock: #5.9, 3.3
+      parent: world
+      child: robot2_tyinggun_dock
+      xyz: [5.9, 2.6, 1.3]
+      rpy: [0.0, 1.57, 1.57]
+
+    robot2_shuck_dock:
+      parent: world
+      child: robot2_shuck_dock
+      xyz: [6.08, 2.6, 1.3]
+      rpy: [0.0, 1.57, 0.0]
+
+  extra_rebars:
+
+    rebar_3c:
+      parent: inventory_3a_4a
+      child: "3c"
+      xyz: [0.22, 0.327, 1.3]
+      rpy: [0.0, 0.0, -1.570]
+      mesh: package://sa2_description/meshes/rebars/3C.STL 
+      scale: 0.001
+
+    rebar_3d:
+      parent: inventory_3a_4a
+      child: "3d"
+      xyz: [0.35, 0.05, 1.42]
+      rpy: [0.0, 0.0, -1.57]
+      mesh: package://sa2_description/meshes/rebars/3D.STL
+      scale: 0.001
+
+    rebar_4c:
+      parent: inventory_3a_4a_2
+      child: "4c"
+      xyz: [0.25, 0.8, 1.25]
+      rpy: [0.0, 0.0, -1.57]
+      mesh: package://sa2_description/meshes/rebars/4C.STL
+      scale: 0.001
+
+    rebar_4d:
+      parent: inventory_3a_4a_2
+      child: "4d"
+      xyz: [1.3, 0.93, 1.3]
+      rpy: [0.0, 0.03, 1.57]
+      mesh: package://sa2_description/meshes/rebars/4D.STL
+      scale: 0.001
+
+
+    # --------------------------------------------------
+    # web rack rebars
+    # --------------------------------------------------
+    rebar_5a:
+      parent: web_ring
+      child: "5a"
+      xyz: [0.39, 0.206, 2.293]
+      rpy: [0.0, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/5A.STL
+      scale: 0.001
+
+    rebar_13_1:
+      parent: web_ring
+      child: "13_1"
+      xyz: [0.39, 0.283, 2.107]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/13.STL
+      scale: 0.001
+
+    rebar_13_2:
+      parent: web_ring
+      child: "13_2"
+      xyz: [0.39, 0.383, 2.107]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/13.STL
+      scale: 0.001
+
+    rebar_13_3:
+      parent: web_ring
+      child: "13_3"
+      xyz: [0.39, 0.483, 2.107]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/13.STL
+      scale: 0.001
+
+    rebar_13_4:
+      parent: web_ring
+      child: "13_4"
+      xyz: [0.39, 0.583, 2.107]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/13.STL
+      scale: 0.001
+
+    rebar_14_1:
+      parent: web_ring
+      child: "14_1"
+      xyz: [0.39, 0.1305, 1.809]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/14A1.STL
+      scale: 0.001
+
+    rebar_14_2:
+      parent: web_ring
+      child: "14_2"
+      xyz: [0.39, 0.3305, 1.83]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/14A2.STL
+      scale: 0.001
+
+    rebar_14_3:
+      parent: web_ring
+      child: "14_3"
+      xyz: [0.39, 0.5305, 1.85]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/14A3.STL
+      scale: 0.001
+
+    rebar_14_4:
+      parent: web_ring
+      child: "14_4"
+      xyz: [0.39, 0.7305, 1.89]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/14A4.STL
+      scale: 0.001
+
+    # -----------------------------------------------
+    #  bottom mat 
+    # -----------------------------------------------
+    rebar_1A:
+      parent: jig_clamp
+      child: "1A"
+      xyz: [0.75, 0.46, 1.89]
+      rpy: [1.2288, 0.0, 1.580796]
+      mesh: package://sa2_description/meshes/rebars/1A.STL
+      scale: 0.001
+
+
+    
+    # --------------------------------------------------
+    # web rack rebars
+    # --------------------------------------------------
+    rebar_5a:
+      parent: web_ring
+      child: "5a"
+      xyz: [0.40, 0.206, 2.293]
+      rpy: [0.0, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/5A.STL
+      scale: 0.001
+
+    #  ------------------------------------------------
+    #  right web rack rebars
+    # ---------------------------------------------------
+    rebar_13_1_R:
+      parent: web_ring_2
+      child: "13_1_R"
+      xyz: [0.36, 0.05, 2.49]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/13.STL
+      scale: 0.001
+
+    rebar_13_2_R:
+      parent: web_ring_2
+      child: "13_2_R"
+      xyz: [0.36, 0.168, 2.49]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/13.STL
+      scale: 0.001
+
+    rebar_13_3_R:
+      parent: web_ring_2
+      child: "13_3_R"
+      xyz: [0.36, 0.05, 2.31]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/13.STL
+      scale: 0.001
+
+    rebar_14_1_R:
+      parent: web_ring_2
+      child: "14_1_R"
+      xyz: [0.36, 0.37, 2.07]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/14A1.STL
+      scale: 0.001
+
+    rebar_14_2_R:
+      parent: web_ring_2
+      child: "14_2_R"
+      xyz: [0.36, 0.26, 2.1]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/14A2.STL
+      scale: 0.001
+
+    rebar_14_3_R:
+      parent: web_ring_2
+      child: "14_3_R"
+      xyz: [0.36, 0.16, 2.13]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/14A3.STL
+      scale: 0.001
+
+    rebar_14_4_R:
+      parent: web_ring_2
+      child: "14_4_R"
+      xyz: [0.36, 0.05, 2.15]
+      rpy: [-1.57, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/rebars/14A4.STL
+      scale: 0.001
+     
+
+
+
+    rebar_6:
+      parent: web_ring_2
+      child: "6a"
+      xyz: [0.36, 0.298, 2.06]
+      rpy: [1.57, 0.0, 1.57]
+      mesh: package://sa2_description/meshes/rebars/6A(8).STL
+      scale: 0.001
+
+
+    
+  
+  extra_grippers:
+    robot1_tying_gun:
+      parent: robot1_tyinggun_dock
+      child: robot1_tying_gun_visual
+      xyz: [0.15, 0.005, -0.015] # set to tying_gun macro xyz
+      rpy: [1.5708, -0.3005, 3.1415] # set to tying_gun macro rpy
+      mesh: package://sa2_description/meshes/ee/TYING_GUN_v2.stl
+      mesh_xyz: [-0.612, -0.914, -1.319]
+      mesh_rpy: [0.0, 0.0, 0.0]
+      scale: 0.001
+      color: [0.12, 0.12, 0.12, 1.0]
+
+    robot2_tying_gun:
+      parent: robot2_tyinggun_dock
+      child: robot2_tying_gun_visual
+      xyz: [0.15, 0.005, -0.015] # set to tying_gun macro xyz
+      rpy: [1.5708, -0.3005, 3.1415] # set to tying_gun macro rpy
+      mesh: package://sa2_description/meshes/ee/TYING_GUN_v2.stl
+      mesh_xyz: [-0.612, -0.914, -1.319]
+      mesh_rpy: [0.0, 0.0, 0.0]
+      scale: 0.001
+      color: [0.12, 0.12, 0.12, 1.0]
+
+    robot1_schunk_base:
+      parent: robot1_shuck_dock
+      child: robot1_schunk_gripper_base_visual
+      xyz: [0.0, 0.0, 0.0] # set to schunk_gripper macro xyz
+      rpy: [0.0 ,1.57, 0.0] # set to schunk_gripper macro rpy
+      mesh: package://sa2_description/meshes/ee/schunk_gripper_binary.stl
+      mesh_xyz: [0.0, 0.0, 0.0]
+      mesh_rpy: [1.5708, 0.0, 1.5708]
+      scale: 0.001
+      color: [0.7922, 0.8196, 0.9333, 1.0]
+
+    robot1_schunk_link7:
+      parent: robot1_schunk_gripper_base_visual
+      child: robot1_schunk_link7_visual
+      xyz: [0.0, 0.0, 0.1858]
+      rpy: [1.5708, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/ee/link7.STL
+      mesh_xyz: [0.0, 0.0, 0.0]
+      mesh_rpy: [0.0, 0.0, 0.0]
+      scale: 1.0
+      color: [0.7922, 0.8196, 0.9333, 1.0]
+
+    robot1_schunk_link8:
+      parent: robot1_schunk_gripper_base_visual
+      child: robot1_schunk_link8_visual
+      xyz: [0.0, 0.0, 0.1858]
+      rpy: [1.5708, 0.0, -3.1416]
+      mesh: package://sa2_description/meshes/ee/link8.STL
+      mesh_xyz: [0.0, 0.0, 0.0]
+      mesh_rpy: [0.0, 0.0, 0.0]
+      scale: 1.0
+      color: [0.7922, 0.8196, 0.9333, 1.0]
+
+    robot2_schunk_base:
+      parent: robot2_shuck_dock
+      child: robot2_schunk_gripper_base_visual
+      xyz: [0.0, 0.0, 0.0] # set to schunk_gripper macro xyz
+      rpy: [0.0 ,1.57, 0.0] # set to schunk_gripper macro rpy
+      mesh: package://sa2_description/meshes/ee/schunk_gripper_binary.stl
+      mesh_xyz: [0.0, 0.0, 0.0]
+      mesh_rpy: [1.5708, 0.0, 1.5708]
+      scale: 0.001
+      color: [0.7922, 0.8196, 0.9333, 1.0]
+
+    robot2_schunk_link7:
+      parent: robot2_schunk_gripper_base_visual
+      child: robot2_schunk_link7_visual
+      xyz: [0.0, 0.0, 0.1858]
+      rpy: [1.5708, 0.0, 0.0]
+      mesh: package://sa2_description/meshes/ee/link7.STL
+      mesh_xyz: [0.0, 0.0, 0.0]
+      mesh_rpy: [0.0, 0.0, 0.0]
+      scale: 1.0
+      color: [0.7922, 0.8196, 0.9333, 1.0]
+
+    robot2_schunk_link8:
+      parent: robot2_schunk_gripper_base_visual
+      child: robot2_schunk_link8_visual
+      xyz: [0.0, 0.0, 0.1858]
+      rpy: [1.5708, 0.0, -3.1416]
+      mesh: package://sa2_description/meshes/ee/link8.STL
+      mesh_xyz: [0.0, 0.0, 0.0]
+      mesh_rpy: [0.0, 0.0, 0.0]
+      scale: 1.0
+      color: [0.7922, 0.8196, 0.9333, 1.0]
+
+environment:
+  sa3_main_jig:
+    xyz: [0.0, 0.0, 0.0]
+    rpy: [0.0, 0.0, 0.0]
+
+  inventory_3a_4a:
+    xyz: [2.6, -0.7, 0.0] #  y=1.7
+    rpy: [0.0, 0.0, 3.14]
+
+  inventory_3a_4a_2:
+    xyz: [2.9, -1.7, 0.0] #  y=-1.7
+    rpy: [0.0, 0.0, 0.0]
+
+  jig_clamp:
+    xyz: [0.0, 3.1, 0.0] # y=2.6,0
+    rpy: [0.0, 0.0, -1.5708]
+
+  web_ring:
+    xyz: [-1.18, 3.3, 0.0] # y=2.6
+    rpy: [0.0, 0.0, -1.5708]
+
+  web_ring_2:
+    xyz: [5.9, 3.3, 0.0] #y=2.6
+    rpy: [0.0, 0.0, -1.5708]
+
+robot_pedestals:
+  robot1_pedestal:
+    xyz: [-1.0, 1.4, 0.0] #0.7,1.2
+    rpy: [0.0, 0.0, -1.5708]
+
+  robot2_pedestal:
+    xyz: [6.0, 1.4, 0.0]  # 5.8x
+    rpy: [0.0, 0.0, -1.5708]
+
+  robot3_pedestal:
+    xyz: [-1.00000, 0.15, 0.0]  # -0.9,0.6
+    rpy: [0.0, 0.0, -1.5708]
+
+  robot4_pedestal:
+    xyz: [5.6, 0.15, 0.0] #5.8x, 0.6
+    rpy: [0.0, 0.0, -1.5708]

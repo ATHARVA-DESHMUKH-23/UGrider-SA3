@@ -1,0 +1,319 @@
+<?xml version="1.0"?>
+
+<robot
+  xmlns:xacro="http://www.ros.org/wiki/xacro"
+  name="sa3_end_effactor">
+
+  <!-- ========================================================= -->
+  <!-- TYING GUN                                                 -->
+  <!-- ========================================================= -->
+
+  <xacro:macro name="tying_gun"
+    params="
+      parent_link
+      prefix:=''
+      xyz:='0 0 0'
+      rpy:='0 0 0'
+      visual_xyz:='-0.612 -0.914 -1.319'
+      visual_rpy:='0 0 0'">
+
+    <!-- ========================================================= -->
+    <!-- TYING GUN BODY                                            -->
+    <!-- ========================================================= -->
+
+    <link name="${prefix}tying_gun">
+
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="1.5"/>
+        <inertia
+          ixx="0.025"
+          ixy="0"
+          ixz="0"
+          iyy="0.018"
+          iyz="0"
+          izz="0.026"/>
+      </inertial>
+
+      <visual>
+        <origin
+          xyz="${visual_xyz}"
+          rpy="${visual_rpy}"/>
+
+        <geometry>
+          <mesh
+            filename="package://sa2_description/meshes/ee/TYING_GUN_v2.stl"
+            scale="0.001 0.001 0.001"/>
+        </geometry>
+
+        <material name="${prefix}tying_gun_material">
+          <color rgba="0.12 0.12 0.12 1"/>
+        </material>
+      </visual>
+
+      <collision>
+        <origin
+          xyz="${visual_xyz}"
+          rpy="${visual_rpy}"/>
+
+        <geometry>
+          <mesh
+            filename="package://sa2_description/meshes/ee/TYING_GUN_v2.stl"
+            scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+
+    </link>
+
+
+    <!-- ========================================================= -->
+    <!-- TYING GUN ATTACHMENT                                      -->
+    <!-- ========================================================= -->
+
+    <joint
+      name="${prefix}tying_gun_mount"
+      type="fixed">
+
+      <origin
+        xyz="${xyz}"
+        rpy="${rpy}"/>
+
+      <parent link="${parent_link}"/>
+      <child link="${prefix}tying_gun"/>
+
+    </joint>
+
+
+    <!-- ========================================================= -->
+    <!-- TYING GUN TCP                                             -->
+    <!-- ========================================================= -->
+
+    <!-- <link name="${prefix}tg_end_effactor">
+
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+
+        <geometry>
+          <sphere radius="0.015"/>
+        </geometry>
+
+        <material name="${prefix}end_effector_material">
+          <color rgba="0 0 1 1"/>
+        </material>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+
+        <geometry>
+          <sphere radius="0.015"/>
+        </geometry>
+      </collision>
+
+    </link>
+
+
+    <joint
+      name="${prefix}tg_end_effector_joint"
+      type="fixed">
+
+      <origin xyz="0.325 0 0.075" rpy="0 0 0"/>
+
+      <parent link="${prefix}tool_mount"/>
+      <child link="${prefix}tg_end_effactor"/>
+
+    </joint> -->
+
+
+    <!-- <gazebo reference="${prefix}tg_end_effector">
+      <material>Gazebo/Blue</material>
+    </gazebo> -->
+
+  </xacro:macro>
+
+<xacro:macro name="schunk_gripper"
+    params="
+        parent_link
+        prefix:=''
+        xyz:='0 0 0'
+        rpy:='0 0 0'
+        create_mount:='true'">
+
+  
+  <link
+    name="${prefix}gripper_base">
+    <inertial>
+      <origin
+        xyz="-0.000183807162235591 8.05033155577911E-05 0.0321436689908876"
+        rpy="0 0 0" />
+      <mass
+        value="0.45" />
+      <inertia
+        ixx="0.00092934"
+        ixy="0.00000034"
+        ixz="-0.00000738"
+        iyy="0.00071447"
+        iyz="0.00000005"
+        izz="0.00039442" /> 
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="1.5708 0 1.5708" />
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/ee/schunk_gripper_binary.stl"
+          scale="0.001 0.001 0.001" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="1.5708 0 1.5708" />
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/ee/schunk_gripper_binary.stl"
+          scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link> 
+  <xacro:if value="${create_mount}">
+    <joint
+      name="${prefix}gripper_mount"
+      type="fixed">
+      <origin
+        xyz="${xyz}"
+        rpy="${rpy}" />
+      <parent
+        link="${parent_link}"/>
+      <child
+        link="${prefix}gripper_base"/>
+    </joint>
+  </xacro:if>
+  <link
+    name="${prefix}link7">
+    <inertial>
+      <origin
+        xyz="0.00065123185041968 -0.0491929869131989 0.00972258769184025"
+        rpy="0 0 0" />
+      <mass
+        value="0.025" />
+      <inertia
+        ixx="0.00007371"
+        ixy="-0.00000113"
+        ixz="0.00000021"
+        iyy="0.00000781"
+        iyz="-0.00001372"
+        izz="0.0000747" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/ee/link7.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/ee/link7.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="${prefix}J7"
+    type="fixed">
+    <origin
+      xyz="0 0 0.1858"
+      rpy="1.5708 0 0" />
+    <parent
+      link="${prefix}gripper_base" />
+    <child
+      link="${prefix}link7" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0.035"
+      effort="10"
+      velocity="1" />
+  </joint>
+  <link
+    name="${prefix}link8">
+    <inertial>
+      <origin
+        xyz="0.000651231850419722 -0.0491929869131991 0.00972258769184024"
+        rpy="0 0 0" />
+      <mass
+        value="0.025" />
+      <inertia
+        ixx="0.00007371"
+        ixy="-0.00000113"
+        ixz="0.00000021"
+        iyy="0.00000781"
+        iyz="-0.00001372"
+        izz="0.0000747" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/ee/link8.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/ee/link8.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="${prefix}J8"
+    type="fixed">
+    <origin
+      xyz="0 0 0.1858"
+      rpy="1.5708 0 -3.1416" />
+    <parent
+      link="${prefix}gripper_base" />
+    <child
+      link="${prefix}link8" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-0.035"
+      upper="0"
+      effort="10"
+      velocity="1" />
+  </joint>
+
+
+</xacro:macro>
+
+
+</robot>

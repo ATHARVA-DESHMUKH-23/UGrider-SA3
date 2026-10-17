@@ -1,0 +1,465 @@
+<?xml version="1.0"?>
+
+<robot name="sa3_robots"
+       xmlns:xacro="http://wiki.ros.org/xacro">
+
+
+  <!-- Pedestal poses: overridden by launch mappings from workcell.yaml -->
+  <xacro:arg name="robot1_pedestal_xyz" default="-1.0 1.4 0.0"/>
+  <xacro:arg name="robot1_pedestal_rpy" default="0 0 -1.5708"/>
+
+  <xacro:arg name="robot2_pedestal_xyz" default="6.0 1.4 0.0"/>
+  <xacro:arg name="robot2_pedestal_rpy" default="0 0 -1.5708"/>
+
+  <xacro:arg name="robot3_pedestal_xyz" default="-1.00000 0.15 0.0"/>
+  <xacro:arg name="robot3_pedestal_rpy" default="0 0 -1.5708"/>
+
+  <xacro:arg name="robot4_pedestal_xyz" default="5.6 0.15 0.0"/>
+  <xacro:arg name="robot4_pedestal_rpy" default="0 0 -1.5708"/>
+
+  <!-- ========================================================= -->
+  <!-- ARGUMENTS                                                 -->
+  <!-- ========================================================= -->
+
+  <xacro:arg name="hardware_mode" default="mock"/>
+  <xacro:property
+    name="hardware_mode"
+    value="$(arg hardware_mode)"/>
+
+
+  <!-- ========================================================= -->
+  <!-- INCLUDES                                                  -->
+  <!-- ========================================================= -->
+
+  <!-- FANUC M20 -->
+  <xacro:include
+    filename="$(find fanuc_m20_description)/urdf/m20_12_23d_urdf_macro.xacro"/>
+
+  <!-- FANUC R2000 -->
+  <xacro:include
+    filename="$(find fanuc_r2000_description)/urdf/r2000ic_210r_urdf_macro.xacro"/>
+
+  <!-- Grippers -->
+  <xacro:include
+    filename="$(find sa2_description)/urdf/end_effactor.urdf.xacro"/>
+
+  <!-- ros2_control -->
+  <xacro:include
+    filename="$(find sa2_description)/urdf/ros2_controller.urdf.xacro"/>
+
+
+  <!-- ========================================================= -->
+  <!-- WORLD                                                     -->
+  <!-- ========================================================= -->
+
+  <link name="world"/>
+
+
+  <!-- ========================================================= -->
+  <!-- MATERIALS                                                 -->
+  <!-- ========================================================= -->
+
+  <material name="small_pedestal_material">
+    <color rgba="0.30 0.30 0.34 1"/>
+  </material>
+
+  <material name="big_pedestal_material">
+    <color rgba="0.25 0.25 0.30 1"/>
+  </material>
+
+  <material name="end_effactor_material">
+    <color rgba="1.0 0.1 0.1 1"/>
+  </material>
+
+
+  <!-- ========================================================= -->
+  <!-- ROBOT 1 : FANUC M20                                       -->
+  <!-- ========================================================= -->
+
+  <link name="robot1_pedestal">
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/S_PEDESTIAL.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="small_pedestal_material"/>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/S_PEDESTIAL.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+
+  </link>
+
+
+  <joint name="robot1_pedestal_world_joint" type="fixed">
+    <origin
+    xyz="$(arg robot1_pedestal_xyz)"
+    rpy="$(arg robot1_pedestal_rpy)"/>
+    <parent link="world"/>
+    <child link="robot1_pedestal"/>
+  </joint>
+
+
+  <!-- Robot 1 tool mount -->
+
+  <link name="robot1_tool_mount"/>
+
+
+  <xacro:m20_12_23d
+    prefix="robot1_"
+    parent="robot1_pedestal"
+    child="robot1_tool_mount">
+
+    <origin xyz="0.2 0.2 2.2" rpy="0 0 3.14"/>
+
+  </xacro:m20_12_23d>
+
+
+  <!-- Robot 1 Schunk gripper -->
+
+  <!-- <xacro:schunk_gripper
+    parent_link="robot1_tool_mount"
+    prefix="robot1_"
+    xyz="0 0 0"
+    rpy="0 1.57 0"/> -->
+
+  <!-- Robot 1 Tying Gun -->
+  <!-- <xacro:tying_gun
+    parent_link="robot1_tool_mount"
+    prefix="robot1_"
+    xyz="0.15 0.005 -0.015"
+    rpy="1.5708 -0.3005 3.1415"/> -->
+
+
+  
+  <!-- Robot 1 end effactor (ball, +0.2 m in X from flange) -->
+  <link name="robot1_end_effactor">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.02"/>
+      </geometry>
+      <material name="end_effactor_material"/>
+    </visual>
+  </link>
+
+  <joint name="robot1_end_effactor_joint" type="fixed">
+    <origin xyz="0.2 0 0" rpy="0 0 0"/>
+    <parent link="robot1_flange"/>
+    <child link="robot1_end_effactor"/>
+  </joint>
+
+  <!-- TYING GUN TCP                                             -->
+
+  <link name="robot1_tg_end_effactor">
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+
+      <geometry>
+        <sphere radius="0.015"/>
+      </geometry>
+
+      <material name="robot1_end_effector_material">
+        <color rgba="0 0 1 1"/>
+      </material>
+    </visual>
+
+
+  </link>
+
+
+  <joint
+    name="robot1_tg_end_effector_joint"
+    type="fixed">
+
+    <origin xyz="0.325 0 0.075" rpy="0 0 0"/>
+
+    <parent link="robot1_tool_mount"/>
+    <child link="robot1_tg_end_effactor"/>
+
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- ROBOT 2 : FANUC M20                                       -->
+  <!-- ========================================================= -->
+
+  <link name="robot2_pedestal">
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/S_PEDESTIAL.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="small_pedestal_material"/>
+    </visual>
+
+
+
+  </link>
+
+
+  <joint name="robot2_pedestal_world_joint" type="fixed">
+    <origin
+    xyz="$(arg robot2_pedestal_xyz)"
+    rpy="$(arg robot2_pedestal_rpy)"/>
+    <parent link="world"/>
+    <child link="robot2_pedestal"/>
+  </joint>
+
+
+  <!-- Robot 2 tool mount -->
+
+  <link name="robot2_tool_mount"/>
+
+
+  <xacro:m20_12_23d
+    prefix="robot2_"
+    parent="robot2_pedestal"
+    child="robot2_tool_mount">
+
+    <origin xyz="0.2 0.2 2.2" rpy="0 0 -3.14"/>
+
+  </xacro:m20_12_23d>
+
+
+  <!-- Robot 2 Schunk gripper -->
+
+  <!-- <xacro:schunk_gripper
+    parent_link="robot2_tool_mount"
+    prefix="robot2_"
+    xyz="0 0 0"
+    rpy="0 1.57 0"/> -->
+
+  <!-- Robot 2 Tying Gun -->
+  <!-- <xacro:tying_gun
+    parent_link="robot2_tool_mount"
+    prefix="robot2_"
+    xyz="0.15 0.005 -0.015"
+    rpy="1.5708 -0.3005 3.1415"/> -->
+
+
+  <!-- Robot 2 end effactor (ball, +0.2 m in X from flange) -->
+
+  <link name="robot2_end_effactor">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.02"/>
+      </geometry>
+      <material name="end_effactor_material"/>
+    </visual>
+  </link>
+
+  <joint name="robot2_end_effactor_joint" type="fixed">
+    <origin xyz="0.2 0 0" rpy="0 0 0"/>
+    <parent link="robot2_flange"/>
+    <child link="robot2_end_effactor"/>
+  </joint>
+
+  <!-- TYING GUN TCP                                             -->
+
+  <link name="robot2_tg_end_effactor">
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+
+      <geometry>
+        <sphere radius="0.015"/>
+      </geometry>
+
+      <material name="robot2_end_effector_material">
+        <color rgba="0 0 1 1"/>
+      </material>
+    </visual>
+
+    
+
+  </link>
+
+
+  <joint name="robot2_tg_end_effector_joint"
+    type="fixed">
+
+    <origin xyz="0.325 0 0.075" rpy="0 0 0"/>
+
+    <parent link="robot2_tool_mount"/>
+    <child link="robot2_tg_end_effactor"/>
+
+  </joint>
+
+
+
+  <!-- ========================================================= -->
+  <!-- ROBOT 3 : FANUC R2000                                     -->
+  <!-- ========================================================= -->
+
+  <link name="robot3_pedestal">
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/B_PEDESTIAL.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="big_pedestal_material"/>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/B_PEDESTIAL.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+
+  </link>
+
+
+  <joint name="robot3_pedestal_world_joint" type="fixed">
+    <origin
+    xyz="$(arg robot3_pedestal_xyz)"
+    rpy="$(arg robot3_pedestal_rpy)"/>
+    <parent link="world"/>
+    <child link="robot3_pedestal"/>
+  </joint>
+
+
+  <!-- Robot 3 gripper mount -->
+
+  <link name="robot3_gripper_mount"/>
+
+
+  <xacro:r2000ic_210r
+    prefix="robot3_"
+    parent="robot3_pedestal"
+    child="robot3_gripper_mount">
+
+    <origin xyz="0.4 0.4 2.1" rpy="0 0 1.5708"/>
+
+  </xacro:r2000ic_210r>
+
+
+  <!-- Robot 3 Schunk gripper -->
+
+  <xacro:schunk_gripper
+    parent_link="robot3_gripper_mount"
+    prefix="robot3_"
+    xyz="0 0 0"
+    rpy="0 1.57 0"/>
+
+
+  <!-- Robot 3 end effactor (ball, +0.2 m in X from flange) -->
+
+  <link name="robot3_end_effactor">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.02"/>
+      </geometry>
+      <material name="end_effactor_material"/>
+    </visual>
+  </link>
+
+  <joint name="robot3_end_effactor_joint" type="fixed">
+    <origin xyz="0.2 0 0" rpy="0 0 0"/>
+    <parent link="robot3_flange"/>
+    <child link="robot3_end_effactor"/>
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- ROBOT 4 : FANUC R2000                                     -->
+  <!-- ========================================================= -->
+
+  <link name="robot4_pedestal">
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/B_PEDESTIAL.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="big_pedestal_material"/>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://sa2_description/meshes/sa3_env/B_PEDESTIAL.STL"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+
+  </link>
+
+
+  <joint name="robot4_pedestal_world_joint" type="fixed">
+    <origin
+    xyz="$(arg robot4_pedestal_xyz)"
+    rpy="$(arg robot4_pedestal_rpy)"/>
+    <parent link="world"/>
+    <child link="robot4_pedestal"/>
+  </joint>
+
+
+  <!-- Robot 4 gripper mount -->
+
+  <link name="robot4_gripper_mount"/>
+
+
+  <xacro:r2000ic_210r
+    prefix="robot4_"
+    parent="robot4_pedestal"
+    child="robot4_gripper_mount">
+
+    <origin xyz="0.4 0.4 2.1" rpy="0 0 -1.5708"/>
+
+  </xacro:r2000ic_210r>
+
+
+  <!-- Robot 4 Schunk gripper -->
+
+  <xacro:schunk_gripper
+    parent_link="robot4_gripper_mount"
+    prefix="robot4_"
+    xyz="0 0 0"
+    rpy="0 1.57 0"/>
+
+
+  <!-- Robot 4 end effactor (ball, +0.2 m in X from flange) -->
+
+  <link name="robot4_end_effactor">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.02"/>
+      </geometry>
+      <material name="end_effactor_material"/>
+    </visual>
+  </link>
+
+  <joint name="robot4_end_effactor_joint" type="fixed">
+    <origin xyz="0.2 0 0" rpy="0 0 0"/>
+    <parent link="robot4_flange"/>
+    <child link="robot4_end_effactor"/>
+  </joint>
+
+
+</robot>

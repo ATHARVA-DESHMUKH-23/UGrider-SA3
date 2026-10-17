@@ -1,0 +1,783 @@
+// robot2_motion.cpp  (sa3_motion)
+//
+// Robot 2 pick/place with rebar attach/detach (same scene API as Robot 1 / Robot 3).
+//
+//   pickPlace(pick_frame, place_frame, rebar):
+//     1  movej pick approach
+//        gripper <-> rebar collision OFF
+//     2  movel pick            -> ATTACH rebar to the planning link
+//     3  movel pick retract    -> gripper <-> rebar collision ON again
+//     4  movel transition      (Y/Z of place approach, X of pick approach)
+//     5  movel/movej place approach
+//        jig_clamp <-> rebar and gripper <-> rebar collision OFF
+//     6  movel place           -> DETACH rebar into the world
+//     7  movel place retract   -> collisions ON again
+//
+// Offsets are in the WORLD frame.
+
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <functional>
+#include <iomanip>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <moveit/move_group_interface/move_group_interface.h>
+#include <moveit_msgs/msg/move_it_error_codes.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/time.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+
+#include "sa3_motion/direct_execute.hpp"
+#include "sa3_motion/planning_scene_objects.hpp"
+
+using namespace std::chrono_literals;
+using MoveItErr = moveit_msgs::msg::MoveItErrorCodes;
+
+namespace
+{
+
+constexpr const char * kNodeName = "sa3_robot2_pick_place";
+
+// ---------------------------------------------------------------------------
+// Robot / frames
+// ---------------------------------------------------------------------------
+constexpr char kGroup[] = "robot2_arm";
+constexpr char kPlanningLink[] = "robot2_end_effactor";   // (sic) matches SRDF
+constexpr char kReferenceFrame[] = "world";
+constexpr char kControllerAction[] = "/robot2_arm_controller/follow_joint_trajectory";
+
+constexpr std::array<double, 3> kApproachOffset = {0.0, -0.25, 0.0};
+
+// true : spawn the rebar collision objects here.
+// false: rely on rebar_planning_scene_node having spawned them already.
+constexpr bool kSpawnRebars = false;
+
+constexpr bool kStopOnFirstFailure = true;
+
+// ---------------------------------------------------------------------------
+// Collision settings
+// ---------------------------------------------------------------------------
+// Must match the collision object IDs in the planning scene.
+const std::string kJigClampId = "jig_clamp";
+const std::string kWebRingId = "web_ring_2";   // right web rack (parent of the *_R rebars)
+
+// Links that touch the rebar while it is picked / released.
+const std::vector<std::string> kGripperLinks = {
+  kPlanningLink, "robot2_tool_mount", "robot2_J6_link",
+  "robot2_schunk_base", "robot2_schunk_link7", "robot2_schunk_link8"};
+
+// ---------------------------------------------------------------------------
+// Planning settings
+// ---------------------------------------------------------------------------
+constexpr double kPlanningTime = 15.0;
+constexpr int kOmplAttempts = 10;
+constexpr int kPlanRetries = 3;
+
+constexpr double kMoveJVelocity = 0.30;
+constexpr double kMoveJAcceleration = 0.20;
+constexpr double kMoveLVelocity = 0.10;
+constexpr double kMoveLAcceleration = 0.10;
+
+constexpr int kStepsPerPair = 7;
+
+
+// ===========================================================================
+// helpers
+// ===========================================================================
+geometry_msgs::msg::Pose offsetWorld(
+  const geometry_msgs::msg::Pose & original, const std::array<double, 3> & d)
+{
+  auto result = original;
+  result.position.x += d[0];
+  result.position.y += d[1];
+  result.position.z += d[2];
+  return result;
+}
+
+std::string poseStr(const geometry_msgs::msg::Pose & pose)
+{
+  tf2::Quaternion q(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w);
+  double roll = 0.0, pitch = 0.0, yaw = 0.0;
+  tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
+  char buf[200];
+  std::snprintf(
+    buf, sizeof(buf), "xyz=[%.4f, %.4f, %.4f] rpy=[%.4f, %.4f, %.4f]",
+    pose.position.x, pose.position.y, pose.position.z, roll, pitch, yaw);
+  return buf;
+}
+
+std::string errStr(int c)
+{
+  switch (c) {
+    case MoveItErr::SUCCESS: return "SUCCESS";
+    case MoveItErr::FAILURE: return "FAILURE";
+    case MoveItErr::PLANNING_FAILED: return "PLANNING_FAILED";
+    case MoveItErr::INVALID_MOTION_PLAN: return "INVALID_MOTION_PLAN";
+    case MoveItErr::MOTION_PLAN_INVALIDATED_BY_ENVIRONMENT_CHANGE:
+      return "MOTION_PLAN_INVALIDATED_BY_ENVIRONMENT_CHANGE";
+    case MoveItErr::CONTROL_FAILED: return "CONTROL_FAILED";
+    case MoveItErr::TIMED_OUT: return "TIMED_OUT";
+    case MoveItErr::PREEMPTED: return "PREEMPTED";
+    case MoveItErr::START_STATE_IN_COLLISION: return "START_STATE_IN_COLLISION";
+    case MoveItErr::GOAL_IN_COLLISION: return "GOAL_IN_COLLISION";
+    case MoveItErr::GOAL_CONSTRAINTS_VIOLATED: return "GOAL_CONSTRAINTS_VIOLATED";
+    case MoveItErr::INVALID_GROUP_NAME: return "INVALID_GROUP_NAME";
+    case MoveItErr::INVALID_LINK_NAME: return "INVALID_LINK_NAME";
+    case MoveItErr::FRAME_TRANSFORM_FAILURE: return "FRAME_TRANSFORM_FAILURE";
+    case MoveItErr::ROBOT_STATE_STALE: return "ROBOT_STATE_STALE";
+    case MoveItErr::NO_IK_SOLUTION: return "NO_IK_SOLUTION";
+    default: return "CODE_" + std::to_string(c);
+  }
+}
+
+std::string hintFor(const std::string & planner, int code)
+{
+  switch (code) {
+    case MoveItErr::NO_IK_SOLUTION:
+      return "target pose has no IK solution.";
+    case MoveItErr::GOAL_IN_COLLISION:
+      return "the target pose is in collision with the scene.";
+    case MoveItErr::START_STATE_IN_COLLISION:
+      return "the robot's start state is in collision.";
+    case MoveItErr::INVALID_MOTION_PLAN:
+    case MoveItErr::GOAL_CONSTRAINTS_VIOLATED:
+      return planner == "LIN" ?
+             "straight line is not feasible (collision on the line, joint limit or singularity)." :
+             "planner returned a path that violates the goal constraints.";
+    case MoveItErr::PLANNING_FAILED:
+      return planner == "OMPL" ?
+             "OMPL found no collision-free path within the budget." :
+             "Pilz could not build the straight-line path.";
+    default:
+      return "";
+  }
+}
+
+// Runs a function on scope exit, or earlier through runNow().
+class ScopeGuard
+{
+public:
+  explicit ScopeGuard(std::function<void()> fn) : fn_(std::move(fn)) {}
+  ScopeGuard(const ScopeGuard &) = delete;
+  ScopeGuard & operator=(const ScopeGuard &) = delete;
+  void runNow()
+  {
+    if (fn_) {
+      auto fn = std::move(fn_);
+      fn_ = nullptr;
+      fn();
+    }
+  }
+  ~ScopeGuard() {runNow();}
+
+private:
+  std::function<void()> fn_;
+};
+
+// ===========================================================================
+// step / failure bookkeeping
+// ===========================================================================
+struct StepInfo
+{
+  int pair_idx = 0;
+  int pair_total = 0;
+  int step_idx = 0;
+  int step_total = kStepsPerPair;
+  std::string pick;
+  std::string place;
+  std::string rebar;
+  std::string step;
+};
+
+struct Failure
+{
+  StepInfo info;
+  std::string planner;
+  std::string stage;
+  int code = 0;
+  double plan_time = 0.0;
+};
+
+struct Ctx
+{
+  rclcpp::Node::SharedPtr node;
+  moveit::planning_interface::MoveGroupInterface * mg = nullptr;
+  tf2_ros::Buffer * tf = nullptr;
+  PlanningSceneObjects * scene = nullptr;
+  std::string link = kPlanningLink;
+  rclcpp_action::Client<sa3_motion::FJT>::SharedPtr fjt;
+
+  StepInfo cur;
+  double pick_x_offset = 0.0;
+  std::vector<Failure> failures;
+};
+
+std::string stepTag(const Ctx & c)
+{
+  std::ostringstream s;
+  s << "[pair " << c.cur.pair_idx << "/" << c.cur.pair_total
+    << " | step " << c.cur.step_idx << "/" << c.cur.step_total
+    << " | " << c.cur.pick << " -> " << c.cur.place
+    << " | " << c.cur.rebar
+    << " | " << c.cur.step << "] ";
+  return s.str();
+}
+
+void reportFailure(
+  Ctx & c, const std::string & planner, const std::string & stage, int code,
+  double plan_time, const geometry_msgs::msg::Pose * target, const std::string & note = "")
+{
+  Failure f;
+  f.info = c.cur;
+  f.planner = planner;
+  f.stage = stage;
+  f.code = code;
+  f.plan_time = plan_time;
+  c.failures.push_back(f);
+
+  std::ostringstream s;
+  s << "\n================ FAILURE #" << c.failures.size() << " ================\n"
+    << " pair      : " << c.cur.pair_idx << " of " << c.cur.pair_total
+    << "   (" << c.cur.pick << " -> " << c.cur.place << ", " << c.cur.rebar << ")\n"
+    << " step      : " << c.cur.step_idx << " of " << c.cur.step_total
+    << "   '" << c.cur.step << "'\n"
+    << " planner   : " << planner << "\n"
+    << " stage     : " << stage << "\n"
+    << " error     : " << errStr(code) << " (" << code << ")\n"
+    << " time      : " << std::fixed << std::setprecision(2) << plan_time << " s\n";
+  if (target) {
+    s << " target    : " << poseStr(*target) << "\n";
+  }
+  const auto hint = hintFor(planner, code);
+  if (!hint.empty()) {
+    s << " meaning   : " << hint << "\n";
+  }
+  if (!note.empty()) {
+    s << " note      : " << note << "\n";
+  }
+  s << "=========================================";
+  RCLCPP_ERROR(c.node->get_logger(), "%s", s.str().c_str());
+}
+
+// ===========================================================================
+// TF
+// ===========================================================================
+bool lookupFramePose(Ctx & c, const std::string & frame, geometry_msgs::msg::Pose & pose)
+{
+  try {
+    const auto t = c.tf->lookupTransform(
+      kReferenceFrame, frame, tf2::TimePointZero, tf2::durationFromSec(10.0));
+    pose.position.x = t.transform.translation.x;
+    pose.position.y = t.transform.translation.y;
+    pose.position.z = t.transform.translation.z;
+    pose.orientation = t.transform.rotation;
+    return true;
+  } catch (const tf2::TransformException & e) {
+    reportFailure(
+      c, "TF", "frame lookup", MoveItErr::FRAME_TRANSFORM_FAILURE, 0.0, nullptr,
+      "'" + frame + "' -> '" + kReferenceFrame + "': " + e.what());
+    return false;
+  }
+}
+
+// ===========================================================================
+// MOVEJ : OMPL, pose target
+// ===========================================================================
+bool movej(Ctx & c, const geometry_msgs::msg::Pose & target)
+{
+  auto & mg = *c.mg;
+  const auto logger = c.node->get_logger();
+  const std::string tag = stepTag(c);
+
+  if (!mg.getCurrentState(10.0)) {
+    reportFailure(c, "OMPL", "current state", MoveItErr::ROBOT_STATE_STALE, 0.0, &target);
+    return false;
+  }
+  mg.setStartStateToCurrentState();
+  mg.setPlanningPipelineId("ompl");
+  mg.setPlannerId("RRTConnectkConfigDefault");
+  mg.setPlanningTime(kPlanningTime);
+  mg.setNumPlanningAttempts(kOmplAttempts);
+  mg.setMaxVelocityScalingFactor(kMoveJVelocity);
+  mg.setMaxAccelerationScalingFactor(kMoveJAcceleration);
+  mg.setGoalPositionTolerance(0.001);
+  mg.setGoalOrientationTolerance(0.01);
+  mg.clearPoseTargets();
+  mg.clearPathConstraints();
+
+  RCLCPP_INFO(logger, "%smovej target %s", tag.c_str(), poseStr(target).c_str());
+  if (!mg.setPoseTarget(target, c.link)) {
+    reportFailure(c, "OMPL", "set target", MoveItErr::FAILURE, 0.0, &target,
+      "MoveIt rejected the pose target.");
+    return false;
+  }
+
+  moveit::planning_interface::MoveGroupInterface::Plan plan;
+  bool planned = false;
+  int last_code = 0;
+  const auto t0 = std::chrono::steady_clock::now();
+  for (int attempt = 1; attempt <= kPlanRetries; ++attempt) {
+    const auto code = mg.plan(plan);
+    last_code = code.val;
+    if (code == moveit::core::MoveItErrorCode::SUCCESS) {
+      planned = true;
+      break;
+    }
+    RCLCPP_WARN(
+      logger, "%sOMPL attempt %d/%d failed: %s", tag.c_str(), attempt, kPlanRetries,
+      errStr(last_code).c_str());
+  }
+  const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  mg.clearPoseTargets();
+
+  if (!planned) {
+    reportFailure(c, "OMPL", "planning", last_code, dt, &target, "all retries failed.");
+    return false;
+  }
+  int exec_code = 0;
+  std::string exec_note;
+  if (!sa3_motion::executeDirect(c.fjt, plan.trajectory_.joint_trajectory, exec_code, exec_note)) {
+    reportFailure(c, "OMPL", "execution", exec_code, dt, &target, exec_note);
+    return false;
+  }
+  RCLCPP_INFO(logger, "%smovej done (%.2f s).", tag.c_str(), dt);
+  return true;
+}
+
+// ===========================================================================
+// MOVEL : Pilz LIN, pose target
+// ===========================================================================
+bool movel(Ctx & c, const geometry_msgs::msg::Pose & target)
+{
+  auto & mg = *c.mg;
+  const auto logger = c.node->get_logger();
+  const std::string tag = stepTag(c);
+
+  if (!mg.getCurrentState(10.0)) {
+    reportFailure(c, "LIN", "current state", MoveItErr::ROBOT_STATE_STALE, 0.0, &target);
+    return false;
+  }
+  mg.setStartStateToCurrentState();
+  mg.setPlanningPipelineId("pilz_industrial_motion_planner");
+  mg.setPlannerId("LIN");
+  mg.setPlanningTime(kPlanningTime);
+  mg.setMaxVelocityScalingFactor(kMoveLVelocity);
+  mg.setMaxAccelerationScalingFactor(kMoveLAcceleration);
+  mg.clearPoseTargets();
+  mg.clearPathConstraints();
+
+  RCLCPP_INFO(logger, "%smovel target %s", tag.c_str(), poseStr(target).c_str());
+  if (!mg.setPoseTarget(target, c.link)) {
+    reportFailure(c, "LIN", "set target", MoveItErr::FAILURE, 0.0, &target,
+      "MoveIt rejected the pose target.");
+    return false;
+  }
+
+  moveit::planning_interface::MoveGroupInterface::Plan plan;
+  const auto t0 = std::chrono::steady_clock::now();
+  const auto code = mg.plan(plan);
+  const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  mg.clearPoseTargets();
+
+  if (code != moveit::core::MoveItErrorCode::SUCCESS) {
+    reportFailure(c, "LIN", "planning", code.val, dt, &target);
+    return false;
+  }
+  int exec_code = 0;
+  std::string exec_note;
+  if (!sa3_motion::executeDirect(c.fjt, plan.trajectory_.joint_trajectory, exec_code, exec_note)) {
+    reportFailure(c, "LIN", "execution", exec_code, dt, &target, exec_note);
+    return false;
+  }
+  RCLCPP_INFO(logger, "%smovel done (%.2f s).", tag.c_str(), dt);
+  return true;
+}
+
+// ===========================================================================
+// PICK_PLACE(pick_frame, place_frame, rebar)
+// ===========================================================================
+bool pickPlace(Ctx & c)
+{
+  const auto logger = c.node->get_logger();
+  auto & scene = *c.scene;
+
+  const std::string pick_frame = c.cur.pick;
+  const std::string place_frame = c.cur.place;
+  const std::string rebar = c.cur.rebar;
+
+  RCLCPP_INFO(
+    logger, "---- pair %d/%d: %s -> %s (%s) ----",
+    c.cur.pair_idx, c.cur.pair_total, pick_frame.c_str(), place_frame.c_str(), rebar.c_str());
+
+  auto step = [&](int idx, const std::string & name) {
+      c.cur.step_idx = idx;
+      c.cur.step = name;
+    };
+
+  step(0, "frame lookup");
+
+  geometry_msgs::msg::Pose pick, place;
+  if (!lookupFramePose(c, pick_frame, pick) || !lookupFramePose(c, place_frame, place)) {
+    return false;
+  }
+
+  pick.position.x += c.pick_x_offset;
+
+  const auto pick_approach = offsetWorld(pick, kApproachOffset);
+  const auto place_approach = offsetWorld(place, kApproachOffset);
+
+  // Custom transition: keep X of the pick approach, take Y/Z of the place approach.
+  geometry_msgs::msg::Pose transition_pose = pick_approach;
+  transition_pose.position.y = place_approach.position.y;
+  transition_pose.position.z = place_approach.position.z;
+
+  // The rebar must be a world object before the pick.
+  if (!scene.verifyObjectState(rebar, true, false)) {
+    RCLCPP_ERROR(logger, "Expected '%s' to be a world object before picking.", rebar.c_str());
+    return false;
+  }
+
+  auto movel_or_movej = [&](
+    const geometry_msgs::msg::Pose & target, const std::string & name, int n) -> bool
+    {
+      step(n, name + " (movel)");
+      if (movel(c, target)) {return true;}
+      RCLCPP_WARN(logger, "%s movel failed -> movej fallback", name.c_str());
+      step(n, name + " (movej fallback)");
+      return movej(c, target);
+    };
+
+  // ============================================================
+  // PICK
+  // ============================================================
+  step(1, "pick approach (movej)");
+  if (!movej(c, pick_approach)) {
+    return false;
+  }
+
+  // Gripper <-> rebar collisions OFF until after the pick retract.
+  step(1, "allow gripper/rebar contact");
+  if (!scene.setObjectCollisionsAllowed(rebar, kGripperLinks, true)) {
+    RCLCPP_ERROR(logger, "Failed to allow contact for '%s'.", rebar.c_str());
+    return false;
+  }
+  ScopeGuard pick_guard([&]() {
+      scene.setObjectCollisionsAllowed(rebar, kGripperLinks, false);
+    });
+
+  step(2, "pick (movel)");
+  if (!movel(c, pick)) {
+    return false;
+  }
+
+  step(2, "attach " + rebar);
+  if (!scene.attachWorldObjectPreservingPose(*c.mg, rebar, c.link, kGripperLinks) ||
+    !scene.verifyObjectState(rebar, false, true, c.link))
+  {
+    RCLCPP_ERROR(logger, "Failed to attach '%s' to '%s'.", rebar.c_str(), c.link.c_str());
+    return false;
+  }
+  RCLCPP_INFO(logger, "ATTACHED: %s follows '%s'.", rebar.c_str(), c.link.c_str());
+
+  // Temporarily allow the attached rebar to intersect the web ring (it is
+  // still inside the rack slot while retracting).
+  step(3, "allow attached rebar/web_ring contact");
+  if (!scene.setCollisionPairAllowed(rebar, kWebRingId, true)) {
+    RCLCPP_ERROR(
+      logger, "Failed to allow collision between '%s' and '%s'.", rebar.c_str(), kWebRingId.c_str());
+    return false;
+  }
+  // Runs on any early return below, so the allowance never leaks.
+  ScopeGuard web_ring_guard([&]() {
+      scene.setCollisionPairAllowed(rebar, kWebRingId, false);
+    });
+
+  step(3, "pick retract (movel)");
+  if (!movel(c, pick_approach)) {
+    RCLCPP_ERROR(logger, "Retract failed; '%s' remains attached.", rebar.c_str());
+    return false;
+  }
+
+  // // Custom transition move (still carrying the rebar, allowance still on).
+  // step(4, "transition (movel)");
+  // if (!movel(c, transition_pose)) {
+  //   return false;
+  // }
+
+  // // Clear of the rack: restore normal collision checking.
+  // step(4, "restore rebar/web_ring + gripper/rebar collision");
+  // web_ring_guard.runNow();
+  // pick_guard.runNow();
+  // RCLCPP_INFO(logger, "Collision checking restored for '%s'.", rebar.c_str());
+
+  // ============================================================
+  // PLACE
+  // ============================================================
+  if (!movel_or_movej(place_approach, "place approach", 5)) {
+    return false;
+  }
+
+  // jig_clamp <-> rebar and gripper <-> rebar OFF until after the place retract.
+  step(5, "allow rebar/jig_clamp and gripper contact");
+  if (!scene.setObjectCollisionsAllowed(rebar, kGripperLinks, true) ||
+    !scene.setCollisionPairAllowed(rebar, kJigClampId, true))
+  {
+    scene.setObjectCollisionsAllowed(rebar, kGripperLinks, false);
+    scene.setCollisionPairAllowed(rebar, kJigClampId, false);
+    RCLCPP_ERROR(logger, "Failed to allow place contacts for '%s'.", rebar.c_str());
+    return false;
+  }
+  ScopeGuard place_guard([&]() {
+      scene.setObjectCollisionsAllowed(rebar, kGripperLinks, false);
+      scene.setCollisionPairAllowed(rebar, kJigClampId, false);
+    });
+
+  step(6, "place (movel)");
+  if (!movel(c, place)) {
+    return false;
+  }
+
+  step(6, "detach " + rebar);
+  if (!scene.detachObjectToWorldPreservingPose(*c.mg, rebar) ||
+    !scene.verifyObjectState(rebar, true, false))
+  {
+    RCLCPP_ERROR(logger, "Failed to detach '%s'.", rebar.c_str());
+    return false;
+  }
+  RCLCPP_INFO(logger, "RELEASED: '%s' is now a world object.", rebar.c_str());
+
+  step(7, "place retract (movel)");
+  if (!movel(c, place_approach)) {
+    RCLCPP_ERROR(logger, "'%s' was placed but the retract failed.", rebar.c_str());
+    return false;
+  }
+
+  step(7, "restore collisions");
+  place_guard.runNow();
+
+  RCLCPP_INFO(logger, "---- pair %d/%d done ----", c.cur.pair_idx, c.cur.pair_total);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Job table: one rebar per place, same order
+// ---------------------------------------------------------------------------
+struct Job
+{
+  std::string pick;
+  std::vector<std::string> places;
+  std::vector<std::string> rebars;
+  double pick_x_increment = 0.0;
+};
+
+const std::vector<Job> kJobs = {
+  {"6pf",
+    {"6_placef_r"},
+    {"rebar_6"},
+    0.0},
+
+  {"13_1pf",
+    {"13_placef1_r", "13_placef2_r"},
+    {"rebar_13_1_R", "rebar_13_2_R"},
+    0.118},
+
+  {"13_2pf",
+    {"13_placef3_r"},
+    {"rebar_13_3_R"},
+    0.0},
+
+  {"14_4pf",
+    {"14_placef4_r", "14_placef3_r", "14_placef2_r", "14_placef1_r"},
+    {"rebar_14_4_R", "rebar_14_3_R", "rebar_14_2_R", "rebar_14_1_R"},
+    0.112},
+};
+
+enum class PairStatus { kOk, kFailed, kNotRun };
+
+struct PairResult
+{
+  std::string pick, place, rebar;
+  double pick_x_offset = 0.0;
+  PairStatus status = PairStatus::kNotRun;
+  Failure failure;
+};
+
+void printSummary(const std::vector<PairResult> & results)
+{
+  int ok = 0, failed = 0, not_run = 0;
+  for (const auto & r : results) {
+    if (r.status == PairStatus::kOk) {++ok;}
+    else if (r.status == PairStatus::kNotRun) {++not_run;}
+    else {++failed;}
+  }
+
+  std::printf("\n==================== RUN SUMMARY (robot2_arm) ====================\n");
+  const int total = static_cast<int>(results.size());
+  int idx = 0;
+  for (const auto & r : results) {
+    ++idx;
+    if (r.status == PairStatus::kOk) {
+      std::printf(
+        "%d/%d %-7s -> %-14s %-14s | OK\n", idx, total,
+        r.pick.c_str(), r.place.c_str(), r.rebar.c_str());
+    } else if (r.status == PairStatus::kNotRun) {
+      std::printf(
+        "%d/%d %-7s -> %-14s %-14s | NOT RUN\n", idx, total,
+        r.pick.c_str(), r.place.c_str(), r.rebar.c_str());
+    } else {
+      std::printf(
+        "%d/%d %-7s -> %-14s %-14s | FAILED | step %d/%d %s | %s | %s | %s\n", idx, total,
+        r.pick.c_str(), r.place.c_str(), r.rebar.c_str(),
+        r.failure.info.step_idx, r.failure.info.step_total, r.failure.info.step.c_str(),
+        r.failure.planner.c_str(), r.failure.stage.c_str(), errStr(r.failure.code).c_str());
+    }
+  }
+  std::printf("\nPairs OK: %d / %d    FAILED: %d    NOT RUN: %d\n", ok, total, failed, not_run);
+  std::printf("===================================================================\n");
+}
+
+}  // namespace
+
+// ===========================================================================
+// main
+// ===========================================================================
+int main(int argc, char ** argv)
+{
+  rclcpp::init(argc, argv);
+
+  const auto node_options =
+    rclcpp::NodeOptions().automatically_declare_parameters_from_overrides(true);
+  auto node = rclcpp::Node::make_shared(kNodeName, node_options);
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  std::thread executor_thread([&executor]() {executor.spin();});
+
+  tf2_ros::Buffer tf_buffer(node->get_clock());
+  tf_buffer.setUsingDedicatedThread(true);
+  tf2_ros::TransformListener tf_listener(tf_buffer, node, false);
+
+  bool ok = false;
+  try {
+    ok = [&]() -> bool
+      {
+        RCLCPP_INFO(node->get_logger(), "Waiting for MoveIt, joint states and TF.");
+        rclcpp::sleep_for(2s);
+
+        moveit::planning_interface::MoveGroupInterface move_group(node, kGroup);
+        move_group.setPoseReferenceFrame(kReferenceFrame);
+        move_group.setEndEffectorLink(kPlanningLink);
+        move_group.setPlanningTime(kPlanningTime);
+
+        if (!move_group.getCurrentState(10.0)) {
+          RCLCPP_ERROR(node->get_logger(), "Current robot state is unavailable.");
+          return false;
+        }
+
+        auto fjt = rclcpp_action::create_client<sa3_motion::FJT>(node, kControllerAction);
+        if (!fjt->wait_for_action_server(10s)) {
+          RCLCPP_ERROR(node->get_logger(), "Controller '%s' unavailable.", kControllerAction);
+          return false;
+        }
+
+        // Same scene helper Robot 1 / Robot 3 use.
+        PlanningSceneObjects scene_objects(node);
+        if (kSpawnRebars && !scene_objects.addExtraRebars()) {
+          RCLCPP_ERROR(node->get_logger(), "Failed to initialize rebar collision objects.");
+          return false;
+        }
+
+        Ctx ctx;
+        ctx.node = node;
+        ctx.mg = &move_group;
+        ctx.tf = &tf_buffer;
+        ctx.scene = &scene_objects;
+        ctx.fjt = fjt;
+
+        std::vector<PairResult> results;
+        for (const auto & job : kJobs) {
+          if (job.rebars.size() != job.places.size()) {
+            RCLCPP_ERROR(
+              node->get_logger(), "Job '%s': %zu places but %zu rebars.",
+              job.pick.c_str(), job.places.size(), job.rebars.size());
+            return false;
+          }
+          for (size_t j = 0; j < job.places.size(); ++j) {
+            PairResult r;
+            r.pick = job.pick;
+            r.place = job.places[j];
+            r.rebar = job.rebars[j];
+            r.pick_x_offset = static_cast<double>(j) * job.pick_x_increment;
+            results.push_back(r);
+          }
+        }
+        const int total = static_cast<int>(results.size());
+
+        bool stop = false;
+        for (int i = 0; i < total && !stop; ++i) {
+          auto & r = results[i];
+          ctx.cur = StepInfo{};
+          ctx.cur.pair_idx = i + 1;
+          ctx.cur.pair_total = total;
+          ctx.cur.pick = r.pick;
+          ctx.cur.place = r.place;
+          ctx.cur.rebar = r.rebar;
+          ctx.pick_x_offset = r.pick_x_offset;
+
+          const size_t failures_before = ctx.failures.size();
+          if (pickPlace(ctx)) {
+            r.status = PairStatus::kOk;
+          } else {
+            // Still holding the rebar? Release it so the next pair starts clean.
+            if (scene_objects.verifyObjectState(r.rebar, false, true, ctx.link)) {
+              scene_objects.detachObjectToWorldPreservingPose(move_group, r.rebar);
+            }
+            // Make sure temporary allowances do not leak into the next pair.
+            scene_objects.setCollisionPairAllowed(r.rebar, kWebRingId, false);
+            scene_objects.setCollisionPairAllowed(r.rebar, kJigClampId, false);
+            scene_objects.setObjectCollisionsAllowed(r.rebar, kGripperLinks, false);
+            r.status = PairStatus::kFailed;
+            if (ctx.failures.size() > failures_before) {
+              r.failure = ctx.failures.back();
+            }
+            if (kStopOnFirstFailure) {
+              stop = true;
+              RCLCPP_ERROR(node->get_logger(), "Stopping: pair %d/%d failed.", i + 1, total);
+            }
+          }
+        }
+
+        printSummary(results);
+
+        for (const auto & r : results) {
+          if (r.status != PairStatus::kOk) {return false;}
+        }
+        RCLCPP_INFO(node->get_logger(), "All %d pick/place pairs completed.", total);
+        return true;
+      }();
+  } catch (const std::exception & e) {
+    RCLCPP_FATAL(node->get_logger(), "Unhandled exception: %s", e.what());
+  } catch (...) {
+    RCLCPP_FATAL(node->get_logger(), "Unhandled non-standard exception.");
+  }
+
+  (void)tf_listener;
+  executor.cancel();
+  if (executor_thread.joinable()) {
+    executor_thread.join();
+  }
+  rclcpp::shutdown();
+  return ok ? 0 : 1;
+}
