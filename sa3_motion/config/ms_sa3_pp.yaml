@@ -33,6 +33,14 @@ motion_sequence:
       retries: 1
       on_failure: abort
 
+    - name: "home all robots"
+      executables:
+        - home_all_robots
+      mode: sequential
+      retries: 3
+      on_failure: continue
+
+
     - name: "Change gripper"
       executables:
         - robot1_gripper_change
@@ -46,14 +54,7 @@ motion_sequence:
         - robot2_tying_gun
       mode: parallel
       retries: 1
-      on_failure: final_home
-
-    - name: "Final home all robots"
-      executables:
-        - home_all_robots
-      mode: sequential
-      retries: 1
-      on_failure: finish
+      on_failure: abort
 
     - name: "Pick/place final assembly"
       executables:
@@ -64,4 +65,11 @@ motion_sequence:
             object_id: rebar_1A
       mode: sequential
       retries: 1
-      on_failure: finish
+      on_failure: final_home
+
+    - name: "Final home all robots"
+      executables:
+        - home_all_robots
+      mode: sequential
+      retries: 3
+      on_failure: final_home

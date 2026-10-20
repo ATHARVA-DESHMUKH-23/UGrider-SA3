@@ -786,20 +786,66 @@ bool followPosesJ(
   const std::vector<geometry_msgs::msg::Pose> & poses,
   int first_step_idx)
 {
+  const auto logger = ctx.node->get_logger();
+
+  auto movel_or_movej =
+    [&](const geometry_msgs::msg::Pose & target,
+        const std::string & name,
+        int n) -> bool
+    {
+      // First attempt: Cartesian linear motion using Pilz LIN.
+      ctx.cur.step_idx = n;
+      ctx.cur.step = name + " (movel)";
+
+      if (movel(ctx, target)) {
+        return true;
+      }
+
+      // Fallback: retry the same target using OMPL MoveJ.
+      RCLCPP_WARN(
+        logger,
+        "%sMoveL failed for %s. Trying MoveJ fallback.",
+        stepTag(ctx).c_str(),
+        name.c_str());
+
+      ctx.cur.step_idx = n;
+      ctx.cur.step = name + " (movej fallback)";
+
+      if (movej(ctx, target)) {
+        RCLCPP_INFO(
+          logger,
+          "%sMoveJ fallback succeeded for %s.",
+          stepTag(ctx).c_str(),
+          name.c_str());
+
+        return true;
+      }
+
+      RCLCPP_ERROR(
+        logger,
+        "%sBoth MoveL and MoveJ failed for %s.",
+        stepTag(ctx).c_str(),
+        name.c_str());
+
+      return false;
+    };
+
   for (std::size_t i = 0; i < poses.size(); ++i) {
-    ctx.cur.step_idx = first_step_idx + static_cast<int>(i);
+    const int step_idx =
+      first_step_idx + static_cast<int>(i);
 
-    ctx.cur.step =
+    const std::string name =
       "arc point " + std::to_string(i + 1) + "/" +
-      std::to_string(poses.size()) + " (movel)";
+      std::to_string(poses.size());
 
-    if (!movel(ctx, poses[i])) {
+    if (!movel_or_movej(poses[i], name, step_idx)) {
       return false;
     }
   }
 
   return true;
 }
+
 
 
 // ===========================================================================
@@ -1049,7 +1095,8 @@ bool pickPlace(
   if (!followPosesJ(ctx, arc, step + 1)) {
     RCLCPP_ERROR(
       logger,
-      "Arc motion failed. '%s' remains attached for recovery.",
+      "Arc motion failed even after MoveJ fallback. "
+      "'%s' remains attached for recovery.",
       ctx.object_id);
     return false;
   }

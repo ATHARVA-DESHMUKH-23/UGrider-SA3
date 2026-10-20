@@ -1,4 +1,3 @@
-
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 
@@ -10,6 +9,7 @@
 #include <cmath>
 #include <future>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -23,6 +23,8 @@ namespace
 {
 
 constexpr double kHomeTolerance = 0.02;  // radians
+constexpr auto kVerifyTimeout = 5s;
+constexpr auto kVerifyPollPeriod = 250ms;
 constexpr double kExecuteMargin = 10.0;
 
 struct RobotConfig
@@ -109,15 +111,25 @@ bool executeDirect(
     return false;
   }
 
+  if (result.result &&
+      result.result->error_code != FJT::Result::SUCCESSFUL)
+  {
+    RCLCPP_ERROR(
+      logger, "Controller reported trajectory error: %d, %s",
+      result.result->error_code,
+      result.result->error_string.c_str());
+    return false;
+  }
+
   return true;
 }
 
-bool verifyHome(
+bool verifyHomeOnce(
   const rclcpp::Logger & logger,
   moveit::planning_interface::MoveGroupInterface & move_group)
 {
   const auto home_values = move_group.getNamedTargetValues("home");
-  const auto current_state = move_group.getCurrentState(10.0);
+  const auto current_state = move_group.getCurrentState(2.0);
 
   if (home_values.empty()) {
     RCLCPP_ERROR(
@@ -126,7 +138,13 @@ bool verifyHome(
   }
 
   if (!current_state) {
-    RCLCPP_ERROR(logger, "Could not obtain the current robot state.");
+    RCLCPP_WARN(logger, "Current robot state is not available yet.");
+    return false;
+  }
+
+  const auto * robot_model = current_state->getRobotModel().get();
+  if (!robot_model) {
+    RCLCPP_ERROR(logger, "Current state has no robot model.");
     return false;
   }
 
@@ -136,40 +154,51 @@ bool verifyHome(
     const std::string & joint_name = joint.first;
     const double target = joint.second;
 
-    // Ensure the variable is present in the robot model.
-    const auto * robot_model = current_state->getRobotModel().get();
-
-    if (!robot_model ||
-        robot_model->getVariableIndex(joint_name) < 0)
-    {
-    RCLCPP_ERROR(
+    if (robot_model->getVariableIndex(joint_name) < 0) {
+      RCLCPP_ERROR(
         logger, "Joint variable '%s' is missing from the robot model.",
         joint_name.c_str());
-    all_home = false;
-    continue;
+      all_home = false;
+      continue;
     }
 
-    const double actual =
-      current_state->getVariablePosition(joint_name);
-
-    // Handles angular wraparound for continuous joints.
+    const double actual = current_state->getVariablePosition(joint_name);
     const double error =
       std::abs(std::remainder(actual - target, 2.0 * M_PI));
 
     if (error > kHomeTolerance) {
       RCLCPP_WARN(
         logger,
-        "%s not home: actual=%.4f target=%.4f error=%.4f rad",
-        joint_name.c_str(), actual, target, error);
+        "%s not home: actual=%.4f target=%.4f error=%.4f rad (tolerance %.4f)",
+        joint_name.c_str(), actual, target, error, kHomeTolerance);
       all_home = false;
     } else {
       RCLCPP_INFO(
-        logger, "%s verified: %.4f rad (target %.4f)",
-        joint_name.c_str(), actual, target);
+        logger, "%s verified: %.4f rad (target %.4f, error %.4f)",
+        joint_name.c_str(), actual, target, error);
     }
   }
 
   return all_home;
+}
+
+bool verifyHomeWithRetry(
+  const rclcpp::Logger & logger,
+  moveit::planning_interface::MoveGroupInterface & move_group)
+{
+  const auto deadline = std::chrono::steady_clock::now() + kVerifyTimeout;
+
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (verifyHomeOnce(logger, move_group)) {
+      return true;
+    }
+    rclcpp::sleep_for(kVerifyPollPeriod);
+  }
+
+  RCLCPP_ERROR(
+    logger, "Home verification did not pass within %.1f seconds.",
+    std::chrono::duration<double>(kVerifyTimeout).count());
+  return false;
 }
 
 bool runRobot(const RobotConfig & cfg)
@@ -205,16 +234,15 @@ bool runRobot(const RobotConfig & cfg)
     move_group.setMaxVelocityScalingFactor(0.15);
     move_group.setMaxAccelerationScalingFactor(0.10);
 
-    auto current_state = move_group.getCurrentState(10.0);
+    const auto current_state = move_group.getCurrentState(10.0);
 
     if (!current_state) {
       RCLCPP_ERROR(logger, "Current joint state is unavailable.");
       throw std::runtime_error("Current state unavailable");
     }
 
-    auto controller =
-      rclcpp_action::create_client<FJT>(
-        node, cfg.controller_action);
+    auto controller = rclcpp_action::create_client<FJT>(
+      node, cfg.controller_action);
 
     if (!controller->wait_for_action_server(10s)) {
       RCLCPP_ERROR(
@@ -246,11 +274,8 @@ bool runRobot(const RobotConfig & cfg)
     }
 
     RCLCPP_INFO(
-      logger, "Home trajectory planned for '%s'.",
-      cfg.group.c_str());
+      logger, "Home trajectory planned for '%s'.", cfg.group.c_str());
 
-    // Each worker reaches this stage independently. All four workers can
-    // submit their trajectories concurrently to their respective controllers.
     RCLCPP_INFO(
       logger, "Executing home trajectory on %s.",
       cfg.controller_action.c_str());
@@ -259,25 +284,21 @@ bool runRobot(const RobotConfig & cfg)
       throw std::runtime_error("Execution failed");
     }
 
-    // Give joint-state feedback time to reflect the final controller position.
-    rclcpp::sleep_for(1s);
+    RCLCPP_INFO(
+      logger, "Controller completed trajectory for '%s'; verifying feedback.",
+      cfg.group.c_str());
 
-    if (!verifyHome(logger, move_group)) {
-      RCLCPP_ERROR(
-        logger, "Home verification failed for '%s'.",
-        cfg.group.c_str());
+    if (!verifyHomeWithRetry(logger, move_group)) {
       throw std::runtime_error("Home verification failed");
     }
 
     RCLCPP_INFO(
-      logger, "SUCCESS: '%s' is confirmed at home.",
-      cfg.group.c_str());
+      logger, "SUCCESS: '%s' is confirmed at home.", cfg.group.c_str());
 
     success = true;
   } catch (const std::exception & e) {
     RCLCPP_ERROR(
-      logger, "Robot '%s' failed: %s",
-      cfg.name.c_str(), e.what());
+      logger, "Robot '%s' failed: %s", cfg.name.c_str(), e.what());
   }
 
   executor.cancel();
@@ -313,14 +334,15 @@ int main(int argc, char ** argv)
       "/robot4_arm_controller/follow_joint_trajectory")
   };
 
-  // One independent worker per arm.
-  std::vector<bool> results(robots.size(), false);
+  // int is used rather than vector<bool>: vector<bool> packs bits and can
+  // cause a data race when different worker threads write concurrently.
+  std::vector<int> results(robots.size(), 0);
   std::vector<std::thread> workers;
   workers.reserve(robots.size());
 
-  for (size_t i = 0; i < robots.size(); ++i) {
+  for (std::size_t i = 0; i < robots.size(); ++i) {
     workers.emplace_back([&, i]() {
-      results[i] = runRobot(robots[i]);
+      results[i] = runRobot(robots[i]) ? 1 : 0;
     });
   }
 
@@ -332,12 +354,11 @@ int main(int argc, char ** argv)
 
   bool all_home = true;
 
-  for (size_t i = 0; i < results.size(); ++i) {
-    if (!results[i]) {
+  for (std::size_t i = 0; i < results.size(); ++i) {
+    if (results[i] == 0) {
       RCLCPP_ERROR(
         rclcpp::get_logger("home_all_robots"),
-        "%s did not complete and verify home.",
-        robots[i].name.c_str());
+        "%s did not complete and verify home.", robots[i].name.c_str());
       all_home = false;
     }
   }

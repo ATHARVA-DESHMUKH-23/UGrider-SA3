@@ -7,16 +7,17 @@
 //
 // Sequence:
 //   1. MoveJ  pick approach   (pick frame, y - 0.20)
-//   2. Allow collision: object <-> gripper links, object <-> jig_clamp
+//   2. Allow collision: object <-> gripper links, jig_clamp, sa3_main_jig;
+//      once active children are identified, each child <-> both jigs
 //   3. MoveL  pick frame
 //   4. Attach object + all child objects to the gripper link
 //   5. MoveL  pick approach   (retract)
-//   6. MoveJ  place approach  (place frame, y - 0.20)
+//   6. MoveJ  place approach  (place frame, z + 0.20)
 //   7. MoveL  place frame
 //   8. Detach child objects and object into the world
-//   9. MoveL  place approach  (retract)
-//  10. Restore collision: object <-> gripper links, object <-> jig_clamp,
-//      object <-> children
+//   9. MoveL  place approach  (retract, z + 0.20)
+//  10. Restore collision: object <-> gripper links/jigs,
+//      each active child <-> both jigs, and object <-> children
 //  11. Go to home pose
 //
 // Parameters:
@@ -64,12 +65,14 @@ constexpr char kGroup[] = "robot3_arm";
 constexpr char kEndEffector[] = "robot3_end_effactor";
 constexpr char kGripperLink2[] = "robot3_J6_link";   // extra gripper link
 constexpr char kJigClamp[] = "jig_clamp";            // fixture the rebar sits in
+constexpr char kMainJig[] = "sa3_main_jig";           // main jig that may contact the carried assembly
 constexpr char kWorld[] = "world";
 constexpr char kHomeState[] = "home";
 constexpr char kController[] = "/robot3_arm_controller/follow_joint_trajectory";
 
-// Approach / retract offset in WORLD frame: frame pose + this offset.
-constexpr std::array<double, 3> kApproachOffset = {0.0, -0.20, 0.0};
+// Independent approach / retract offsets in WORLD frame: frame pose + offset.
+constexpr std::array<double, 3> kPickApproachOffset = {0.0, -0.20, 0.0};
+constexpr std::array<double, 3> kPlaceApproachOffset = {0.0, 0.0, 0.30};
 
 constexpr double kPlanningTime = 15.0;
 constexpr double kMoveJVel = 0.30;
@@ -237,15 +240,20 @@ bool goHome(Ctx & ctx)
 }
 
 
-// Allow / restore collision for object <-> gripper links, object <-> jig_clamp and
-// object <-> each active child.
+// Allow / restore only the intended contact pairs for the carried assembly:
+// main object <-> gripper links, jig_clamp, sa3_main_jig;
+// each active child <-> main object, jig_clamp, sa3_main_jig.
+// Children that were not present as world collision objects are skipped.
 bool setPickCollisions(Ctx & ctx, const std::vector<std::string> & touch_links, bool allowed)
 {
   bool ok = true;
   ok &= ctx.scene->setObjectCollisionsAllowed(ctx.object_id, touch_links, allowed);
   ok &= ctx.scene->setObjectCollisionsAllowed(ctx.object_id, {kJigClamp}, allowed);
+  ok &= ctx.scene->setObjectCollisionsAllowed(ctx.object_id, {kMainJig}, allowed);
   for (const auto & child : ctx.children_active) {
     ok &= ctx.scene->setCollisionPairAllowed(ctx.object_id, child, allowed);
+    ok &= ctx.scene->setCollisionPairAllowed(child, kJigClamp, allowed);
+    ok &= ctx.scene->setCollisionPairAllowed(child, kMainJig, allowed);
   }
   return ok;
 }
@@ -272,14 +280,14 @@ bool attachAssembly(Ctx & ctx, const std::vector<std::string> & touch_links)
     ctx.children_active.push_back(child);
   }
 
-  // Object <-> children contact allowed (they touch while carried).
-  for (const auto & child : ctx.children_active) {
-    if (!ctx.scene->setCollisionPairAllowed(ctx.object_id, child, true)) {
-      RCLCPP_ERROR(
-        logger, "Failed to allow collision '%s' <-> '%s'.",
-        ctx.object_id.c_str(), child.c_str());
-      return false;
-    }
+  // Allow the full carried assembly to overlap the jig clamp during lift/retract.
+  // This includes object <-> child and child <-> jig_clamp pairs.
+  if (!setPickCollisions(ctx, touch_links, true)) {
+    RCLCPP_ERROR(
+      logger,
+      "Failed to allow collisions for '%s' and its active children against the jig clamp.",
+      ctx.object_id.c_str());
+    return false;
   }
 
   if (!ctx.scene->attachWorldObjectPreservingPose(
@@ -350,8 +358,8 @@ bool pickPlace(Ctx & ctx, const std::string & pick_frame, const std::string & pl
     return false;
   }
 
-  const auto pick_approach = withOffset(pick, kApproachOffset);
-  const auto place_approach = withOffset(place, kApproachOffset);
+  const auto pick_approach = withOffset(pick, kPickApproachOffset);
+  const auto place_approach = withOffset(place, kPlaceApproachOffset);
 
   // Object must start as a world collision object.
   if (!ctx.scene->verifyObjectState(ctx.object_id, true, false)) {
@@ -364,9 +372,11 @@ bool pickPlace(Ctx & ctx, const std::string & pick_frame, const std::string & pl
     return false;
   }
 
-  // 2. Allow collision: object <-> gripper, object <-> jig_clamp
+  // 2. Allow intended contacts during pick: object <-> gripper, jig_clamp,
+  // and sa3_main_jig. Active child pairs are enabled in attachAssembly().
   if (!ctx.scene->setObjectCollisionsAllowed(ctx.object_id, touch_links, true) ||
-    !ctx.scene->setObjectCollisionsAllowed(ctx.object_id, {kJigClamp}, true))
+    !ctx.scene->setObjectCollisionsAllowed(ctx.object_id, {kJigClamp}, true) ||
+    !ctx.scene->setObjectCollisionsAllowed(ctx.object_id, {kMainJig}, true))
   {
     RCLCPP_ERROR(logger, "Failed to allow object collisions.");
     return false;
@@ -392,7 +402,7 @@ bool pickPlace(Ctx & ctx, const std::string & pick_frame, const std::string & pl
   }
 
   // 6. MoveL place approach
-  if (!movel(ctx, place_approach, "place approach")) {
+  if (!movej(ctx, place_approach, "place approach")) {
     return false;
   }
 
@@ -477,7 +487,8 @@ int main(int argc, char ** argv)
         "rebar_14_1",
         "rebar_14_2",
         "rebar_14_3",
-        "rebar_14_4","rebar_3c", "rebar_4c"
+        "rebar_14_4",
+        "rebar_3c", "rebar_4c"
         });
     }
 

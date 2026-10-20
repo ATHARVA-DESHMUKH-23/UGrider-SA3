@@ -182,27 +182,27 @@ workcell:
   # =========================================================
   tying_frames:
 
-    # # ---------- type 5 (4 points) ----------
-    # 5_placef_l_t1:
-    #   parent: 5_placef_l
-    #   child: 5_placef_l_t1
-    #   xyz: [0.0, -0.20, 0.050]
-    #   rpy: [0.5236, 0.0, 0.0]
-    # 5_placef_l_t2:
-    #   parent: 5_placef_l
-    #   child: 5_placef_l_t2
-    #   xyz: [0.0, -0.10,0.050]
-    #   rpy: [-0.5236, 0.0, 0.0]
-    # 5_placef_l_t3:
-    #   parent: 5_placef_l
-    #   child: 5_placef_l_t3
-    #   xyz: [0.0, -0.10, -0.160]
-    #   rpy: [-0.5236, 0.0, 0.0]
-    # 5_placef_l_t4:
-    #   parent: 5_placef_l
-    #   child: 5_placef_l_t4
-    #   xyz: [0.0,-0.20, 0.160]
-    #   rpy: [0.5236, 0.0, 0.0]
+    # # ---------- type 5 (3 points) ----------
+    # ---------- type 5: tying frames  ----------
+    5_placef_l_t1:
+      parent: 5_placef_l
+      child: 5_placef_l_t1
+      xyz: [-0.03, 0.06903398036956787, 0.0006616413593292236]
+      rpy: [0.5854007482281, 0.0, 0.0]
+
+    5_placef_l_t2:
+      parent: 5_placef_l
+      child: 5_placef_l_t2
+      xyz: [-0.03, 0.03714217245578766, -0.12903551757335663]
+      rpy: [-0.5854007482281, 0.0, 0.0]
+
+    5_placef_l_t3:
+      parent: 5_placef_l
+      child: 5_placef_l_t3
+      xyz: [-0.03, 0.15548759698867798, -0.11478203535079956]
+      rpy: [1.57, 0.0, 0.0]
+
+    
 
     # ---------- type 13 (2 points each) ----------
     13_placef1_l_t1:
@@ -295,7 +295,28 @@ workcell:
       rpy: [3.14, 0.0, 0.0]
 
 
+    # -----------RIGHT SIDE FRAMES -----------
+    # ---------- type 6: tying frames (clicked points) ----------
+    6_placef_r_t1:
+      parent: 6_placef_r
+      child: 6_placef_r_t1
+      xyz: [-0.03, -0.026151299476623535, 0.028699636459350586]
+      rpy: [0.5854007482281, 0.0, 0.0]
+
+    6_placef_r_t2:
+      parent: 6_placef_r
+      child: 6_placef_r_t2
+      xyz: [-0.03, -0.0038506537675857544, -0.3535647392272949]
+      rpy: [-0.5854007482281, 0.0, 0.0]
+
+    6_placef_r_t3:
+      parent: 6_placef_r
+      child: 6_placef_r_t3
+      xyz: [-0.03, 0.12687206268310547, -0.31388020515441895]
+      rpy: [0.5854007482281, 0.0, 0.0]
+
     # ---------- type 13 (2 points each) ----------
+
     13_placef1_r_t1:
       parent: 13_placef1_r
       child: 13_placef1_r_t1
@@ -321,12 +342,12 @@ workcell:
     13_placef3_r_t1:
       parent: 13_placef3_r
       child: 13_placef3_r_t1
-      xyz: [ 0.05, -0.020, -0.075]
+      xyz: [ -0.03, -0.020, -0.075]
       rpy: [3.14, 0.0, 0.0]
     13_placef3_r_t2:
       parent: 13_placef3_r
       child: 13_placef3_r_t2
-      xyz: [ 0.05,0.020, 0.075]
+      xyz: [ -0.03,0.020, 0.075]
       rpy: [3.14, 0.0, 0.0]
 
     # ---------- type 14 (2 points each) ----------

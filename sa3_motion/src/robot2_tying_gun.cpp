@@ -99,7 +99,7 @@ struct Job
 
 // Used when the node is started without the `clamp_frames` parameter.
 const std::vector<Job> kDefaultJobs = {
-  // {"5_placef_r", 4},
+  {"6_placef_r", 3},
 
   {"13_placef1_r", 2},
   {"13_placef2_r", 2},
@@ -488,6 +488,70 @@ bool movel(Ctx & c, const geometry_msgs::msg::Pose & target)
 }
 
 // ===========================================================================
+// RETURN TO HOME
+// Uses the SRDF named target "home" for this robot's MoveIt group.
+ // ===========================================================================
+bool moveHome(Ctx & c)
+{
+  auto & mg = *c.mg;
+  const auto logger = c.node->get_logger();
+
+  RCLCPP_INFO(logger, "All tying points processed; planning return to named target 'home'.");
+
+  mg.clearPoseTargets();
+  mg.clearPathConstraints();
+  mg.setStartStateToCurrentState();
+  mg.setPlanningPipelineId("ompl");
+  mg.setPlannerId("RRTConnectkConfigDefault");
+  mg.setPlanningTime(kPlanningTime);
+  mg.setNumPlanningAttempts(kOmplAttempts);
+  mg.setMaxVelocityScalingFactor(kMoveJVelocity);
+  mg.setMaxAccelerationScalingFactor(kMoveJAcceleration);
+
+  if (!mg.setNamedTarget("home")) {
+    RCLCPP_ERROR(
+      logger, "Could not set named target 'home' for group '%s'. Check the SRDF group_state.",
+      kGroup);
+    return false;
+  }
+
+  moveit::planning_interface::MoveGroupInterface::Plan plan;
+  bool planned = false;
+  int last_code = 0;
+
+  for (int attempt = 1; attempt <= kPlanRetries; ++attempt) {
+    mg.setStartStateToCurrentState();
+    const auto code = mg.plan(plan);
+    last_code = code.val;
+    if (code == moveit::core::MoveItErrorCode::SUCCESS) {
+      planned = true;
+      break;
+    }
+    RCLCPP_WARN(
+      logger, "Home planning attempt %d/%d failed: %s",
+      attempt, kPlanRetries, errStr(last_code).c_str());
+  }
+
+  mg.clearPoseTargets();
+
+  if (!planned) {
+    RCLCPP_ERROR(
+      logger, "Failed to plan return to home after %d attempts: %s",
+      kPlanRetries, errStr(last_code).c_str());
+    return false;
+  }
+
+  const auto exec = mg.execute(plan);
+  if (exec != moveit::core::MoveItErrorCode::SUCCESS) {
+    RCLCPP_ERROR(logger, "Execution of return-to-home trajectory failed: %s", errStr(exec.val).c_str());
+    return false;
+  }
+
+  RCLCPP_INFO(logger, "Robot returned to home successfully.");
+  return true;
+}
+
+// ===========================================================================
 // TIE ONE POINT
 //   c.cur.idx / total / clamp / frame are set by the caller.
 // ===========================================================================
@@ -678,10 +742,28 @@ int main(int argc, char ** argv)
 
         printSummary(results);
 
+        // Always attempt to return home after the tying sequence has finished,
+        // even if one or more tying points failed.
+        const bool home_ok = moveHome(ctx);
+
+        bool tying_ok = true;
         for (const auto & r : results) {
-          if (r.status != Status::kOk) {return false;}
+          if (r.status != Status::kOk) {
+            tying_ok = false;
+            break;
+          }
         }
-        RCLCPP_INFO(node->get_logger(), "All %d tying points completed.", total);
+
+        if (!tying_ok) {
+          RCLCPP_ERROR(node->get_logger(), "Tying sequence had failures.");
+        }
+        if (!home_ok) {
+          RCLCPP_ERROR(node->get_logger(), "Robot did not return home successfully.");
+        }
+
+        if (!tying_ok || !home_ok) {return false;}
+
+        RCLCPP_INFO(node->get_logger(), "All %d tying points completed and robot is home.", total);
         return true;
       }();
   } catch (const std::exception & e) {
