@@ -1,0 +1,187 @@
+<?xml version="1.0"?>
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro"
+       name="sa3_gantry">
+
+  <!-- ========================================================= -->
+  <!-- GANTRY PARAMETERS                                         -->
+  <!-- ========================================================= -->
+
+  <xacro:arg name="gantry_xyz" default="1.3, 0.0, 0.0"/>
+  <xacro:arg name="gantry_rpy" default="0.0 0.0 0.0"/>
+  <xacro:arg name="gantry_scale" default="0.001 0.001 0.001"/>
+
+  <!-- ========================================================= -->
+  <!-- MATERIALS                                                 -->
+  <!-- ========================================================= -->
+
+  <material name="gantry_rail_material">
+    <color rgba="0.25 0.28 0.32 1.0"/>
+  </material>
+
+  <material name="gantry_carriage_material">
+    <color rgba="0.85 0.45 0.10 1.0"/>
+  </material>
+
+  <material name="gantry_part_material">
+    <color rgba="0.15 0.45 0.85 1.0"/>
+  </material>
+
+  <!-- ========================================================= -->
+  <!-- GANTRY MACRO                                              -->
+  <!-- ========================================================= -->
+
+  <xacro:macro
+      name="sa3_gantry"
+      params="parent:=world xyz:='0 0 0' rpy:='0 0 0' scale:='0.001 0.001 0.001'">
+
+    <!-- ======================================================= -->
+    <!-- GANTRY FRAME / RAIL                                     -->
+    <!-- Mesh geometry starts at its original STL coordinates.  -->
+    <!-- ======================================================= -->
+
+    <link name="gantry_link">
+
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh
+              filename="package://sa2_description/meshes/gantry.stl"
+              scale="${scale}"/>
+        </geometry>
+        <material name="gantry_rail_material"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh
+              filename="package://sa2_description/meshes/gantry.stl"
+              scale="${scale}"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="4.0 1.0 2.65" rpy="0 0 0"/>
+        <mass value="50.0"/>
+        <inertia
+            ixx="1.0" ixy="0.0" ixz="0.0"
+            iyy="70.0" iyz="0.0"
+            izz="70.0"/>
+      </inertial>
+
+    </link>
+
+    <!-- World placement is controlled by workcell.yaml -->
+
+    <joint name="world_to_gantry" type="fixed">
+      <parent link="${parent}"/>
+      <child link="gantry_link"/>
+      <origin xyz="${xyz}" rpy="${rpy}"/>
+    </joint>
+
+    <!-- ======================================================= -->
+    <!-- HORIZONTAL SLIDING CARRIAGE                             -->
+    <!-- ======================================================= -->
+
+    <link name="gantry_carriage_link">
+
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.35 0.35 0.20"/>
+        </geometry>
+        <material name="gantry_carriage_material"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.35 0.35 0.20"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="10.0"/>
+        <inertia
+            ixx="0.20" ixy="0.0" ixz="0.0"
+            iyy="0.20" iyz="0.0"
+            izz="0.20"/>
+      </inertial>
+
+    </link>
+
+    <joint name="gantry_slide_joint" type="prismatic">
+      <parent link="gantry_link"/>
+      <child link="gantry_carriage_link"/>
+
+      <origin xyz="0 0 0.25" rpy="0 0 0"/>
+      <axis xyz="1 0 0"/>
+
+      <limit
+          lower="0.0"
+          upper="4.0"
+          effort="1000.0"
+          velocity="0.5"/>
+
+      <dynamics damping="5.0" friction="1.0"/>
+    </joint>
+
+    <!-- ======================================================= -->
+    <!-- VERTICAL GANTRY PART                                    -->
+    <!-- ======================================================= -->
+
+    <link name="gantry_part_link">
+
+      <visual>
+        <origin xyz="0 0.5 5" rpy="0 0 0"/>
+        <geometry>
+          <mesh
+              filename="package://sa2_description/meshes/gantry_part.stl"
+              scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="gantry_part_material"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0.5 5" rpy="0 0 0"/>
+        <geometry>
+          <mesh
+              filename="package://sa2_description/meshes/gantry_part.stl"
+              scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="0.25 0.5 1.5" rpy="0 0 0"/>
+        <mass value="5.0"/>
+        <inertia
+            ixx="0.11" ixy="0.0" ixz="0.0"
+            iyy="0.11" iyz="0.0"
+            izz="0.033"/>
+      </inertial>
+
+    </link>
+
+    <joint name="gantry_down_joint" type="prismatic">
+      <parent link="gantry_carriage_link"/>
+      <child link="gantry_part_link"/>
+
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+
+      <!-- Positive motion moves the part downward -->
+      <axis xyz="0 0 -1"/>
+
+      <limit
+          lower="0.0"
+          upper="2.0"
+          effort="1000.0"
+          velocity="0.25"/>
+
+      <dynamics damping="5.0" friction="1.0"/>
+    </joint>
+
+  </xacro:macro>
+
+</robot>

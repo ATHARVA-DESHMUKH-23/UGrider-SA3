@@ -98,6 +98,32 @@ def generate_launch_description():
         )
 
     # =========================================================
+    # GANTRY MAPPINGS FROM WORKCELL YAML
+    # =========================================================
+
+    environment = workcell_config.get("environment", {})
+    gantry = environment.get("gantry")
+
+    if not isinstance(gantry, dict):
+        raise KeyError(
+            f"Missing 'environment.gantry' configuration in {workcell_yaml}"
+        )
+
+    for key in ("xyz", "rpy", "scale"):
+        if key not in gantry:
+            raise KeyError(
+                f"Missing 'environment.gantry.{key}' in {workcell_yaml}"
+            )
+
+    robot_mappings["gantry_xyz"] = vector_to_string(gantry["xyz"])
+    robot_mappings["gantry_rpy"] = vector_to_string(gantry["rpy"])
+    robot_mappings["gantry_scale"] = vector_to_string(gantry["scale"])
+
+    print("\nMoveIt gantry configuration loaded from workcell.yaml:")
+    print(f"  xyz={gantry['xyz']}")
+    print(f"  rpy={gantry['rpy']}")
+    print(f"  scale={gantry['scale']}")
+    # =========================================================
     # ROBOT XACRO
     # =========================================================
 

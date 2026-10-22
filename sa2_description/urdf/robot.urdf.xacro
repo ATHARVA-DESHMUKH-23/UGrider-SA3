@@ -16,7 +16,11 @@
 
   <xacro:arg name="robot4_pedestal_xyz" default="5.6 0.15 0.0"/>
   <xacro:arg name="robot4_pedestal_rpy" default="0 0 -1.5708"/>
-
+  <!-- Gantry position and orientation: overridden from workcell.yaml -->
+  <xacro:arg name="gantry_xyz" default="0.0 0.0 0.0"/>
+  <xacro:arg name="gantry_rpy" default="0.0 0.0 0.0"/>
+  <xacro:arg name="gantry_scale" default="0.001 0.001 0.001"/>
+  
   <!-- ========================================================= -->
   <!-- ARGUMENTS                                                 -->
   <!-- ========================================================= -->
@@ -42,7 +46,11 @@
   <!-- Grippers -->
   <xacro:include
     filename="$(find sa2_description)/urdf/end_effactor.urdf.xacro"/>
-
+  
+  <!-- Gantry -->
+  <xacro:include
+    filename="$(find sa2_description)/urdf/gantry.urdf.xacro"/>
+  
   <!-- ros2_control -->
   <xacro:include
     filename="$(find sa2_description)/urdf/ros2_controller.urdf.xacro"/>
@@ -53,6 +61,12 @@
   <!-- ========================================================= -->
 
   <link name="world"/>
+
+  <xacro:sa3_gantry
+    parent="world"
+    xyz="$(arg gantry_xyz)"
+    rpy="$(arg gantry_rpy)"
+    scale="$(arg gantry_scale)"/>
 
 
   <!-- ========================================================= -->
@@ -356,7 +370,7 @@
 
   <!-- Robot 3 Schunk gripper -->
 
-  <xacro:schunk_gripper
+  <xacro:sa3_grpr01
     parent_link="robot3_gripper_mount"
     prefix="robot3_"
     xyz="0 0 0"
@@ -376,7 +390,7 @@
   </link>
 
   <joint name="robot3_end_effactor_joint" type="fixed">
-    <origin xyz="0.2 0 0" rpy="0 0 0"/>
+    <origin xyz="0.3 0 0" rpy="0 0 0"/>
     <parent link="robot3_flange"/>
     <child link="robot3_end_effactor"/>
   </joint>
@@ -434,13 +448,12 @@
   </xacro:r2000ic_210r>
 
 
-  <!-- Robot 4 Schunk gripper -->
-
-  <xacro:schunk_gripper
+  <!-- Robot 4: SA3_GRPR01_R gripper -->
+  <xacro:sa3_grpr01_r
     parent_link="robot4_gripper_mount"
     prefix="robot4_"
     xyz="0 0 0"
-    rpy="0 1.57 0"/>
+    rpy="0 0 0"/>
 
 
   <!-- Robot 4 end effactor (ball, +0.2 m in X from flange) -->
@@ -456,7 +469,7 @@
   </link>
 
   <joint name="robot4_end_effactor_joint" type="fixed">
-    <origin xyz="0.2 0 0" rpy="0 0 0"/>
+    <origin xyz="0.3 0 0" rpy="0 0 0"/>
     <parent link="robot4_flange"/>
     <child link="robot4_end_effactor"/>
   </joint>

@@ -83,6 +83,12 @@ ros2 launch sa3_motion sa3_motion_sequence_yaml.launch.py \
   sequence_config:=./src/src/sa3_motion/config/ms_sa3_pp.yaml
 ```
 
+**To run any specific node**
+```bash
+ros2 run sa3_motion <node_name>   --ros-args   --params-file ~/ros_ws/sa3_j/src/src/sa3_motion/config/move_grouph.yaml
+```
+
+
 For Jazzy, source the corresponding Jazzy setup instead.
 
 **Configuration:** `src/src/sa3_motion/config/ms_sa3_pp.yaml` defines the sequence to execute up to and including the SA3 pick-and-place operation. The sequence order, executable parameters, execution mode, retries, and failure handling are controlled by this YAML file.

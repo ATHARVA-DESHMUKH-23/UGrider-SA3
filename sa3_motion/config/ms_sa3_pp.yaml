@@ -11,13 +11,13 @@ motion_sequence:
         - name: robot3_motion
           parameters:
             pick_frame: inventory_3a_4a_frame
-            place_frame: place_frame_10
+            place_frame: place_frame_10_l
             object_id: rebar_3c
 
         - name: robot4_motion
           parameters:
             pick_frame: inventory_3a_4a_frame_2
-            place_frame: place_frame_10_l
+            place_frame: place_frame_10
             object_id: rebar_4c
 
         - attach_tool

@@ -220,7 +220,7 @@ struct Ctx
   rclcpp_action::Client<sa3_motion::FJT>::SharedPtr fjt;
 
   StepInfo cur;
-  double pick_x_offset = 0.0;
+  std::array<double, 3> pick_offset = {0.0, 0.0, 0.0};
   std::vector<Failure> failures;
 };
 
@@ -433,7 +433,9 @@ bool pickPlace(Ctx & c)
     return false;
   }
 
-  pick.position.x += c.pick_x_offset;
+  pick.position.x += c.pick_offset[0];
+  pick.position.y += c.pick_offset[1];
+  pick.position.z += c.pick_offset[2];
 
   const auto pick_approach = offsetWorld(pick, kApproachOffset);
   const auto place_approach = offsetWorld(place, kApproachOffset);
@@ -572,44 +574,69 @@ bool pickPlace(Ctx & c)
 }
 
 // ---------------------------------------------------------------------------
-// Job table: one rebar per place, same order
+// Explicit pick/place pair input from ROS 2 YAML parameters.
+// Each entry: pick_frame,place_frame,rebar_id,pick_offset_x,pick_offset_y,pick_offset_z
+// Offsets are applied to the pick pose in the WORLD frame, in metres.
+// The place pose is taken directly from its TF frame.
 // ---------------------------------------------------------------------------
-struct Job
+struct PairInput
 {
   std::string pick;
-  std::vector<std::string> places;
-  std::vector<std::string> rebars;
-  double pick_x_increment = 0.0;
+  std::string place;
+  std::string rebar;
+  std::array<double, 3> pick_offset = {0.0, 0.0, 0.0};
 };
 
-const std::vector<Job> kJobs = {
-  {"6pf",
-    {"6_placef_r"},
-    {"rebar_6"},
-    0.0},
+std::string trim(const std::string & value)
+{
+  const auto first = value.find_first_not_of(" \t\r\n");
+  if (first == std::string::npos) { return ""; }
+  const auto last = value.find_last_not_of(" \t\r\n");
+  return value.substr(first, last - first + 1);
+}
 
-  {"13_1pf",
-    {"13_placef1_r", "13_placef2_r"},
-    {"rebar_13_1_R", "rebar_13_2_R"},
-    0.118},
+bool parsePairInput(const std::string & spec, PairInput & result, std::string & error)
+{
+  std::vector<std::string> fields;
+  std::stringstream stream(spec);
+  std::string field;
+  while (std::getline(stream, field, ',')) { fields.push_back(trim(field)); }
 
-  {"13_2pf",
-    {"13_placef3_r"},
-    {"rebar_13_3_R"},
-    0.0},
-
-  {"14_4pf",
-    {"14_placef4_r", "14_placef3_r", "14_placef2_r", "14_placef1_r"},
-    {"rebar_14_4_R", "rebar_14_3_R", "rebar_14_2_R", "rebar_14_1_R"},
-    0.112},
-};
+  if (fields.size() != 6) {
+    error = "expected 6 comma-separated fields: pick_frame,place_frame,rebar_id,offset_x,offset_y,offset_z";
+    return false;
+  }
+  if (fields[0].empty() || fields[1].empty() || fields[2].empty()) {
+    error = "pick_frame, place_frame, and rebar_id must not be empty";
+    return false;
+  }
+  std::array<double, 3> offsets{};
+  for (std::size_t i = 0; i < 3; ++i) {
+    try {
+      std::size_t parsed_chars = 0;
+      offsets[i] = std::stod(fields[i + 3], &parsed_chars);
+      if (parsed_chars != fields[i + 3].size() || !std::isfinite(offsets[i])) {
+        error = "offset values must be finite numbers";
+        return false;
+      }
+    } catch (const std::exception &) {
+      error = "invalid numeric offset: '" + fields[i + 3] + "'";
+      return false;
+    }
+  }
+  result.pick = fields[0];
+  result.place = fields[1];
+  result.rebar = fields[2];
+  result.pick_offset = offsets;
+  return true;
+}
 
 enum class PairStatus { kOk, kFailed, kNotRun };
 
 struct PairResult
 {
   std::string pick, place, rebar;
-  double pick_x_offset = 0.0;
+  std::array<double, 3> pick_offset = {0.0, 0.0, 0.0};
   PairStatus status = PairStatus::kNotRun;
   Failure failure;
 };
@@ -706,23 +733,46 @@ int main(int argc, char ** argv)
         ctx.scene = &scene_objects;
         ctx.fjt = fjt;
 
+        // Use the same runtime-configurable parameter format as robot1_motion.
+        // A task YAML passed through --params-file overrides these defaults.
+        const std::vector<std::string> default_pair_specs = {
+          "6pf,6_placef_r,rebar_6,0.0,0.0,0.0",
+          "13_1pf,13_placef1_r,rebar_13_1_R,0.0,0.0,0.0",
+          "13_1pf,13_placef2_r,rebar_13_2_R,0.118,0.0,0.0",
+          "13_2pf,13_placef3_r,rebar_13_3_R,0.0,0.0,0.0",
+          "14_4pf,14_placef4_r,rebar_14_1_R,0.0,0.0,0.0",
+          "14_4pf,14_placef3_r,rebar_14_2_R,0.112,0.0,0.0",
+          "14_4pf,14_placef2_r,rebar_14_3_R,0.224,0.0,0.0",
+          "14_4pf,14_placef1_r,rebar_14_4_R,0.336,0.0,0.0"
+        };
+        if (!node->has_parameter("pick_place_pairs")) {
+          node->declare_parameter<std::vector<std::string>>("pick_place_pairs", default_pair_specs);
+        }
+        std::vector<std::string> pair_specs;
+        if (!node->get_parameter("pick_place_pairs", pair_specs) || pair_specs.empty()) {
+          RCLCPP_ERROR(node->get_logger(),
+            "Parameter 'pick_place_pairs' is empty or unavailable. Provide entries in task.yaml.");
+          return false;
+        }
+
         std::vector<PairResult> results;
-        for (const auto & job : kJobs) {
-          if (job.rebars.size() != job.places.size()) {
-            RCLCPP_ERROR(
-              node->get_logger(), "Job '%s': %zu places but %zu rebars.",
-              job.pick.c_str(), job.places.size(), job.rebars.size());
+        results.reserve(pair_specs.size());
+        for (std::size_t i = 0; i < pair_specs.size(); ++i) {
+          PairInput input;
+          std::string parse_error;
+          if (!parsePairInput(pair_specs[i], input, parse_error)) {
+            RCLCPP_ERROR(node->get_logger(), "Invalid pick_place_pairs entry %zu ('%s'): %s",
+              i + 1, pair_specs[i].c_str(), parse_error.c_str());
             return false;
           }
-          for (size_t j = 0; j < job.places.size(); ++j) {
-            PairResult r;
-            r.pick = job.pick;
-            r.place = job.places[j];
-            r.rebar = job.rebars[j];
-            r.pick_x_offset = static_cast<double>(j) * job.pick_x_increment;
-            results.push_back(r);
-          }
+          PairResult r;
+          r.pick = input.pick;
+          r.place = input.place;
+          r.rebar = input.rebar;
+          r.pick_offset = input.pick_offset;
+          results.push_back(std::move(r));
         }
+
         const int total = static_cast<int>(results.size());
 
         bool stop = false;
@@ -734,7 +784,7 @@ int main(int argc, char ** argv)
           ctx.cur.pick = r.pick;
           ctx.cur.place = r.place;
           ctx.cur.rebar = r.rebar;
-          ctx.pick_x_offset = r.pick_x_offset;
+          ctx.pick_offset = r.pick_offset;
 
           const size_t failures_before = ctx.failures.size();
           if (pickPlace(ctx)) {

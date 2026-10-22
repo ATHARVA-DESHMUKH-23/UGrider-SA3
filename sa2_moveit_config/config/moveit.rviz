@@ -3,7 +3,8 @@ Panels:
     Help Height: 70
     Name: Displays
     Property Tree Widget:
-      Expanded: ~
+      Expanded:
+        - /TF1
       Splitter Ratio: 0.5
     Tree Height: 795
   - Class: rviz_common/Help
@@ -52,6 +53,21 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
+        gantry_carriage_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        gantry_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        gantry_part_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
         robot1_J1_link:
           Alpha: 1
           Show Axes: false
@@ -232,26 +248,16 @@ Visualization Manager:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        robot3_gripper_base:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         robot3_gripper_mount:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        robot3_link7:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        robot3_link8:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         robot3_pedestal:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot3_sa3_grpr01:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -308,26 +314,16 @@ Visualization Manager:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        robot4_gripper_base:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         robot4_gripper_mount:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        robot4_link7:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        robot4_link8:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         robot4_pedestal:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot4_sa3_grpr01_r:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -457,17 +453,45 @@ Visualization Manager:
           Value: true
         13_placef1_l:
           Value: true
+        13_placef1_l_t1:
+          Value: true
+        13_placef1_l_t2:
+          Value: true
         13_placef1_r:
+          Value: true
+        13_placef1_r_t1:
+          Value: true
+        13_placef1_r_t2:
           Value: true
         13_placef2_l:
           Value: true
+        13_placef2_l_t1:
+          Value: true
+        13_placef2_l_t2:
+          Value: true
         13_placef2_r:
+          Value: true
+        13_placef2_r_t1:
+          Value: true
+        13_placef2_r_t2:
           Value: true
         13_placef3_l:
           Value: true
+        13_placef3_l_t1:
+          Value: true
+        13_placef3_l_t2:
+          Value: true
         13_placef3_r:
           Value: true
+        13_placef3_r_t1:
+          Value: true
+        13_placef3_r_t2:
+          Value: true
         13_placef4_l:
+          Value: true
+        13_placef4_l_t1:
+          Value: true
+        13_placef4_l_t2:
           Value: true
         13pf:
           Value: true
@@ -491,19 +515,51 @@ Visualization Manager:
           Value: true
         14_placef1_l:
           Value: true
+        14_placef1_l_t1:
+          Value: true
+        14_placef1_l_t2:
+          Value: true
         14_placef1_r:
+          Value: true
+        14_placef1_r_t1:
+          Value: true
+        14_placef1_r_t2:
           Value: true
         14_placef2_l:
           Value: true
+        14_placef2_l_t1:
+          Value: true
+        14_placef2_l_t2:
+          Value: true
         14_placef2_r:
+          Value: true
+        14_placef2_r_t1:
+          Value: true
+        14_placef2_r_t2:
           Value: true
         14_placef3_l:
           Value: true
+        14_placef3_l_t1:
+          Value: true
+        14_placef3_l_t2:
+          Value: true
         14_placef3_r:
+          Value: true
+        14_placef3_r_t1:
+          Value: true
+        14_placef3_r_t2:
           Value: true
         14_placef4_l:
           Value: true
+        14_placef4_l_t1:
+          Value: true
+        14_placef4_l_t2:
+          Value: true
         14_placef4_r:
+          Value: true
+        14_placef4_r_t1:
+          Value: true
+        14_placef4_r_t2:
           Value: true
         14pf:
           Value: true
@@ -519,17 +575,39 @@ Visualization Manager:
           Value: true
         5_placef_l:
           Value: true
+        5_placef_l_t1:
+          Value: true
+        5_placef_l_t2:
+          Value: true
+        5_placef_l_t3:
+          Value: true
         5a:
           Value: true
         5pf:
           Value: true
         6_placef_r:
           Value: true
+        6_placef_r_t1:
+          Value: true
+        6_placef_r_t2:
+          Value: true
+        6_placef_r_t3:
+          Value: true
         6a:
           Value: true
         6pf:
           Value: true
         All Enabled: true
+        bm_pfl:
+          Value: true
+        bm_pfr:
+          Value: true
+        gantry_carriage_link:
+          Value: true
+        gantry_link:
+          Value: true
+        gantry_part_link:
+          Value: true
         inventory_3a_4a:
           Value: true
         inventory_3a_4a_2:
@@ -656,15 +734,11 @@ Visualization Manager:
           Value: true
         robot3_flange:
           Value: true
-        robot3_gripper_base:
-          Value: true
         robot3_gripper_mount:
           Value: true
-        robot3_link7:
-          Value: true
-        robot3_link8:
-          Value: true
         robot3_pedestal:
+          Value: true
+        robot3_sa3_grpr01:
           Value: true
         robot3_wbase:
           Value: true
@@ -688,19 +762,19 @@ Visualization Manager:
           Value: true
         robot4_flange:
           Value: true
-        robot4_gripper_base:
-          Value: true
         robot4_gripper_mount:
           Value: true
-        robot4_link7:
-          Value: true
-        robot4_link8:
-          Value: true
         robot4_pedestal:
+          Value: true
+        robot4_sa3_grpr01_r:
           Value: true
         robot4_wbase:
           Value: true
         sa3_main_jig:
+          Value: true
+        sa3_pick_point:
+          Value: true
+        sa3_place:
           Value: true
         web_ring:
           Value: true
@@ -710,18 +784,21 @@ Visualization Manager:
           Value: true
       Marker Scale: 1
       Name: TF
-      Show Arrows: true
+      Show Arrows: false
       Show Axes: true
       Show Names: false
       Tree:
         world:
+          gantry_link:
+            gantry_carriage_link:
+              gantry_part_link:
+                {}
           inventory_3a_4a:
-            3c:
-              {}
             3d:
               {}
             inventory_3a_4a_frame:
-              {}
+              3c:
+                {}
           inventory_3a_4a_2:
             4c:
               {}
@@ -731,40 +808,99 @@ Visualization Manager:
               {}
           jig_clamp:
             13_placef1_l:
-              {}
+              13_placef1_l_t1:
+                {}
+              13_placef1_l_t2:
+                {}
             13_placef1_r:
-              {}
+              13_placef1_r_t1:
+                {}
+              13_placef1_r_t2:
+                {}
             13_placef2_l:
-              {}
+              13_placef2_l_t1:
+                {}
+              13_placef2_l_t2:
+                {}
             13_placef2_r:
-              {}
+              13_placef2_r_t1:
+                {}
+              13_placef2_r_t2:
+                {}
             13_placef3_l:
-              {}
+              13_placef3_l_t1:
+                {}
+              13_placef3_l_t2:
+                {}
             13_placef3_r:
-              {}
+              13_placef3_r_t1:
+                {}
+              13_placef3_r_t2:
+                {}
             13_placef4_l:
-              {}
+              13_placef4_l_t1:
+                {}
+              13_placef4_l_t2:
+                {}
             14_placef1_l:
-              {}
+              14_placef1_l_t1:
+                {}
+              14_placef1_l_t2:
+                {}
             14_placef1_r:
-              {}
+              14_placef1_r_t1:
+                {}
+              14_placef1_r_t2:
+                {}
             14_placef2_l:
-              {}
+              14_placef2_l_t1:
+                {}
+              14_placef2_l_t2:
+                {}
             14_placef2_r:
-              {}
+              14_placef2_r_t1:
+                {}
+              14_placef2_r_t2:
+                {}
             14_placef3_l:
-              {}
+              14_placef3_l_t1:
+                {}
+              14_placef3_l_t2:
+                {}
             14_placef3_r:
-              {}
+              14_placef3_r_t1:
+                {}
+              14_placef3_r_t2:
+                {}
             14_placef4_l:
-              {}
+              14_placef4_l_t1:
+                {}
+              14_placef4_l_t2:
+                {}
             14_placef4_r:
-              {}
+              14_placef4_r_t1:
+                {}
+              14_placef4_r_t2:
+                {}
             1A:
               {}
             5_placef_l:
-              {}
+              5_placef_l_t1:
+                {}
+              5_placef_l_t2:
+                {}
+              5_placef_l_t3:
+                {}
             6_placef_r:
+              6_placef_r_t1:
+                {}
+              6_placef_r_t2:
+                {}
+              6_placef_r_t3:
+                {}
+            bm_pfl:
+              {}
+            bm_pfr:
               {}
             place_frame_10:
               {}
@@ -844,11 +980,8 @@ Visualization Manager:
                             robot3_fanuc_flange:
                               {}
                             robot3_gripper_mount:
-                              robot3_gripper_base:
-                                robot3_link7:
-                                  {}
-                                robot3_link8:
-                                  {}
+                              robot3_sa3_grpr01:
+                                {}
               robot3_wbase:
                 {}
           robot4_pedestal:
@@ -871,61 +1004,57 @@ Visualization Manager:
                             robot4_fanuc_flange:
                               {}
                             robot4_gripper_mount:
-                              robot4_gripper_base:
-                                robot4_link7:
-                                  {}
-                                robot4_link8:
-                                  {}
+                              robot4_sa3_grpr01_r:
+                                {}
               robot4_wbase:
                 {}
           sa3_main_jig:
             {}
+          sa3_pick_point:
+            {}
+          sa3_place:
+            {}
           web_ring:
-            13_1:
-              {}
-            13_2:
-              {}
-            13_3:
-              {}
-            13_4:
-              {}
             13pf:
-              {}
-            14_1:
-              {}
-            14_2:
-              {}
-            14_3:
-              {}
-            14_4:
-              {}
+              13_1:
+                {}
+              13_2:
+                {}
+              13_3:
+                {}
+              13_4:
+                {}
             14pf:
-              {}
+              14_1:
+                {}
+              14_2:
+                {}
+              14_3:
+                {}
+              14_4:
+                {}
             5a:
               {}
             5pf:
               {}
           web_ring_2:
-            13_1_R:
-              {}
             13_1pf:
-              {}
-            13_2_R:
-              {}
+              13_1_R:
+                {}
+              13_2_R:
+                {}
             13_2pf:
-              {}
-            13_3_R:
-              {}
-            14_1_R:
-              {}
-            14_2_R:
-              {}
-            14_3_R:
-              {}
-            14_4_R:
-              {}
+              13_3_R:
+                {}
             14_4pf:
-              {}
+              14_1_R:
+                {}
+              14_2_R:
+                {}
+              14_3_R:
+                {}
+              14_4_R:
+                {}
             6a:
               {}
             6pf:
@@ -974,25 +1103,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 4.776302337646484
+      Distance: 9.536624908447266
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 6.3725666999816895
-        Y: 2.8357088565826416
-        Z: 2.391957998275757
+        X: 3.3687407970428467
+        Y: 1.3032116889953613
+        Z: 1.6132773160934448
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.8749987483024597
+      Pitch: 0.5999990701675415
       Target Frame: world
       Value: Orbit (rviz_default_plugins)
-      Yaw: 5.310166358947754
+      Yaw: 4.710167407989502
     Saved: ~
 Window Geometry:
   Displays:

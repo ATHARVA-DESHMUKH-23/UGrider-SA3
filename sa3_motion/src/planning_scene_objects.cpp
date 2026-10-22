@@ -450,7 +450,6 @@ bool PlanningSceneObjects::addRebarObjects()
 {
   // Spawn everything from workcell.yaml: rebars first, then grippers.
   return addExtraRebars()
-      && addMovableRebars()
       && addExtraGrippers();
 }
 

@@ -13,7 +13,7 @@ from launch_ros.actions import Node
 
 
 def vector_to_string(values):
-    """Convert a YAML XYZ/RPY list into a space-separated Xacro argument."""
+    """Convert a YAML XYZ/RPY/scale list into a space-separated Xacro argument."""
     if len(values) != 3:
         raise ValueError(f"Expected 3 values, received: {values}")
     return " ".join(str(value) for value in values)
@@ -32,45 +32,48 @@ def generate_launch_description():
     hardware_mode_arg = DeclareLaunchArgument(
         "hardware_mode",
         default_value="mock",
-        description="Hardware mode: mock, gazebo, or fanuc"
+        description="Hardware mode: mock, gazebo, or fanuc",
     )
 
     # =========================================================
-    # LOAD ENVIRONMENT COORDINATES FROM YAML
+    # LOAD WORKCELL YAML
     # =========================================================
 
-    workcell_yaml = os.path.join(
-        pkg,
-        "config",
-        "workcell.yaml"
-    )
+    workcell_yaml = os.path.join(pkg, "config", "workcell.yaml")
 
     with open(workcell_yaml, "r") as file:
         workcell_config = yaml.safe_load(file)
 
     environment = workcell_config["environment"]
+    robot_pedestals = workcell_config["robot_pedestals"]
 
     # =========================================================
     # ROBOT XACRO
     # =========================================================
 
-    
-    # =========================================================
-    # ROBOT XACRO - PEDESTAL POSITIONS FROM YAML
-    # =========================================================
+    robot_xacro = os.path.join(pkg, "urdf", "robot.urdf.xacro")
 
-    robot_xacro = os.path.join(
-        pkg,
-        "urdf",
-        "robot.urdf.xacro"
-    )
+    gantry = environment.get("gantry")
 
-    # Read pedestal configurations
-    robot_pedestals = workcell_config["robot_pedestals"]
+    if gantry is None:
+        raise KeyError(
+            f"Missing 'environment.gantry' configuration in {workcell_yaml}"
+        )
 
+    for key in ("xyz", "rpy", "scale"):
+        if key not in gantry:
+            raise KeyError(
+                f"Missing 'environment.gantry.{key}' in {workcell_yaml}"
+            )
+
+    # Pass the selected hardware mode to Xacro instead of hardcoding mock.
     robot_mappings = {
-        "hardware_mode": "mock"
-    }
+    "hardware_mode": "mock",
+}
+
+    # ---------------------------------------------------------
+    # PEDESTAL MAPPINGS
+    # ---------------------------------------------------------
 
     pedestal_names = [
         "robot1_pedestal",
@@ -87,17 +90,20 @@ def generate_launch_description():
 
         pedestal = robot_pedestals[name]
 
-        robot_mappings[f"{name}_xyz"] = vector_to_string(
-            pedestal["xyz"]
-        )
+        robot_mappings[f"{name}_xyz"] = vector_to_string(pedestal["xyz"])
+        robot_mappings[f"{name}_rpy"] = vector_to_string(pedestal["rpy"])
 
-        robot_mappings[f"{name}_rpy"] = vector_to_string(
-            pedestal["rpy"]
-        )
+    # ---------------------------------------------------------
+    # GANTRY MAPPINGS
+    # ---------------------------------------------------------
+
+    robot_mappings["gantry_xyz"] = vector_to_string(gantry["xyz"])
+    robot_mappings["gantry_rpy"] = vector_to_string(gantry["rpy"])
+    robot_mappings["gantry_scale"] = vector_to_string(gantry["scale"])
 
     robot_description = xacro.process_file(
         robot_xacro,
-        mappings=robot_mappings
+        mappings=robot_mappings,
     ).toxml()
 
     print("\nRobot pedestal positions loaded from YAML:")
@@ -108,18 +114,17 @@ def generate_launch_description():
             f"rpy={robot_pedestals[name]['rpy']}"
         )
 
+    print("\nGantry configuration loaded from YAML:")
+    print(f"  xyz={gantry['xyz']}")
+    print(f"  rpy={gantry['rpy']}")
+    print(f"  scale={gantry['scale']}")
 
     # =========================================================
     # ENVIRONMENT XACRO
     # =========================================================
 
-    env_xacro = os.path.join(
-        pkg,
-        "urdf",
-        "sa3_env.urdf.xacro"
-    )
+    env_xacro = os.path.join(pkg, "urdf", "sa3_env.urdf.xacro")
 
-    # Build Xacro mappings from the YAML environment section.
     env_mappings = {}
 
     environment_objects = [
@@ -134,23 +139,17 @@ def generate_launch_description():
     for name in environment_objects:
         if name not in environment:
             raise KeyError(
-                f"Missing environment object '{name}' "
-                f"in {workcell_yaml}"
+                f"Missing environment object '{name}' in {workcell_yaml}"
             )
 
         obj = environment[name]
 
-        env_mappings[f"{name}_xyz"] = vector_to_string(
-            obj["xyz"]
-        )
-
-        env_mappings[f"{name}_rpy"] = vector_to_string(
-            obj["rpy"]
-        )
+        env_mappings[f"{name}_xyz"] = vector_to_string(obj["xyz"])
+        env_mappings[f"{name}_rpy"] = vector_to_string(obj["rpy"])
 
     env_description = xacro.process_file(
         env_xacro,
-        mappings=env_mappings
+        mappings=env_mappings,
     ).toxml()
 
     print("\nEnvironment Xacro parameters loaded from YAML:")
@@ -162,24 +161,20 @@ def generate_launch_description():
         )
 
     # =========================================================
-    # ROS2 CONTROLLERS YAML
+    # ROS 2 CONTROLLERS YAML
     # =========================================================
 
     controllers_yaml = os.path.join(
         pkg,
         "config",
-        "ros2_controller.yaml"
+        "ros2_controller.yaml",
     )
 
     # =========================================================
     # RVIZ CONFIGURATION
     # =========================================================
 
-    rviz = os.path.join(
-        pkg,
-        "rviz",
-        "sa2_description.rviz"
-    )
+    rviz = os.path.join(pkg, "rviz", "sa2_description.rviz")
 
     # =========================================================
     # ROBOT STATE PUBLISHER
@@ -191,9 +186,7 @@ def generate_launch_description():
         name="robot_state_publisher",
         output="screen",
         parameters=[
-            {
-                "robot_description": robot_description
-            }
+            {"robot_description": robot_description},
         ],
     )
 
@@ -208,14 +201,12 @@ def generate_launch_description():
         namespace="environment",
         output="screen",
         parameters=[
-            {
-                "robot_description": env_description
-            }
+            {"robot_description": env_description},
         ],
     )
 
     # =========================================================
-    # ROS2 CONTROL NODE
+    # ROS 2 CONTROL NODE
     # =========================================================
 
     ros2_control_node = Node(
@@ -223,10 +214,8 @@ def generate_launch_description():
         executable="ros2_control_node",
         output="screen",
         parameters=[
-            {
-                "robot_description": robot_description
-            },
-            controllers_yaml
+            {"robot_description": robot_description},
+            controllers_yaml,
         ],
     )
 
@@ -246,7 +235,7 @@ def generate_launch_description():
     )
 
     # =========================================================
-    # ROBOT CONTROLLERS
+    # ROBOT 1 CONTROLLER
     # =========================================================
 
     robot1_controller = Node(
@@ -260,6 +249,10 @@ def generate_launch_description():
         output="screen",
     )
 
+    # =========================================================
+    # ROBOT 2 CONTROLLER
+    # =========================================================
+
     robot2_controller = Node(
         package="controller_manager",
         executable="spawner",
@@ -271,6 +264,10 @@ def generate_launch_description():
         output="screen",
     )
 
+    # =========================================================
+    # ROBOT 3 CONTROLLER
+    # =========================================================
+
     robot3_controller = Node(
         package="controller_manager",
         executable="spawner",
@@ -281,6 +278,10 @@ def generate_launch_description():
         ],
         output="screen",
     )
+
+    # =========================================================
+    # ROBOT 4 CONTROLLER
+    # =========================================================
 
     robot4_controller = Node(
         package="controller_manager",
@@ -294,17 +295,29 @@ def generate_launch_description():
     )
 
     # =========================================================
-    # RVIZ2
+    # GANTRY CONTROLLER
+    # =========================================================
+
+    gantry_controller = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=[
+            "gantry_controller",
+            "--controller-manager",
+            "/controller_manager",
+        ],
+        output="screen",
+    )
+
+    # =========================================================
+    # RVIZ 2
     # =========================================================
 
     rviz_node = Node(
         package="rviz2",
         executable="rviz2",
         output="screen",
-        arguments=[
-            "-d",
-            rviz
-        ],
+        arguments=["-d", rviz],
     )
 
     # =========================================================
@@ -324,6 +337,8 @@ def generate_launch_description():
         robot2_controller,
         robot3_controller,
         robot4_controller,
+        gantry_controller,
 
+        # Uncomment to launch RViz automatically.
         # rviz_node,
     ])

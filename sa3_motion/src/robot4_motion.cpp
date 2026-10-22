@@ -5,12 +5,23 @@
 //   2. Allow collision between rebar_4c and Robot 4 touch links.
 //   3. Move to pick pose.
 //   4. Attach rebar_4c to robot4_end_effactor.
-//   5. Retract with the rebar attached.
+//   5. Retract with the rebar attached (rebar/inventory collision allowed
+//      from attach until this retract completes).
 //   6. Follow the circular arc through three TF frames.
 //   7. Move to the place approach.
 //   8. Move to place pose.
 //   9. Detach rebar_4c into the world at the place frame.
 //  10. Retract and restore collision checking.
+//
+// Parameters (all optional):
+//   pick_frame   : TF frame of the pick pose
+//   pick_offset  : [x, y, z] world-frame offset from pick_frame to the REAL pick pose
+//   place_frame  : TF frame of the place pose
+//   place_offset : [x, y, z] world-frame offset from place_frame to the REAL place pose
+//   object_id    : planning-scene object to carry
+//
+// The approach/retract offsets (kPickOffset / kPlaceOffset) are applied on top
+// of the already-shifted pick/place poses.
 //
 // Trajectory execution is sent directly to Robot 4's controller.
 // The Planning Scene is still managed by MoveIt.
@@ -76,20 +87,22 @@ constexpr char kControllerAction[] =
 
 // The ID must match the key in workcell.yaml, not the mesh filename.
 constexpr char kDefaultPickFrame[] = "inventory_3a_4a_frame_2";
-constexpr char kDefaultPlaceFrame[] = "place_frame_10_l";
+constexpr char kDefaultPlaceFrame[] = "place_frame_10";
 constexpr char kDefaultObjectId[] = "rebar_4c";
 
 // Planning-scene link name for the placement fixture.
 constexpr char kJigClampName[] = "jig_clamp";
 
-constexpr char kJ6Link[] = "robot4_J6_link";
+// Inventory collision object the picked rebar starts in. Collision between
+// the ATTACHED rebar and this object is allowed from attach until the
+// pick retract is complete.
+constexpr char kInventoryName[] = "inventory_3a_4a_2";
 
-// Named state from the SRDF for this arm group (robot3_arm / robot4_arm).
-constexpr char kHomeState[] = "home";
+constexpr char kJ6Link[] = "robot4_J6_link";
 
 
 // ===========================================================================
-// Motion offsets (world frame)
+// Approach / retract offsets (world frame), relative to the pick/place pose
 // ===========================================================================
 
 constexpr std::array<double, 3> kPickOffset = {
@@ -117,6 +130,8 @@ constexpr double kMoveLVelocity = 0.20;
 constexpr double kMoveLAcceleration = 0.10;
 
 constexpr int kStepsPerPair = 6;
+
+constexpr char kHomeState[] = "home";
 
 
 // ===========================================================================
@@ -345,11 +360,16 @@ struct Ctx
 
   rclcpp_action::Client<sa3_motion::FJT>::SharedPtr fjt;
 
-  // New: shared SA3 Planning Scene helper.
+  // Shared SA3 Planning Scene helper.
   PlanningSceneObjects * scene = nullptr;
 
   std::string link = kPlanningLink;
   std::string object_id = kDefaultObjectId;
+
+  // World-frame offsets from the TF pick/place frames to the real
+  // pick/place poses (set from the pick_offset / place_offset parameters).
+  std::array<double, 3> pick_offset = {0.0, 0.0, 0.0};
+  std::array<double, 3> place_offset = {0.0, 0.0, 0.0};
 
   StepInfo cur;
 
@@ -686,6 +706,7 @@ bool movel(
   return true;
 }
 
+
 // ===========================================================================
 // Go to the named home state: plan with OMPL, execute through the controller
 // ===========================================================================
@@ -778,8 +799,9 @@ bool goHome(Ctx & ctx)
 }
 
 // ===========================================================================
-// Visit a list of arc poses in order using MoveL
+// Visit a list of arc poses in order using MoveL (MoveJ fallback)
 // ===========================================================================
+
 
 bool followPosesJ(
   Ctx & ctx,
@@ -849,7 +871,7 @@ bool followPosesJ(
 
 
 // ===========================================================================
-// ROBOT 3 PICK AND PLACE WITH REBAR ATTACHMENT
+// ROBOT 4 PICK AND PLACE WITH REBAR ATTACHMENT
 // ===========================================================================
 
 bool pickPlace(
@@ -880,12 +902,18 @@ bool pickPlace(
 
   RCLCPP_INFO(logger, "==============================================");
   RCLCPP_INFO(logger, "Robot 4 Pick & Place with rebar attachment");
-  RCLCPP_INFO(logger, "Rebar ID   : %s", ctx.object_id);
-  RCLCPP_INFO(logger, "Pick frame : %s", pick_frame.c_str());
-  RCLCPP_INFO(logger, "Place frame: %s", place_frame.c_str());
+  RCLCPP_INFO(logger, "Rebar ID    : %s", ctx.object_id.c_str());
+  RCLCPP_INFO(logger, "Pick frame  : %s", pick_frame.c_str());
+  RCLCPP_INFO(
+    logger, "Pick offset : [%.3f, %.3f, %.3f]",
+    ctx.pick_offset[0], ctx.pick_offset[1], ctx.pick_offset[2]);
+  RCLCPP_INFO(logger, "Place frame : %s", place_frame.c_str());
+  RCLCPP_INFO(
+    logger, "Place offset: [%.3f, %.3f, %.3f]",
+    ctx.place_offset[0], ctx.place_offset[1], ctx.place_offset[2]);
   RCLCPP_INFO(
     logger,
-    "Arc frames : %s, %s, %s (%d points)",
+    "Arc frames  : %s, %s, %s (%d points)",
     arc_frames[0].c_str(),
     arc_frames[1].c_str(),
     arc_frames[2].c_str(),
@@ -899,14 +927,18 @@ bool pickPlace(
   ctx.cur.step_idx = 0;
   ctx.cur.step = "frame lookup";
 
-  geometry_msgs::msg::Pose pick;
-  geometry_msgs::msg::Pose place;
+  geometry_msgs::msg::Pose pick_frame_pose;
+  geometry_msgs::msg::Pose place_frame_pose;
 
-  if (!lookupFramePose(ctx, pick_frame, pick) ||
-      !lookupFramePose(ctx, place_frame, place))
+  if (!lookupFramePose(ctx, pick_frame, pick_frame_pose) ||
+      !lookupFramePose(ctx, place_frame, place_frame_pose))
   {
     return false;
   }
+
+  // Actual pick/place poses = TF frame pose + user offset (world frame).
+  const auto pick = offsetWorld(pick_frame_pose, ctx.pick_offset);
+  const auto place = offsetWorld(place_frame_pose, ctx.place_offset);
 
   geometry_msgs::msg::Pose arc_a;
   geometry_msgs::msg::Pose arc_b;
@@ -935,8 +967,10 @@ bool pickPlace(
     "Generated %zu arc points through the three specified frames.",
     arc.size());
 
-  RCLCPP_INFO(logger, "Pick pose  : %s", poseStr(pick).c_str());
-  RCLCPP_INFO(logger, "Place pose : %s", poseStr(place).c_str());
+  RCLCPP_INFO(logger, "Pick frame pose  : %s", poseStr(pick_frame_pose).c_str());
+  RCLCPP_INFO(logger, "Place frame pose : %s", poseStr(place_frame_pose).c_str());
+  RCLCPP_INFO(logger, "Pick pose  (with offset): %s", poseStr(pick).c_str());
+  RCLCPP_INFO(logger, "Place pose (with offset): %s", poseStr(place).c_str());
 
   const auto pick_approach = offsetWorld(pick, kPickOffset);
   const auto place_approach = offsetWorld(place, kPlaceOffset);
@@ -956,7 +990,7 @@ bool pickPlace(
     RCLCPP_ERROR(
       logger,
       "Expected '%s' to be a world object before picking.",
-      ctx.object_id);
+      ctx.object_id.c_str());
     return false;
   }
 
@@ -990,7 +1024,7 @@ bool pickPlace(
     RCLCPP_ERROR(
       logger,
       "Failed to allow contact between '%s' and Robot 4's touch links.",
-      ctx.object_id);
+      ctx.object_id.c_str());
     return false;
   }
 
@@ -1017,14 +1051,14 @@ bool pickPlace(
   }
 
   // ----------------------------------------------------------
-  // STEP 4: Attach rebar_4c to the planning link.
+  // STEP 4: Attach the object to the planning link.
   //
   // MoveIt calculates the attached object's relative transform
   // from its world pose and the robot link pose. No mesh-origin
   // alignment to the TCP is performed here.
   // ----------------------------------------------------------
 
-  ctx.cur.step = "attach rebar_4c";
+  ctx.cur.step = "attach " + ctx.object_id;
 
   if (!ctx.scene->attachWorldObjectPreservingPose(
       *ctx.mg,
@@ -1035,7 +1069,7 @@ bool pickPlace(
     RCLCPP_ERROR(
       logger,
       "Failed to attach '%s' to '%s'. Stopping before retract.",
-      ctx.object_id,
+      ctx.object_id.c_str(),
       ctx.link.c_str());
 
     // If it remains in WORLD state, undo the temporary pair allowance.
@@ -1060,15 +1094,45 @@ bool pickPlace(
     RCLCPP_ERROR(
       logger,
       "Attachment state verification failed for '%s'.",
-      ctx.object_id);
+      ctx.object_id.c_str());
     return false;
   }
 
   RCLCPP_INFO(
     logger,
     "ATTACHED: %s now follows link '%s'.",
-    ctx.object_id,
+    ctx.object_id.c_str(),
     ctx.link.c_str());
+
+  // ----------------------------------------------------------
+  // Allow the attached rebar to touch the inventory it is being
+  // lifted out of. Done after attach so the attached body's ACM
+  // entry is the one that gets changed. Only this pair is allowed;
+  // robot-to-inventory collision checking stays enabled.
+  // ----------------------------------------------------------
+
+  ctx.cur.step = "allow rebar/inventory contact for pick retract";
+
+  if (!ctx.scene->setObjectCollisionsAllowed(
+      ctx.object_id,
+      {kInventoryName},
+      true))
+  {
+    RCLCPP_ERROR(
+      logger,
+      "Could not allow collision between '%s' and '%s'. "
+      "'%s' remains attached for recovery.",
+      ctx.object_id.c_str(),
+      kInventoryName,
+      ctx.object_id.c_str());
+    return false;
+  }
+
+  RCLCPP_INFO(
+    logger,
+    "Collision allowed: '%s' <-> '%s' until pick retract completes.",
+    ctx.object_id.c_str(),
+    kInventoryName);
 
   // ----------------------------------------------------------
   // STEP 5: Retract from pick with the rebar attached.
@@ -1080,10 +1144,34 @@ bool pickPlace(
   if (!movel(ctx, pick_approach)) {
     RCLCPP_ERROR(
       logger,
-      "Retract failed. '%s' remains attached for recovery.",
-      ctx.object_id);
+      "Retract failed. '%s' remains attached for recovery; "
+      "its inventory contact allowance stays enabled.",
+      ctx.object_id.c_str());
     return false;
   }
+
+  // Pick retract complete: restore normal rebar/inventory collision checking.
+  ctx.cur.step = "restore rebar/inventory collision checking";
+
+  if (!ctx.scene->setObjectCollisionsAllowed(
+      ctx.object_id,
+      {kInventoryName},
+      false))
+  {
+    RCLCPP_ERROR(
+      logger,
+      "Pick retract finished, but collision checking between '%s' and '%s' "
+      "could not be restored.",
+      ctx.object_id.c_str(),
+      kInventoryName);
+    return false;
+  }
+
+  RCLCPP_INFO(
+    logger,
+    "Collision restored: '%s' <-> '%s' checked again.",
+    ctx.object_id.c_str(),
+    kInventoryName);
 
   // ----------------------------------------------------------
   // STEPS 6...: Follow the circular arc with the rebar attached.
@@ -1097,15 +1185,14 @@ bool pickPlace(
       logger,
       "Arc motion failed even after MoveJ fallback. "
       "'%s' remains attached for recovery.",
-      ctx.object_id);
+      ctx.object_id.c_str());
     return false;
   }
-
   step += static_cast<int>(arc.size());
 
   // ----------------------------------------------------------
   // Allow the carried rebar to contact the jig clamp for placement.
-  // This changes only the rebar_4c <-> jig_clamp collision pair;
+  // This changes only the object <-> jig_clamp collision pair;
   // collisions between the robot links and jig_clamp stay enabled.
   // Keep this pair allowed after release because the rebar is placed
   // in/against the fixture. The helper updates the MoveIt ACM.
@@ -1121,7 +1208,7 @@ bool pickPlace(
     RCLCPP_ERROR(
       logger,
       "Could not allow collision between '%s' and '%s'; stopping before placement.",
-      ctx.object_id,
+      ctx.object_id.c_str(),
       kJigClampName);
     return false;
   }
@@ -1130,11 +1217,11 @@ bool pickPlace(
     logger,
     "Placement contact enabled: '%s' may contact '%s'. "
     "Robot-to-clamp collision checking remains enabled.",
-    ctx.object_id,
+    ctx.object_id.c_str(),
     kJigClampName);
 
   // ----------------------------------------------------------
-  // Move to the place approach while carrying 4C.
+  // Move to the place approach while carrying the object.
   // ----------------------------------------------------------
 
   ctx.cur.step_idx = ++step;
@@ -1144,12 +1231,12 @@ bool pickPlace(
     RCLCPP_ERROR(
       logger,
       "Place approach failed. '%s' remains attached.",
-      ctx.object_id);
+      ctx.object_id.c_str());
     return false;
   }
 
   // ----------------------------------------------------------
-  // MoveL to the actual place-frame target.
+  // MoveL to the actual place target (place frame + place_offset).
   // ----------------------------------------------------------
 
   ctx.cur.step_idx = ++step;
@@ -1159,7 +1246,7 @@ bool pickPlace(
     RCLCPP_ERROR(
       logger,
       "Place motion failed. '%s' remains attached.",
-      ctx.object_id);
+      ctx.object_id.c_str());
     return false;
   }
 
@@ -1171,7 +1258,7 @@ bool pickPlace(
   // It transfers attached -> WORLD in the Planning Scene.
   // ----------------------------------------------------------
 
-  ctx.cur.step = "detach rebar_4c";
+  ctx.cur.step = "detach " + ctx.object_id;
 
   if (!ctx.scene->detachObjectToWorldPreservingPose(
       *ctx.mg,
@@ -1180,7 +1267,7 @@ bool pickPlace(
     RCLCPP_ERROR(
       logger,
       "Detachment failed for '%s'. Check its current ownership.",
-      ctx.object_id);
+      ctx.object_id.c_str());
     return false;
   }
 
@@ -1188,14 +1275,14 @@ bool pickPlace(
     RCLCPP_ERROR(
       logger,
       "'%s' was not verified in the world after detachment.",
-      ctx.object_id);
+      ctx.object_id.c_str());
     return false;
   }
 
   RCLCPP_INFO(
     logger,
     "RELEASED: '%s' is now a world collision object.",
-    ctx.object_id);
+    ctx.object_id.c_str());
 
   // ----------------------------------------------------------
   // Retract while pair-specific contact allowance stays enabled.
@@ -1229,7 +1316,7 @@ bool pickPlace(
     return false;
   }
 
-    // ----------------------------------------------------------
+  // ----------------------------------------------------------
   // Final step: return the arm to its home state.
   // ----------------------------------------------------------
 
@@ -1245,9 +1332,35 @@ bool pickPlace(
 
   RCLCPP_INFO(logger, "==============================================");
   RCLCPP_INFO(logger, "Robot 4 pick/place completed successfully.");
-  RCLCPP_INFO(logger, "Rebar '%s' was placed and detached.", ctx.object_id);
+  RCLCPP_INFO(logger, "Rebar '%s' was placed and detached.", ctx.object_id.c_str());
   RCLCPP_INFO(logger, "==============================================");
 
+  return true;
+}
+
+// Declare (if needed) and read a 3-element double-array parameter.
+// Returns false if the parameter does not have exactly 3 values.
+bool readOffsetParam(
+  const rclcpp::Node::SharedPtr & node,
+  const std::string & name,
+  std::array<double, 3> & out)
+{
+  if (!node->has_parameter(name)) {
+    node->declare_parameter<std::vector<double>>(
+      name, std::vector<double>{0.0, 0.0, 0.0});
+  }
+
+  const auto values = node->get_parameter(name).as_double_array();
+
+  if (values.size() != 3) {
+    RCLCPP_ERROR(
+      node->get_logger(),
+      "Parameter '%s' must have exactly 3 values [x, y, z], got %zu.",
+      name.c_str(), values.size());
+    return false;
+  }
+
+  out = {values[0], values[1], values[2]};
   return true;
 }
 
@@ -1269,15 +1382,19 @@ int main(int argc, char ** argv)
     kNodeName,
     node_options);
 
-  // Keep these defaults so the node works with no custom parameters.
+  // These parameters can be overridden from a launch file, YAML file, or CLI.
+  // Preserve the original behavior when no overrides are supplied.
   if (!node->has_parameter("pick_frame")) {
-    node->declare_parameter<std::string>("pick_frame", kDefaultPickFrame);
+    node->declare_parameter<std::string>(
+      "pick_frame", kDefaultPickFrame);
   }
   if (!node->has_parameter("place_frame")) {
-    node->declare_parameter<std::string>("place_frame", kDefaultPlaceFrame);
+    node->declare_parameter<std::string>(
+      "place_frame", kDefaultPlaceFrame);
   }
   if (!node->has_parameter("object_id")) {
-    node->declare_parameter<std::string>("object_id", kDefaultObjectId);
+    node->declare_parameter<std::string>(
+      "object_id", kDefaultObjectId);
   }
 
   const std::string pick_frame =
@@ -1288,9 +1405,20 @@ int main(int argc, char ** argv)
     node->get_parameter("object_id").as_string();
 
   if (pick_frame.empty() || place_frame.empty() || object_id.empty()) {
-    RCLCPP_FATAL(
+    RCLCPP_ERROR(
       node->get_logger(),
-      "Parameters pick_frame, place_frame, and object_id must not be empty.");
+      "Parameters 'pick_frame', 'place_frame', and 'object_id' must not be empty.");
+    rclcpp::shutdown();
+    return 1;
+  }
+
+  // World-frame offsets from the TF frames to the real pick/place poses.
+  std::array<double, 3> pick_offset = {0.0, 0.0, 0.0};
+  std::array<double, 3> place_offset = {0.0, 0.0, 0.0};
+
+  if (!readOffsetParam(node, "pick_offset", pick_offset) ||
+      !readOffsetParam(node, "place_offset", place_offset))
+  {
     rclcpp::shutdown();
     return 1;
   }
@@ -1317,12 +1445,18 @@ int main(int argc, char ** argv)
     ok = [&]() -> bool {
       RCLCPP_INFO(node->get_logger(), "==============================================");
       RCLCPP_INFO(node->get_logger(), "Starting Robot 4 Pick & Place with configurable object");
+      RCLCPP_INFO(node->get_logger(), "Pick frame   : %s", pick_frame.c_str());
+      RCLCPP_INFO(
+        node->get_logger(), "Pick offset  : [%.3f, %.3f, %.3f]",
+        pick_offset[0], pick_offset[1], pick_offset[2]);
+      RCLCPP_INFO(node->get_logger(), "Place frame  : %s", place_frame.c_str());
+      RCLCPP_INFO(
+        node->get_logger(), "Place offset : [%.3f, %.3f, %.3f]",
+        place_offset[0], place_offset[1], place_offset[2]);
+      RCLCPP_INFO(node->get_logger(), "Object ID    : %s", object_id.c_str());
       RCLCPP_INFO(node->get_logger(), "Group        : %s", kGroup);
       RCLCPP_INFO(node->get_logger(), "Planning link: %s", kPlanningLink);
       RCLCPP_INFO(node->get_logger(), "Controller   : %s", kControllerAction);
-      RCLCPP_INFO(node->get_logger(), "Pick frame   : %s", pick_frame.c_str());
-      RCLCPP_INFO(node->get_logger(), "Place frame  : %s", place_frame.c_str());
-      RCLCPP_INFO(node->get_logger(), "Object ID    : %s", object_id.c_str());
       RCLCPP_INFO(node->get_logger(), "==============================================");
 
       rclcpp::sleep_for(2s);
@@ -1379,14 +1513,14 @@ int main(int argc, char ** argv)
       RCLCPP_INFO(
         node->get_logger(),
         "Waiting for the shared Planning Scene to finish initializing '%s'...",
-        object_id);
+        object_id.c_str());
 
       // Robot 3 is responsible for loading the shared four-rebar set from
       // workcell.yaml. Do not treat one successful query as readiness: on a
       // relaunch, stale objects can briefly remain in MoveIt's scene while
       // Robot 3 replaces/reloads the set. Require the expected scene to be
-      // present for several consecutive polls and verify 4C using the same
-      // helper that will be used for attachment/detachment.
+      // present for several consecutive polls and verify the object using the
+      // same helper that will be used for attachment/detachment.
       const std::vector<std::string> expected_rebar_ids = {
         "rebar_3c", "rebar_3d", "rebar_4c", "rebar_4d"};
 
@@ -1439,15 +1573,16 @@ int main(int argc, char ** argv)
         RCLCPP_ERROR(
           node->get_logger(),
           "Shared rebar Planning Scene did not become stable within 30 seconds. "
-          "Expected rebar_4c in WORLD state and all four rebar IDs present. "
-          "Check Robot 3's addExtraRebars() log before starting motion.");
+          "Expected '%s' in WORLD state and all four rebar IDs present. "
+          "Check Robot 3's addExtraRebars() log before starting motion.",
+          object_id.c_str());
         return false;
       }
 
       RCLCPP_INFO(
         node->get_logger(),
         "Shared Planning Scene is stable; '%s' is ready for Robot 4 pickup.",
-        object_id);
+        object_id.c_str());
 
       // --------------------------------------------------------
       // Context
@@ -1462,12 +1597,14 @@ int main(int argc, char ** argv)
       ctx.scene = &scene_objects;
       ctx.link = kPlanningLink;
       ctx.object_id = object_id;
+      ctx.pick_offset = pick_offset;
+      ctx.place_offset = place_offset;
 
       ctx.cur.pick = pick_frame;
       ctx.cur.place = place_frame;
 
       // --------------------------------------------------------
-      // Pick 4C, carry it on the existing arc, and place it.
+      // Pick the object, carry it on the existing arc, and place it.
       // --------------------------------------------------------
 
       const bool result = pickPlace(

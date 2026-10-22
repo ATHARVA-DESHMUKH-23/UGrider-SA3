@@ -17,6 +17,8 @@ controller_manager:
     robot4_arm_controller:
       type: joint_trajectory_controller/JointTrajectoryController
 
+    gantry_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
 
 robot1_arm_controller:
   ros__parameters:
@@ -85,6 +87,18 @@ robot4_arm_controller:
     command_interfaces:
       - position
 
+    state_interfaces:
+      - position
+      - velocity
+
+
+gantry_controller:
+  ros__parameters:
+    joints:
+      - gantry_slide_joint
+      - gantry_down_joint
+    command_interfaces:
+      - position
     state_interfaces:
       - position
       - velocity

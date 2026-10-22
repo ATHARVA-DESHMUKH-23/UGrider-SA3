@@ -416,6 +416,37 @@ ament_target_dependencies(robot3_sa3pp
   tf2_ros
 )
 
+# ============================================================
+# Gantry motion node
+# ============================================================
+
+add_executable(gantry_move
+  src/gantry_move.cpp
+)
+
+target_include_directories(gantry_move PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(gantry_move
+  rclcpp
+  rclcpp_action
+  control_msgs
+  trajectory_msgs
+  std_srvs
+  builtin_interfaces
+  moveit_ros_planning_interface
+  moveit_msgs
+  geometry_msgs
+  sensor_msgs
+  tf2
+  tf2_ros
+)
+
+target_link_libraries(gantry_move
+  planning_scene_objects
+)
 
 
 # ============================================================
@@ -463,6 +494,8 @@ install(
     planning_scene_objects
     attach_tool
     robot3_sa3pp
+
+    gantry_move
   DESTINATION lib/${PROJECT_NAME}
 )
 

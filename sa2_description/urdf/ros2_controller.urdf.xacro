@@ -112,6 +112,45 @@
     <xacro:controlled_joint name="robot4_J5"/>
     <xacro:controlled_joint name="robot4_J6"/>
 
+    <!-- ======================================================= -->
+    <!-- GANTRY : HORIZONTAL SLIDE                               -->
+    <!-- ======================================================= -->
+
+    <joint name="gantry_slide_joint">
+
+      <command_interface name="position">
+        <param name="min">0.0</param>
+        <param name="max">4.0</param>
+      </command_interface>
+
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+
+      <state_interface name="velocity"/>
+
+    </joint>
+
+    <!-- ======================================================= -->
+    <!-- GANTRY : VERTICAL DOWN MOVEMENT                         -->
+    <!-- ======================================================= -->
+
+    <joint name="gantry_down_joint">
+
+      <command_interface name="position">
+        <param name="min">0.0</param>
+        <param name="max">2.0</param>
+      </command_interface>
+
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+
+      <state_interface name="velocity"/>
+
+    </joint>
+
+
   </ros2_control>
 
 

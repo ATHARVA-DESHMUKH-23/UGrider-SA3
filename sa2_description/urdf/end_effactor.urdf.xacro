@@ -315,5 +315,137 @@
 
 </xacro:macro>
 
+<!-- ========================================================= -->
+  <!-- SA3 GRIPPER: SA3_GRPR01.STL                                -->
+  <!-- Mesh: sa2_description/meshes/ee/SA3_GRPR01.STL              -->
+  <!-- ========================================================= -->
+
+  <xacro:macro name="sa3_grpr01"
+    params="
+      parent_link
+      prefix:=''
+      xyz:='0 0 0'
+      rpy:='0 1.5708 0'
+      visual_xyz:='0 0 0'
+      visual_rpy:='0 -1.5708 0'
+      mesh_scale:='0.001 0.001 0.001'">
+
+    <link name="${prefix}sa3_grpr01">
+
+      <!-- Provisional inertial parameters.
+           Replace with measured/CAD-derived values for accurate dynamics. -->
+
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.45"/>
+        <inertia
+          ixx="0.00092934"
+          ixy="0.00000034"
+          ixz="-0.00000738"
+          iyy="0.00071447"
+          iyz="0.00000005"
+          izz="0.00039442"/>
+      </inertial>
+
+      <!-- Visual geometry -->
+
+      <visual>
+        <origin xyz="${visual_xyz}" rpy="${visual_rpy}"/>
+        <geometry>
+          <mesh
+            filename="package://sa2_description/meshes/ee/SA3_GRPR01.STL"/>
+        </geometry>
+        <material name="${prefix}sa3_grpr01_material">
+          <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1"/>
+        </material>
+      </visual>
+
+      <!-- Collision geometry -->
+
+      <collision>
+        <origin xyz="${visual_xyz}" rpy="${visual_rpy}"/>
+        <geometry>
+          <mesh
+            filename="package://sa2_description/meshes/ee/SA3_GRPR01.STL"/>
+        </geometry>
+      </collision>
+
+    </link>
+
+    <!-- Fixed mount to the selected robot link -->
+
+    <joint name="${prefix}sa3_grpr01_mount" type="fixed">
+      <origin xyz="${xyz}" rpy="${rpy}"/>
+      <parent link="${parent_link}"/>
+      <child link="${prefix}sa3_grpr01"/>
+    </joint>
+
+  </xacro:macro>
+  <!-- ========================================================= -->
+  <!-- SA3 GRIPPER R: SA3_GRPR01_r.STL                           -->
+  <!-- Intended for Robot 4 only                                 -->
+  <!-- ========================================================= -->
+
+  <xacro:macro name="sa3_grpr01_r"
+    params="
+      parent_link
+      prefix:=''
+      xyz:='0 0 0'
+      rpy:='0 1.5708 0'
+      visual_xyz:='0 0 0'
+      visual_rpy:='0 -1.5708 0'
+      mesh_scale:='0.001 0.001 0.001'">
+
+    <link name="${prefix}sa3_grpr01_r">
+
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.45"/>
+        <inertia
+          ixx="0.00092934"
+          ixy="0.00000034"
+          ixz="-0.00000738"
+          iyy="0.00071447"
+          iyz="0.00000005"
+          izz="0.00039442"/>
+      </inertial>
+
+      <!-- Visual geometry -->
+
+      <visual>
+        <origin xyz="${visual_xyz}" rpy="${visual_rpy}"/>
+        <geometry>
+          <mesh
+            filename="package://sa2_description/meshes/ee/SA3_GRPR01_r.stl"
+            scale="${mesh_scale}"/>
+        </geometry>
+        <material name="${prefix}sa3_grpr01_r_material">
+          <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1"/>
+        </material>
+      </visual>
+
+      <!-- Collision geometry -->
+
+      <collision>
+        <origin xyz="${visual_xyz}" rpy="${visual_rpy}"/>
+        <geometry>
+          <mesh
+            filename="package://sa2_description/meshes/ee/SA3_GRPR01_r.stl"
+            scale="${mesh_scale}"/>
+        </geometry>
+      </collision>
+
+    </link>
+
+    <!-- Fixed mount to the selected robot link -->
+
+    <joint name="${prefix}sa3_grpr01_r_mount" type="fixed">
+      <origin xyz="${xyz}" rpy="${rpy}"/>
+      <parent link="${parent_link}"/>
+      <child link="${prefix}sa3_grpr01_r"/>
+    </joint>
+
+  </xacro:macro>
+
 
 </robot>
