@@ -77,6 +77,13 @@ motion_sequence:
       retries: 1
       on_failure: abort
 
+    - name: "place rebar 1A with gantry and robot3"
+      executables:
+        - gantry_move
+      mode: sequential
+      retries: 1
+      on_failure: abort
+
     - name: "Pick/place final assembly"
       executables:
         - name: robot3_sa3pp
@@ -84,9 +91,31 @@ motion_sequence:
             pick_frame: sa3_pick_point
             place_frame: sa3_place
             object_id: rebar_1A
+            children:
+              - rebar_3c
+              - rebar_4c
+              - rebar_3d
+              - rebar_4d
+              - rebar_5a
+              - rebar_6
+              - rebar_13_1
+              - rebar_13_2
+              - rebar_13_3
+              - rebar_13_4
+              - rebar_14_1
+              - rebar_14_2
+              - rebar_14_3
+              - rebar_14_4
+              - rebar_13_1_R
+              - rebar_13_2_R
+              - rebar_13_3_R
+              - rebar_14_4_R
+              - rebar_14_3_R
+              - rebar_14_2_R
+              - rebar_14_1_R
       mode: sequential
       retries: 1
-      on_failure: final_home
+      on_failure: abort
 
     - name: "Final home all robots"
       executables:

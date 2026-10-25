@@ -49,6 +49,7 @@ constexpr char kReferenceFrame[] = "world";
 
 constexpr double kApproachZ = 0.50;
 constexpr double kPlanningTime = 15.0;
+constexpr int kMoveJPlanRetries = 3;  // Separate OMPL planning requests per MOVEJ
 
 constexpr double kMoveJVelocity = 0.30;
 constexpr double kMoveJAcceleration = 0.20;
@@ -407,13 +408,40 @@ private:
     }
 
     moveit::planning_interface::MoveGroupInterface::Plan plan;
-    const auto result = mg.plan(plan);
+    bool planned = false;
+    int last_error_code = 0;
+
+    // Retry the complete OMPL planning request up to three times. Each request
+    // still has up to 10 internal planning attempts via setNumPlanningAttempts().
+    for (int attempt = 1; attempt <= kMoveJPlanRetries; ++attempt) {
+      // Refresh the start state before each independent planning request.
+      mg.setStartStateToCurrentState();
+
+      const auto result = mg.plan(plan);
+      last_error_code = result.val;
+
+      if (result == moveit::core::MoveItErrorCode::SUCCESS) {
+        planned = true;
+        logI("[MOVEJ] planning succeeded for " + label + " on attempt " +
+          std::to_string(attempt) + "/" + std::to_string(kMoveJPlanRetries) + ".");
+        break;
+      }
+
+      logW("[MOVEJ] planning attempt " + std::to_string(attempt) + "/" +
+        std::to_string(kMoveJPlanRetries) + " failed for " + label +
+        " (code " + std::to_string(result.val) + ").");
+    }
+
     mg.clearPoseTargets();
 
-    if (result != moveit::core::MoveItErrorCode::SUCCESS) {
-      logE("[MOVEJ] planning failed for " + label + " (code " + std::to_string(result.val) + ").");
+    if (!planned) {
+      logE("[MOVEJ] planning failed for " + label + " after " +
+        std::to_string(kMoveJPlanRetries) + " attempts (last code " +
+        std::to_string(last_error_code) + ").");
       return false;
     }
+
+    // Execute only once, after a planning request succeeds.
     if (!executePlan(plan, "MOVEJ", label)) {return false;}
 
     logI("[MOVEJ] " + label + " complete.");

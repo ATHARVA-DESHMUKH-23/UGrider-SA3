@@ -6,55 +6,55 @@
 
 motion_sequence:
   stages:
-    - name: "Pick/place web flanges"
-      executables:
-        - name: robot3_motion
-          parameters:
-            pick_frame: inventory_3a_4a_frame
-            place_frame: place_frame_10_l
-            object_id: rebar_3c
+    # - name: "Pick/place web flanges"
+    #   executables:
+    #     - name: robot3_motion
+    #       parameters:
+    #         pick_frame: inventory_3a_4a_frame
+    #         place_frame: place_frame_10_l
+    #         object_id: rebar_3c
 
-        - name: robot4_motion
-          parameters:
-            pick_frame: inventory_3a_4a_frame_2
-            place_frame: place_frame_10
-            object_id: rebar_4c
+    #     - name: robot4_motion
+    #       parameters:
+    #         pick_frame: inventory_3a_4a_frame_2
+    #         place_frame: place_frame_10
+    #         object_id: rebar_4c
 
-        - attach_tool
-      mode: parallel
-      retries: 1
-      on_failure: abort
+    #     - attach_tool
+    #   mode: parallel
+    #   retries: 1
+    #   on_failure: abort
 
-    - name: "Pick/place shear clamps and rebars"
-      executables:
-        - robot1_motion
-        - robot2_motion
-      mode: parallel
-      retries: 1
-      on_failure: abort
+    # - name: "Pick/place shear clamps and rebars"
+    #   executables:
+    #     - robot1_motion
+    #     - robot2_motion
+    #   mode: parallel
+    #   retries: 1
+    #   on_failure: abort
 
-    - name: "home all robots"
-      executables:
-        - home_all_robots
-      mode: sequential
-      retries: 3
-      on_failure: continue
+    # - name: "home all robots"
+    #   executables:
+    #     - home_all_robots
+    #   mode: sequential
+    #   retries: 3
+    #   on_failure: continue
 
 
-    - name: "Change gripper"
-      executables:
-        - robot1_gripper_change
-      mode: sequential
-      retries: 3
-      on_failure: continue
+    # - name: "Change gripper"
+    #   executables:
+    #     - robot1_gripper_change
+    #   mode: sequential
+    #   retries: 3
+    #   on_failure: continue
 
-    - name: "Tie clamps with tying guns"
-      executables:
-        - robot1_tying_gun
-        - robot2_tying_gun
-      mode: parallel
-      retries: 1
-      on_failure: abort
+    # - name: "Tie clamps with tying guns"
+    #   executables:
+    #     - robot1_tying_gun
+    #     - robot2_tying_gun
+    #   mode: parallel
+    #   retries: 1
+    #   on_failure: abort
 
     - name: "Pick/place final assembly"
       executables:
@@ -63,13 +63,17 @@ motion_sequence:
             pick_frame: sa3_pick_point
             place_frame: sa3_place
             object_id: rebar_1A
+            children:
+              - rebar_3c
+              - rebar_4c
+            start_from_place_approach: true
       mode: sequential
       retries: 1
-      on_failure: final_home
+      on_failure: abort
 
-    - name: "Final home all robots"
-      executables:
-        - home_all_robots
-      mode: sequential
-      retries: 3
-      on_failure: final_home
+    # - name: "Final home all robots"
+    #   executables:
+    #     - home_all_robots
+    #   mode: sequential
+    #   retries: 3
+    #   on_failure: final_home

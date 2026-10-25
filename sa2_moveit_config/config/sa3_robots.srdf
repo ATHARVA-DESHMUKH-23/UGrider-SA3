@@ -20,6 +20,16 @@
         <joint name="robot1_J5" value="0" />
         <joint name="robot1_J6" value="0" />
     </group_state>
+    
+    <group_state name="robot1_sleep" group="robot1_arm">
+        <joint name="robot1_J1" value="-0.000178" />
+        <joint name="robot1_J2" value="0.796943" />
+        <joint name="robot1_J3" value="-0.585701" />
+        <joint name="robot1_J4" value="0.000028" />
+        <joint name="robot1_J5" value="-0.000129" />
+        <joint name="robot1_J6" value="-0.000082" />
+    </group_state>
+
     <group_state name="home" group="robot2_arm">
         <joint name="robot2_J1" value="0" />
         <joint name="robot2_J2" value="0" />

@@ -70,6 +70,31 @@ motion_sequence:
       retries: 1
       on_failure: abort
 
+    - name: "place rebar 1A with gantry and robot3"
+      executables:
+        - gantry_move
+      mode: sequential
+      retries: 1
+      on_failure: abort
+
+    - name: "Tie Bottom Mat with tying guns"
+      executables:
+        - name: robot1_tying_gun
+          parameters:
+            clamp_frames:
+              - "1A_l"
+            tie_counts: [3]
+
+        - name: robot2_tying_gun
+          parameters:
+            clamp_frames:
+              - "1A_r"
+            tie_counts: [3]
+
+      mode: parallel
+      retries: 1
+      on_failure: abort
+
 
     - name: "Pick/place final assembly"
       executables:
@@ -78,9 +103,14 @@ motion_sequence:
             pick_frame: sa3_pick_point
             place_frame: sa3_place
             object_id: rebar_1A
+            children:
+              - rebar_3c
+              - rebar_4c
+              - rebar_5a
+              - rebar_6
       mode: sequential
       retries: 1
-      on_failure: final_home
+      on_failure: abort
 
     - name: "Final home all robots"
       executables:

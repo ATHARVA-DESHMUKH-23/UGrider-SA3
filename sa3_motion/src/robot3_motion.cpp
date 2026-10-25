@@ -78,7 +78,7 @@ namespace
 constexpr char kNodeName[] = "robot3_pick_place";
 
 constexpr char kGroup[] = "robot3_arm";
-constexpr char kPlanningLink[] = "robot3_end_effactor";
+constexpr char kPlanningLink[] = "robot3_end_effactor_ff";
 constexpr char kReferenceFrame[] = "world";
 
 constexpr char kControllerAction[] =
@@ -893,7 +893,8 @@ bool pickPlace(
 
   const std::vector<std::string> touch_links = {
     ctx.link,
-    kJ6Link
+    kJ6Link,
+    "robot3_sa3_grpr01_r"
   };
 
   RCLCPP_INFO(logger, "==============================================");

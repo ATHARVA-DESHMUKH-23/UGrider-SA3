@@ -1,0 +1,10 @@
+# Motion sequence configuration for sa3_motion_sequence.launch.py
+
+motion_sequence:
+  stages:
+    - name: "Gantry move"
+      executables:
+        - gantry_move
+      mode: sequential
+      retries: 1
+      on_failure: abort

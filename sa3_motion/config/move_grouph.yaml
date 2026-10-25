@@ -1616,4 +1616,3 @@
       \ link2=\"robot2_link8\" reason=\"Never\"/><disable_collisions link1=\"robot2_link7\"\
       \ link2=\"robot2_link8\" reason=\"Never\"/></robot>"
     use_sim_time: false
-

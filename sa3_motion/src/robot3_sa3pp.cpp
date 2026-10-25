@@ -15,9 +15,10 @@
 //   6. MoveJ  place approach  (place frame, z + 0.20)
 //   7. MoveL  place frame
 //   8. Detach child objects and object into the world
-//   9. MoveL  place approach  (retract, z + 0.20)
-//  10. Restore collision: object <-> gripper links/jigs,
-//      each active child <-> both jigs, and object <-> children
+//   9. MoveL  place retract   (place frame, x - 0.10)
+//  10. Restore collision (only after the place retract is complete):
+//      object <-> gripper links/jigs, each active child <-> gripper links/jigs,
+//      and object <-> children
 //  11. Go to home pose
 //
 // Parameters:
@@ -62,19 +63,31 @@ namespace
 // ---------------------------------------------------------------------------
 
 constexpr char kGroup[] = "robot3_arm";
+constexpr char kRobot1Group[] = "robot1_arm";
 constexpr char kEndEffector[] = "robot3_end_effactor";
 constexpr char kGripperLink2[] = "robot3_J6_link";   // extra gripper link
 constexpr char kJigClamp[] = "jig_clamp";            // fixture the rebar sits in
 constexpr char kMainJig[] = "sa3_main_jig";           // main jig that may contact the carried assembly
 constexpr char kWorld[] = "world";
 constexpr char kHomeState[] = "home";
+constexpr char kRobot1SleepState[] = "robot1_sleep";
 constexpr char kController[] = "/robot3_arm_controller/follow_joint_trajectory";
+constexpr char kRobot1Controller[] = "/robot1_arm_controller/follow_joint_trajectory";
 
 // Independent approach / retract offsets in WORLD frame: frame pose + offset.
-constexpr std::array<double, 3> kPickApproachOffset = {0.0, -0.20, 0.0};
+// Pick approach: -0.10 m along X.
+// Pick retract:  -0.20 m along Y.
+// Place approach: +0.30 m along Z (unchanged).
+// Place retract:  -0.10 m along X.
+constexpr std::array<double, 3> kPickApproachOffset = {-0.10, 0.0, 0.0};
+constexpr std::array<double, 3> kPickRetractOffset = {0.0, -0.20, 0.0};
 constexpr std::array<double, 3> kPlaceApproachOffset = {0.0, 0.0, 0.30};
+constexpr std::array<double, 3> kPlaceRetractOffset = {-0.10, 0.0, 0.0};
 
 constexpr double kPlanningTime = 15.0;
+constexpr int kMoveJPlanRetries = 3;  // Separate OMPL planning requests if one fails.
+constexpr int kMoveLPlanRetries = 3;  // Separate Pilz LIN planning requests if one fails.
+constexpr int kNamedPlanRetries = 3;  // Separate OMPL requests for named-state moves (robot1 sleep, home).
 constexpr double kMoveJVel = 0.30;
 constexpr double kMoveJAcc = 0.20;
 constexpr double kMoveLVel = 0.20;
@@ -127,17 +140,42 @@ bool lookupPose(Ctx & ctx, const std::string & frame, geometry_msgs::msg::Pose &
 }
 
 
-// Plan the current group target, then execute on the controller.
+// Plan the current group target (retrying up to kNamedPlanRetries times),
+// then execute the first successful plan on the controller.
 bool planAndExecute(Ctx & ctx, const std::string & name)
 {
   const auto logger = ctx.node->get_logger();
 
   moveit::planning_interface::MoveGroupInterface::Plan plan;
-  const auto result = ctx.mg->plan(plan);
+  bool planned = false;
+  int last_code = 0;
+
+  for (int attempt = 1; attempt <= kNamedPlanRetries; ++attempt) {
+    // Refresh the start state so each retry plans from where the robot actually is.
+    ctx.mg->setStartStateToCurrentState();
+
+    const auto result = ctx.mg->plan(plan);
+    last_code = result.val;
+
+    if (result == moveit::core::MoveItErrorCode::SUCCESS) {
+      planned = true;
+      RCLCPP_INFO(
+        logger, "[%s] planning succeeded on attempt %d/%d",
+        name.c_str(), attempt, kNamedPlanRetries);
+      break;
+    }
+
+    RCLCPP_WARN(
+      logger, "[%s] planning attempt %d/%d failed (code %d)",
+      name.c_str(), attempt, kNamedPlanRetries, last_code);
+  }
+
   ctx.mg->clearPoseTargets();
 
-  if (result != moveit::core::MoveItErrorCode::SUCCESS) {
-    RCLCPP_ERROR(logger, "[%s] planning failed (code %d)", name.c_str(), result.val);
+  if (!planned) {
+    RCLCPP_ERROR(
+      logger, "[%s] planning failed after %d attempts (last code %d)",
+      name.c_str(), kNamedPlanRetries, last_code);
     return false;
   }
 
@@ -180,7 +218,55 @@ bool movej(Ctx & ctx, const geometry_msgs::msg::Pose & target, const std::string
     return false;
   }
 
-  return planAndExecute(ctx, name);
+  // Retry the OMPL planning request up to three times. Execute only the
+  // first successful plan; do not retry controller execution here.
+  moveit::planning_interface::MoveGroupInterface::Plan plan;
+  bool planned = false;
+  int last_code = 0;
+
+  for (int attempt = 1; attempt <= kMoveJPlanRetries; ++attempt) {
+    const auto result = mg.plan(plan);
+    last_code = result.val;
+
+    if (result == moveit::core::MoveItErrorCode::SUCCESS) {
+      planned = true;
+      RCLCPP_INFO(
+        ctx.node->get_logger(),
+        "[%s] OMPL planning succeeded on attempt %d/%d",
+        name.c_str(), attempt, kMoveJPlanRetries);
+      break;
+    }
+
+    RCLCPP_WARN(
+      ctx.node->get_logger(),
+      "[%s] OMPL planning attempt %d/%d failed (code %d)",
+      name.c_str(), attempt, kMoveJPlanRetries, last_code);
+  }
+
+  mg.clearPoseTargets();
+
+  if (!planned) {
+    RCLCPP_ERROR(
+      ctx.node->get_logger(),
+      "[%s] OMPL planning failed after %d attempts (last code %d)",
+      name.c_str(), kMoveJPlanRetries, last_code);
+    return false;
+  }
+
+  int code = 0;
+  std::string note;
+  if (!sa3_motion::executeDirect(
+      ctx.fjt, plan.trajectory_.joint_trajectory, code, note))
+  {
+    RCLCPP_ERROR(
+      ctx.node->get_logger(),
+      "[%s] execution failed (code %d): %s",
+      name.c_str(), code, note.c_str());
+    return false;
+  }
+
+  RCLCPP_INFO(ctx.node->get_logger(), "[%s] done", name.c_str());
+  return true;
 }
 
 
@@ -207,17 +293,69 @@ bool movel(Ctx & ctx, const geometry_msgs::msg::Pose & target, const std::string
     return false;
   }
 
-  return planAndExecute(ctx, name);
+  // Retry the Pilz LIN planning request up to kMoveLPlanRetries times.
+  // Execute only the first successful plan; do not retry controller execution here.
+  moveit::planning_interface::MoveGroupInterface::Plan plan;
+  bool planned = false;
+  int last_code = 0;
+
+  for (int attempt = 1; attempt <= kMoveLPlanRetries; ++attempt) {
+    // Refresh the start state so each retry plans from where the robot actually is.
+    mg.setStartStateToCurrentState();
+
+    const auto result = mg.plan(plan);
+    last_code = result.val;
+
+    if (result == moveit::core::MoveItErrorCode::SUCCESS) {
+      planned = true;
+      RCLCPP_INFO(
+        ctx.node->get_logger(),
+        "[%s] LIN planning succeeded on attempt %d/%d",
+        name.c_str(), attempt, kMoveLPlanRetries);
+      break;
+    }
+
+    RCLCPP_WARN(
+      ctx.node->get_logger(),
+      "[%s] LIN planning attempt %d/%d failed (code %d)",
+      name.c_str(), attempt, kMoveLPlanRetries, last_code);
+  }
+
+  mg.clearPoseTargets();
+
+  if (!planned) {
+    RCLCPP_ERROR(
+      ctx.node->get_logger(),
+      "[%s] LIN planning failed after %d attempts (last code %d)",
+      name.c_str(), kMoveLPlanRetries, last_code);
+    return false;
+  }
+
+  int code = 0;
+  std::string note;
+  if (!sa3_motion::executeDirect(
+      ctx.fjt, plan.trajectory_.joint_trajectory, code, note))
+  {
+    RCLCPP_ERROR(
+      ctx.node->get_logger(),
+      "[%s] execution failed (code %d): %s",
+      name.c_str(), code, note.c_str());
+    return false;
+  }
+
+  RCLCPP_INFO(ctx.node->get_logger(), "[%s] done", name.c_str());
+  return true;
 }
 
 
-// OMPL move to the named "home" state.
-bool goHome(Ctx & ctx)
+// OMPL move to any named SRDF state. Used for Robot 1 sleep and Robot 3 home.
+bool goToNamedState(Ctx & ctx, const std::string & state, const std::string & label)
 {
   auto & mg = *ctx.mg;
 
   if (!mg.getCurrentState(10.0)) {
-    RCLCPP_ERROR(ctx.node->get_logger(), "[home] current state unavailable");
+    RCLCPP_ERROR(
+      ctx.node->get_logger(), "[%s] current state unavailable", label.c_str());
     return false;
   }
 
@@ -230,20 +368,28 @@ bool goHome(Ctx & ctx)
   mg.setMaxAccelerationScalingFactor(kMoveJAcc);
   mg.clearPoseTargets();
 
-  if (!mg.setNamedTarget(kHomeState)) {
+  if (!mg.setNamedTarget(state)) {
     RCLCPP_ERROR(
-      ctx.node->get_logger(), "[home] named state '%s' not found in SRDF", kHomeState);
+      ctx.node->get_logger(), "[%s] named state '%s' not found for group",
+      label.c_str(), state.c_str());
     return false;
   }
 
-  return planAndExecute(ctx, "home");
+  return planAndExecute(ctx, label);
+}
+
+bool goHome(Ctx & ctx)
+{
+  return goToNamedState(ctx, kHomeState, "home");
 }
 
 
 // Allow / restore only the intended contact pairs for the carried assembly:
 // main object <-> gripper links, jig_clamp, sa3_main_jig;
-// each active child <-> main object, jig_clamp, sa3_main_jig.
+// each active child <-> gripper links, main object, jig_clamp, sa3_main_jig.
 // Children that were not present as world collision objects are skipped.
+// Allowed at pick, and only restored (allowed=false) after the place retract is done,
+// so the gripper may touch the released rebars while it backs away.
 bool setPickCollisions(Ctx & ctx, const std::vector<std::string> & touch_links, bool allowed)
 {
   bool ok = true;
@@ -251,6 +397,7 @@ bool setPickCollisions(Ctx & ctx, const std::vector<std::string> & touch_links, 
   ok &= ctx.scene->setObjectCollisionsAllowed(ctx.object_id, {kJigClamp}, allowed);
   ok &= ctx.scene->setObjectCollisionsAllowed(ctx.object_id, {kMainJig}, allowed);
   for (const auto & child : ctx.children_active) {
+    ok &= ctx.scene->setObjectCollisionsAllowed(child, touch_links, allowed);
     ok &= ctx.scene->setCollisionPairAllowed(ctx.object_id, child, allowed);
     ok &= ctx.scene->setCollisionPairAllowed(child, kJigClamp, allowed);
     ok &= ctx.scene->setCollisionPairAllowed(child, kMainJig, allowed);
@@ -359,13 +506,21 @@ bool pickPlace(Ctx & ctx, const std::string & pick_frame, const std::string & pl
   }
 
   const auto pick_approach = withOffset(pick, kPickApproachOffset);
+  const auto pick_retract = withOffset(pick, kPickRetractOffset);
   const auto place_approach = withOffset(place, kPlaceApproachOffset);
+  const auto place_retract = withOffset(place, kPlaceRetractOffset);
 
   // Object must start as a world collision object.
   if (!ctx.scene->verifyObjectState(ctx.object_id, true, false)) {
     RCLCPP_ERROR(logger, "'%s' is not a world object.", ctx.object_id.c_str());
     return false;
   }
+  RCLCPP_INFO(
+    logger,
+    "Pick approach target: x=%.3f y=%.3f z=%.3f",
+    pick_approach.position.x,
+    pick_approach.position.y,
+    pick_approach.position.z);
 
   // 1. MoveJ pick approach
   if (!movej(ctx, pick_approach, "pick approach")) {
@@ -397,12 +552,12 @@ bool pickPlace(Ctx & ctx, const std::string & pick_frame, const std::string & pl
   }
 
   // 5. MoveL retract
-  if (!movel(ctx, pick_approach, "pick retract")) {
+  if (!movel(ctx, pick_retract, "pick retract")) {
     return false;
   }
 
   // 6. MoveL place approach
-  if (!movej(ctx, place_approach, "place approach")) {
+  if (!movel(ctx, place_approach, "place approach")) {
     return false;
   }
 
@@ -416,12 +571,12 @@ bool pickPlace(Ctx & ctx, const std::string & pick_frame, const std::string & pl
     return false;
   }
 
-  // 9. MoveL retract (collision still allowed, gripper may touch object)
-  if (!movel(ctx, place_approach, "place retract")) {
+  // 9. MoveL retract (collision still allowed, gripper may touch object and children)
+  if (!movel(ctx, place_retract, "place retract")) {
     return false;
   }
 
-  // 10. Restore collision
+  // 10. Restore collision (only now, after the place retract has completed)
   if (!setPickCollisions(ctx, touch_links, false)) {
     RCLCPP_ERROR(logger, "Failed to restore object collisions.");
     return false;
@@ -463,11 +618,11 @@ int main(int argc, char ** argv)
   const std::string place_frame = param("place_frame", "place_frame_10");
   const std::string object_id = param("object_id", "rebar_1A");
 
-  
-    if (!node->has_parameter("children")) {
+
+  if (!node->has_parameter("children")) {
     node->declare_parameter<std::vector<std::string>>(
-        "children",
-        std::vector<std::string>{
+      "children",
+      std::vector<std::string>{
         // From kJobs
         "rebar_6",
         "rebar_13_1_R",
@@ -489,8 +644,8 @@ int main(int argc, char ** argv)
         "rebar_14_3",
         "rebar_14_4",
         "rebar_3c", "rebar_4c"
-        });
-    }
+      });
+  }
 
   const std::vector<std::string> children =
     node->get_parameter("children").as_string_array();
@@ -508,32 +663,66 @@ int main(int argc, char ** argv)
   try {
     rclcpp::sleep_for(2s);
 
+    // Create both MoveGroups, but execute Robot 1's sleep motion first.
+    moveit::planning_interface::MoveGroupInterface robot1_move_group(node, kRobot1Group);
     moveit::planning_interface::MoveGroupInterface move_group(node, kGroup);
     move_group.setPoseReferenceFrame(kWorld);
     move_group.setEndEffectorLink(kEndEffector);
 
+    auto robot1_fjt =
+      rclcpp_action::create_client<sa3_motion::FJT>(node, kRobot1Controller);
     auto fjt = rclcpp_action::create_client<sa3_motion::FJT>(node, kController);
-    if (!fjt->wait_for_action_server(10s)) {
-      RCLCPP_ERROR(node->get_logger(), "Controller '%s' unavailable.", kController);
+
+    if (!robot1_fjt->wait_for_action_server(10s)) {
+      RCLCPP_ERROR(
+        node->get_logger(), "Robot 1 controller '%s' unavailable.",
+        kRobot1Controller);
+    } else if (!fjt->wait_for_action_server(10s)) {
+      RCLCPP_ERROR(
+        node->get_logger(), "Robot 3 controller '%s' unavailable.", kController);
     } else {
+      PlanningSceneObjects scene(node);
 
-        PlanningSceneObjects scene(node);
+      // Robot 1 context is used only for the named sleep-state move.
+      Ctx robot1_ctx;
+      robot1_ctx.node = node;
+      robot1_ctx.mg = &robot1_move_group;
+      robot1_ctx.tf = &tf_buffer;
+      robot1_ctx.fjt = robot1_fjt;
+      robot1_ctx.scene = &scene;
 
-        Ctx ctx;
-        ctx.node = node;
-        ctx.mg = &move_group;
-        ctx.tf = &tf_buffer;
-        ctx.fjt = fjt;
-        ctx.scene = &scene;
-        ctx.object_id = object_id;
-        ctx.children = children;
+      // Robot 3 context performs the existing pick/place process.
+      Ctx ctx;
+      ctx.node = node;
+      ctx.mg = &move_group;
+      ctx.tf = &tf_buffer;
+      ctx.fjt = fjt;
+      ctx.scene = &scene;
+      ctx.object_id = object_id;
+      ctx.children = children;
+
+      RCLCPP_INFO(
+        node->get_logger(),
+        "Step 1/2: moving Robot 1 to named state '%s' before Robot 3 starts.",
+        kRobot1SleepState);
+
+      if (goToNamedState(robot1_ctx, kRobot1SleepState, "robot1 sleep")) {
+        RCLCPP_INFO(
+          node->get_logger(),
+          "Robot 1 reached sleep state. Starting Robot 3 pick/place process.");
 
         RCLCPP_INFO(
-        node->get_logger(), "Pick: %s | Place: %s | Object: %s | Children: %zu",
-        pick_frame.c_str(), place_frame.c_str(), object_id.c_str(), children.size());
+          node->get_logger(),
+          "Pick: %s | Place: %s | Object: %s | Children: %zu",
+          pick_frame.c_str(), place_frame.c_str(), object_id.c_str(), children.size());
 
         ok = pickPlace(ctx, pick_frame, place_frame);
-
+      } else {
+        RCLCPP_ERROR(
+          node->get_logger(),
+          "Robot 1 failed to reach sleep state; Robot 3 process will not start.");
+        ok = false;
+      }
     }
   } catch (const std::exception & e) {
     RCLCPP_FATAL(node->get_logger(), "Unhandled exception: %s", e.what());

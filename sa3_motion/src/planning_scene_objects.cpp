@@ -1,5 +1,5 @@
 #include "sa3_motion/planning_scene_objects.hpp"
-
+// version y
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -997,6 +997,41 @@ bool PlanningSceneObjects::detachObjectToWorldPreservingPose(
   const std::string attach_link =
     it->second.link_name;
 
+  // DEBUG ONLY: inspect the attached-object representation before detaching.
+  RCLCPP_INFO(
+    node_->get_logger(),
+    "DETACH DEBUG [%s]: attached link='%s', object.header.frame_id='%s', "
+    "object pose xyz=[%.6f, %.6f, %.6f], quat=[%.6f, %.6f, %.6f, %.6f], "
+    "meshes=%zu, mesh_poses=%zu.",
+    object_id.c_str(),
+    attach_link.c_str(),
+    it->second.object.header.frame_id.c_str(),
+    it->second.object.pose.position.x,
+    it->second.object.pose.position.y,
+    it->second.object.pose.position.z,
+    it->second.object.pose.orientation.x,
+    it->second.object.pose.orientation.y,
+    it->second.object.pose.orientation.z,
+    it->second.object.pose.orientation.w,
+    it->second.object.meshes.size(),
+    it->second.object.mesh_poses.size());
+
+  if (!it->second.object.mesh_poses.empty()) {
+    const auto & debug_mesh_pose = it->second.object.mesh_poses.front();
+    RCLCPP_INFO(
+      node_->get_logger(),
+      "DETACH DEBUG [%s]: first mesh pose xyz=[%.6f, %.6f, %.6f], "
+      "quat=[%.6f, %.6f, %.6f, %.6f].",
+      object_id.c_str(),
+      debug_mesh_pose.position.x,
+      debug_mesh_pose.position.y,
+      debug_mesh_pose.position.z,
+      debug_mesh_pose.orientation.x,
+      debug_mesh_pose.orientation.y,
+      debug_mesh_pose.orientation.z,
+      debug_mesh_pose.orientation.w);
+  }
+
   if (!verifyObjectState(
         object_id,
         false,
@@ -1007,14 +1042,52 @@ bool PlanningSceneObjects::detachObjectToWorldPreservingPose(
   }
 
   // Attached-object pose is relative to the link.
-  // Compose it with the link's world pose to recover its world pose.
-  const auto link_world_pose =
+  // Prefer TF for the link's world pose (same source used by the workcell
+  // visualizers); fall back to MoveIt's current pose if TF is unavailable.
+  // Compose this with the attached object's link-relative pose to recover
+  // the object's world pose.
+  const auto moveit_link_pose =
     move_group.getCurrentPose(attach_link).pose;
+
+  geometry_msgs::msg::Pose tf_link_pose;
+  const bool have_tf_pose = lookupWorldPose(
+    *tf_buffer_, node_->get_logger(), attach_link, tf_link_pose);
+
+  const geometry_msgs::msg::Pose link_world_pose =
+    have_tf_pose ? tf_link_pose : moveit_link_pose;
+
+  RCLCPP_INFO(
+    node_->get_logger(),
+    "DETACH DEBUG [%s]: current link pose frame='%s', link='%s', "
+    "xyz=[%.6f, %.6f, %.6f], quat=[%.6f, %.6f, %.6f, %.6f].",
+    object_id.c_str(),
+    have_tf_pose ? "world (TF)" : "MoveIt current pose",
+    attach_link.c_str(),
+    link_world_pose.position.x,
+    link_world_pose.position.y,
+    link_world_pose.position.z,
+    link_world_pose.orientation.x,
+    link_world_pose.orientation.y,
+    link_world_pose.orientation.z,
+    link_world_pose.orientation.w);
 
   const auto release_world_pose =
     composePoses(
       link_world_pose,
       it->second.object.pose);
+
+  RCLCPP_INFO(
+    node_->get_logger(),
+    "DETACH DEBUG [%s]: calculated release world pose xyz=[%.6f, %.6f, %.6f], "
+    "quat=[%.6f, %.6f, %.6f, %.6f].",
+    object_id.c_str(),
+    release_world_pose.position.x,
+    release_world_pose.position.y,
+    release_world_pose.position.z,
+    release_world_pose.orientation.x,
+    release_world_pose.orientation.y,
+    release_world_pose.orientation.z,
+    release_world_pose.orientation.w);
 
   auto world_object = it->second.object;
 
@@ -1023,6 +1096,21 @@ bool PlanningSceneObjects::detachObjectToWorldPreservingPose(
 
   world_object.operation =
     moveit_msgs::msg::CollisionObject::ADD;
+
+  RCLCPP_INFO(
+    node_->get_logger(),
+    "DETACH DEBUG [%s]: outgoing world object frame='%s', operation=%d, "
+    "pose xyz=[%.6f, %.6f, %.6f], quat=[%.6f, %.6f, %.6f, %.6f].",
+    object_id.c_str(),
+    world_object.header.frame_id.c_str(),
+    static_cast<int>(world_object.operation),
+    world_object.pose.position.x,
+    world_object.pose.position.y,
+    world_object.pose.position.z,
+    world_object.pose.orientation.x,
+    world_object.pose.orientation.y,
+    world_object.pose.orientation.z,
+    world_object.pose.orientation.w);
 
   // Remove the attached object and insert the world object in
   // one Planning Scene diff.
@@ -1077,6 +1165,30 @@ bool PlanningSceneObjects::detachObjectToWorldPreservingPose(
         angularError(
           release_world_pose.orientation,
           world_it->second.pose.orientation);
+
+      RCLCPP_INFO(
+        node_->get_logger(),
+        "DETACH DEBUG [%s]: world read-back frame='%s', "
+        "actual xyz=[%.6f, %.6f, %.6f], quat=[%.6f, %.6f, %.6f, %.6f]; "
+        "expected xyz=[%.6f, %.6f, %.6f], quat=[%.6f, %.6f, %.6f, %.6f]; "
+        "translation_error=%.9f m, rotation_error=%.9f rad.",
+        object_id.c_str(),
+        world_it->second.header.frame_id.c_str(),
+        world_it->second.pose.position.x,
+        world_it->second.pose.position.y,
+        world_it->second.pose.position.z,
+        world_it->second.pose.orientation.x,
+        world_it->second.pose.orientation.y,
+        world_it->second.pose.orientation.z,
+        world_it->second.pose.orientation.w,
+        release_world_pose.position.x,
+        release_world_pose.position.y,
+        release_world_pose.position.z,
+        release_world_pose.orientation.x,
+        release_world_pose.orientation.y,
+        release_world_pose.orientation.z,
+        release_world_pose.orientation.w,
+        p_error, r_error);
 
       if (p_error > 1e-4 || r_error > 1e-4)
       {
