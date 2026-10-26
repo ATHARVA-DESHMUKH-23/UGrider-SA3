@@ -58,6 +58,25 @@ motion_sequence:
       retries: 1
       on_failure: abort
 
+
+    - name: "Tie Bottom Mat with tying guns"
+      executables:
+        - name: robot1_tying_gun
+          parameters:
+            clamp_frames:
+              - "1A_l"
+            tie_counts: [3]
+
+        - name: robot2_tying_gun
+          parameters:
+            clamp_frames:
+              - "1A_r"
+            tie_counts: [3]
+
+      mode: parallel
+      retries: 1
+      on_failure: abort
+
     - name: "Pick/place final assembly"
       executables:
         - name: robot3_sa3pp

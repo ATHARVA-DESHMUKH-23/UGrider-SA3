@@ -7,14 +7,15 @@
 //        gripper <-> rebar collision OFF
 //     2  movel pick            -> ATTACH rebar to the planning link
 //     3  movel pick retract    -> gripper <-> rebar collision ON again
-//     4  movel transition      (Y/Z of place approach, X of pick approach)
-//     5  movel/movej place approach
+//     4  CIRC via transition -> LIN via stop -> OMPL direct fallback
+//     5  reach place approach
 //        jig_clamp <-> rebar and gripper <-> rebar collision OFF
 //     6  movel place           -> DETACH rebar into the world
 //     7  movel place retract   -> collisions ON again
 //
 // Offsets are in the WORLD frame.
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -31,6 +32,8 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit_msgs/msg/move_it_error_codes.hpp>
+#include <moveit_msgs/msg/constraints.hpp>
+#include <moveit_msgs/msg/position_constraint.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <tf2/LinearMath/Matrix3x3.h>
@@ -48,7 +51,7 @@ using MoveItErr = moveit_msgs::msg::MoveItErrorCodes;
 namespace
 {
 
-constexpr const char * kNodeName = "sa3_robot2_pick_place";
+constexpr const char * kNodeName = "sa3_robot2_pick_place_fallback";
 
 // ---------------------------------------------------------------------------
 // Robot / frames
@@ -65,6 +68,9 @@ constexpr std::array<double, 3> kApproachOffset = {0.0, -0.25, 0.0};
 constexpr bool kSpawnRebars = false;
 
 constexpr bool kStopOnFirstFailure = true;
+
+// Fixed world-frame X coordinate of the CIRC/LIN via point (Robot 2).
+constexpr double kViaX = 5.22;
 
 // ---------------------------------------------------------------------------
 // Collision settings
@@ -89,6 +95,10 @@ constexpr double kMoveJVelocity = 0.30;
 constexpr double kMoveJAcceleration = 0.20;
 constexpr double kMoveLVelocity = 0.10;
 constexpr double kMoveLAcceleration = 0.10;
+constexpr double kMoveCVelocity = 0.10;
+constexpr double kMoveCAcceleration = 0.10;
+constexpr std::array<double, 5> kMoveCVelScales = {0.10, 0.05, 0.03, 0.02, 0.01};
+constexpr std::array<double, 5> kMoveLVelScales = {0.10, 0.05, 0.03, 0.02, 0.01};
 
 constexpr int kStepsPerPair = 7;
 
@@ -359,8 +369,9 @@ bool movej(Ctx & c, const geometry_msgs::msg::Pose & target)
 // ===========================================================================
 // MOVEL : Pilz LIN, pose target
 // ===========================================================================
-bool movel(Ctx & c, const geometry_msgs::msg::Pose & target)
+bool movel(Ctx & c, const geometry_msgs::msg::Pose & target, bool * planning_failed = nullptr)
 {
+  if (planning_failed) *planning_failed = false;
   auto & mg = *c.mg;
   const auto logger = c.node->get_logger();
   const std::string tag = stepTag(c);
@@ -386,13 +397,47 @@ bool movel(Ctx & c, const geometry_msgs::msg::Pose & target)
   }
 
   moveit::planning_interface::MoveGroupInterface::Plan plan;
+  bool planned = false;
+  int last_code = 0;
+  const int total = static_cast<int>(kMoveLVelScales.size());
   const auto t0 = std::chrono::steady_clock::now();
-  const auto code = mg.plan(plan);
+
+  for (int attempt = 1; attempt <= total; ++attempt) {
+    const double scale = kMoveLVelScales[attempt - 1];
+
+    mg.setStartStateToCurrentState();
+    mg.setMaxVelocityScalingFactor(scale);
+    mg.setMaxAccelerationScalingFactor(std::min(kMoveLAcceleration, scale));
+
+    const auto result = mg.plan(plan);
+    last_code = result.val;
+
+    if (result == moveit::core::MoveItErrorCode::SUCCESS) {
+      planned = true;
+      RCLCPP_INFO(
+        logger, "%sLIN planning succeeded on attempt %d/%d (velocity scale %.3f)",
+        tag.c_str(), attempt, total, scale);
+      break;
+    }
+
+    RCLCPP_WARN(
+      logger, "%sLIN attempt %d/%d failed at velocity scale %.3f: %s",
+      tag.c_str(), attempt, total, scale, errStr(last_code).c_str());
+
+    // A slower speed cannot fix these, so stop early.
+    if (last_code == MoveItErr::NO_IK_SOLUTION ||
+      last_code == MoveItErr::GOAL_IN_COLLISION ||
+      last_code == MoveItErr::START_STATE_IN_COLLISION)
+    {
+      break;
+    }
+  }
   const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   mg.clearPoseTargets();
 
-  if (code != moveit::core::MoveItErrorCode::SUCCESS) {
-    reportFailure(c, "LIN", "planning", code.val, dt, &target);
+  if (!planned) {
+    reportFailure(c, "LIN", "planning", last_code, dt, &target, "all velocity scales failed.");
+    if (planning_failed) *planning_failed = true;
     return false;
   }
   int exec_code = 0;
@@ -402,6 +447,123 @@ bool movel(Ctx & c, const geometry_msgs::msg::Pose & target)
     return false;
   }
   RCLCPP_INFO(logger, "%smovel done (%.2f s).", tag.c_str(), dt);
+  return true;
+}
+
+// ===========================================================================
+// MOVEC : Pilz CIRC, Cartesian circular arc through an interim point
+// ===========================================================================
+bool movec(
+  Ctx & c,
+  const geometry_msgs::msg::Pose & interim,
+  const geometry_msgs::msg::Pose & target,
+  bool * planning_failed = nullptr)
+{
+  if (planning_failed) *planning_failed = false;
+  auto & mg = *c.mg;
+  const auto logger = c.node->get_logger();
+  const std::string tag = stepTag(c);
+
+  if (!mg.getCurrentState(10.0)) {
+    reportFailure(c, "CIRC", "current state", MoveItErr::ROBOT_STATE_STALE, 0.0, &target);
+    return false;
+  }
+
+  // Pilz requires exactly one position constraint and the name "interim".
+  moveit_msgs::msg::PositionConstraint via_constraint;
+  via_constraint.header.frame_id = kReferenceFrame;
+  via_constraint.link_name = c.link;
+  via_constraint.constraint_region.primitive_poses.push_back(interim);
+  via_constraint.weight = 1.0;
+
+  moveit_msgs::msg::Constraints path_constraints;
+  path_constraints.name = "interim";
+  path_constraints.position_constraints.push_back(via_constraint);
+
+  mg.setStartStateToCurrentState();
+  mg.setPlanningPipelineId("pilz_industrial_motion_planner");
+  mg.setPlannerId("CIRC");
+  mg.setPlanningTime(kPlanningTime);
+  mg.setNumPlanningAttempts(1);
+  mg.setMaxVelocityScalingFactor(kMoveCVelocity);
+  mg.setMaxAccelerationScalingFactor(kMoveCAcceleration);
+  mg.clearPoseTargets();
+  mg.clearPathConstraints();
+  mg.setPathConstraints(path_constraints);
+
+  // Ensure the CIRC-only interim constraint never leaks into LIN / OMPL.
+  ScopeGuard constraint_guard([&mg]() {
+    mg.clearPathConstraints();
+    mg.clearPoseTargets();
+  });
+
+  RCLCPP_INFO(logger, "%smovec interim %s", tag.c_str(), poseStr(interim).c_str());
+  RCLCPP_INFO(logger, "%smovec target  %s", tag.c_str(), poseStr(target).c_str());
+  if (!mg.setPoseTarget(target, c.link)) {
+    reportFailure(c, "CIRC", "set target", MoveItErr::FAILURE, 0.0, &target,
+      "MoveIt rejected the pose target.");
+    return false;
+  }
+
+  moveit::planning_interface::MoveGroupInterface::Plan plan;
+  bool planned = false;
+  int last_code = MoveItErr::PLANNING_FAILED;
+  const int total = static_cast<int>(kMoveCVelScales.size());
+  const auto t0 = std::chrono::steady_clock::now();
+
+  for (int attempt = 1; attempt <= total; ++attempt) {
+    const double scale = kMoveCVelScales[attempt - 1];
+    mg.setStartStateToCurrentState();
+    mg.setMaxVelocityScalingFactor(scale);
+    mg.setMaxAccelerationScalingFactor(std::min(kMoveCAcceleration, scale));
+
+    const auto result = mg.plan(plan);
+    last_code = result.val;
+    if (result == moveit::core::MoveItErrorCode::SUCCESS) {
+      planned = true;
+      RCLCPP_INFO(logger,
+        "%sCIRC planning succeeded on attempt %d/%d (velocity scale %.3f)",
+        tag.c_str(), attempt, total, scale);
+      break;
+    }
+
+    RCLCPP_WARN(logger,
+      "%sCIRC attempt %d/%d failed at velocity scale %.3f: %s",
+      tag.c_str(), attempt, total, scale, errStr(last_code).c_str());
+
+    // Slowing down cannot fix these failures.
+    if (last_code == MoveItErr::NO_IK_SOLUTION ||
+        last_code == MoveItErr::GOAL_IN_COLLISION ||
+        last_code == MoveItErr::START_STATE_IN_COLLISION ||
+        last_code == MoveItErr::INVALID_GROUP_NAME ||
+        last_code == MoveItErr::INVALID_LINK_NAME ||
+        last_code == MoveItErr::FRAME_TRANSFORM_FAILURE) {
+      break;
+    }
+  }
+
+  const double dt = std::chrono::duration<double>(
+    std::chrono::steady_clock::now() - t0).count();
+  // Clear CIRC-only constraints before other motion commands.
+  constraint_guard.runNow();
+
+  if (!planned) {
+    reportFailure(c, "CIRC", "planning", last_code, dt, &target,
+      "CIRC retries failed down to velocity scale 0.01. "
+      "Check arc geometry, collisions, IK continuity/singularities and joint limits.");
+    if (planning_failed) *planning_failed = true;
+    return false;
+  }
+
+  int exec_code = 0;
+  std::string exec_note;
+  if (!sa3_motion::executeDirect(c.fjt, plan.trajectory_.joint_trajectory,
+      exec_code, exec_note)) {
+    reportFailure(c, "CIRC", "execution", exec_code, dt, &target, exec_note);
+    return false;
+  }
+
+  RCLCPP_INFO(logger, "%smovec done (%.2f s).", tag.c_str(), dt);
   return true;
 }
 
@@ -440,26 +602,15 @@ bool pickPlace(Ctx & c)
   const auto pick_approach = offsetWorld(pick, kApproachOffset);
   const auto place_approach = offsetWorld(place, kApproachOffset);
 
-  // Custom transition: keep X of the pick approach, take Y/Z of the place approach.
-  geometry_msgs::msg::Pose transition_pose = pick_approach;
-  transition_pose.position.y = place_approach.position.y;
-  transition_pose.position.z = place_approach.position.z;
+  // Robot 2 via point: fixed world X; Y, Z and orientation from place approach.
+  auto via_pose = place_approach;
+  via_pose.position.x = kViaX;
 
   // The rebar must be a world object before the pick.
   if (!scene.verifyObjectState(rebar, true, false)) {
     RCLCPP_ERROR(logger, "Expected '%s' to be a world object before picking.", rebar.c_str());
     return false;
   }
-
-  auto movel_or_movej = [&](
-    const geometry_msgs::msg::Pose & target, const std::string & name, int n) -> bool
-    {
-      step(n, name + " (movel)");
-      if (movel(c, target)) {return true;}
-      RCLCPP_WARN(logger, "%s movel failed -> movej fallback", name.c_str());
-      step(n, name + " (movej fallback)");
-      return movej(c, target);
-    };
 
   // ============================================================
   // PICK
@@ -525,11 +676,49 @@ bool pickPlace(Ctx & c)
   // RCLCPP_INFO(logger, "Collision checking restored for '%s'.", rebar.c_str());
 
   // ============================================================
-  // PLACE
+  // PLACE APPROACH: CIRC -> LIN with via stop -> OMPL direct
+  // Robot 2 via point = (kViaX, place_approach.y, place_approach.z),
+  // with orientation from place_approach.
   // ============================================================
-  if (!movel_or_movej(place_approach, "place approach", 5)) {
+  bool approach_done = false;
+  bool planning_failed = false;
+
+  step(5, "place approach (CIRC through fixed via point)");
+  RCLCPP_INFO(logger, "Approach strategy 1/3: CIRC through robot2 fixed via point");
+  if (movec(c, via_pose, place_approach, &planning_failed)) {
+    approach_done = true;
+  } else if (!planning_failed) {
+    RCLCPP_ERROR(logger, "CIRC non-planning failure; aborting automatic fallback.");
     return false;
   }
+
+  if (!approach_done) {
+    RCLCPP_WARN(logger, "CIRC planning failed. Strategy 2/3: LIN with a stop at fixed via point.");
+    step(5, "place approach (LIN to fixed via point)");
+    bool lin_failed = false;
+    if (movel(c, via_pose, &lin_failed)) {
+      step(5, "place approach (LIN via point to goal)");
+      if (movel(c, place_approach, &lin_failed)) {
+        approach_done = true;
+      } else if (!lin_failed) {
+        RCLCPP_ERROR(logger, "LIN to goal non-planning failure; aborting fallback.");
+        return false;
+      }
+    } else if (!lin_failed) {
+      RCLCPP_ERROR(logger, "LIN to fixed via point non-planning failure; aborting fallback.");
+      return false;
+    }
+  }
+
+  if (!approach_done) {
+    RCLCPP_WARN(logger, "LIN failed. Strategy 3/3: movej directly to place approach (no via).");
+    step(5, "place approach (movej direct fallback)");
+    if (!movej(c, place_approach)) {
+      RCLCPP_ERROR(logger, "All three place-approach strategies failed.");
+      return false;
+    }
+  }
+  RCLCPP_INFO(logger, "Place approach reached successfully.");
 
   // jig_clamp <-> rebar and gripper <-> rebar OFF until after the place retract.
   step(5, "allow rebar/jig_clamp and gripper contact");

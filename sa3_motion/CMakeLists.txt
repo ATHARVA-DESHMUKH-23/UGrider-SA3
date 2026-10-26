@@ -448,6 +448,32 @@ target_link_libraries(gantry_move
   planning_scene_objects
 )
 
+# ======================================================
+# Flange pick/place motion node
+# ======================================================
+
+add_executable(flange_pp
+  src/flange_pp.cpp
+)
+
+target_include_directories(flange_pp PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(flange_pp
+  rclcpp
+  rclcpp_action
+  control_msgs
+  trajectory_msgs
+  moveit_ros_planning_interface
+  moveit_msgs
+  geometry_msgs
+  sensor_msgs
+  tf2
+  tf2_ros
+)
+
 
 # ============================================================
 # Link Planning Scene Objects to robot motion nodes
@@ -469,6 +495,9 @@ target_link_libraries(robot4_motion
   planning_scene_objects
 )
 target_link_libraries(robot3_sa3pp
+  planning_scene_objects
+)
+target_link_libraries(flange_pp
   planning_scene_objects
 )
 
@@ -494,6 +523,7 @@ install(
     planning_scene_objects
     attach_tool
     robot3_sa3pp
+    flange_pp
 
     gantry_move
   DESTINATION lib/${PROJECT_NAME}

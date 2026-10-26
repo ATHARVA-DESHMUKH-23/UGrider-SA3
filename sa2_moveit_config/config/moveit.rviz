@@ -4,7 +4,7 @@ Panels:
     Name: Displays
     Property Tree Widget:
       Expanded:
-        - /TF1
+        - /Grid1
       Splitter Ratio: 0.5
     Tree Height: 795
   - Class: rviz_common/Help
@@ -28,11 +28,11 @@ Visualization Manager:
       Name: Grid
       Normal Cell Count: 0
       Offset:
-        X: 0
+        X: 5
         Y: 0
         Z: 0
       Plane: XY
-      Plane Cell Count: 10
+      Plane Cell Count: 13
       Reference Frame: <Fixed Frame>
       Value: true
     - Alpha: 1
@@ -57,7 +57,6 @@ Visualization Manager:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-          Value: true
         gantry_link:
           Alpha: 1
           Show Axes: false
@@ -240,6 +239,11 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
+        robot3_end_effactor_ff:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
         robot3_fanuc_flange:
           Alpha: 1
           Show Axes: false
@@ -302,6 +306,11 @@ Visualization Manager:
           Show Trail: false
           Value: true
         robot4_end_effactor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        robot4_end_effactor_ff:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -565,6 +574,18 @@ Visualization Manager:
           Value: true
         1A:
           Value: true
+        1A_l_t1:
+          Value: true
+        1A_l_t2:
+          Value: true
+        1A_l_t3:
+          Value: true
+        1A_r_t1:
+          Value: true
+        1A_r_t2:
+          Value: true
+        1A_r_t3:
+          Value: true
         3c:
           Value: true
         3d:
@@ -601,6 +622,10 @@ Visualization Manager:
         bm_pfl:
           Value: true
         bm_pfr:
+          Value: true
+        bm_pkL:
+          Value: true
+        bm_pkr:
           Value: true
         gantry_carriage_link:
           Value: true
@@ -730,6 +755,8 @@ Visualization Manager:
           Value: true
         robot3_end_effactor:
           Value: true
+        robot3_end_effactor_ff:
+          Value: true
         robot3_fanuc_flange:
           Value: true
         robot3_flange:
@@ -757,6 +784,8 @@ Visualization Manager:
         robot4_base_link:
           Value: true
         robot4_end_effactor:
+          Value: true
+        robot4_end_effactor_ff:
           Value: true
         robot4_fanuc_flange:
           Value: true
@@ -794,18 +823,21 @@ Visualization Manager:
               gantry_part_link:
                 {}
           inventory_3a_4a:
-            3d:
+            bm_pkL:
               {}
             inventory_3a_4a_frame:
               3c:
                 {}
+              3d:
+                {}
           inventory_3a_4a_2:
-            4c:
-              {}
-            4d:
+            bm_pkr:
               {}
             inventory_3a_4a_frame_2:
-              {}
+              4c:
+                {}
+              4d:
+                {}
           jig_clamp:
             13_placef1_l:
               13_placef1_l_t1:
@@ -884,6 +916,18 @@ Visualization Manager:
                 {}
             1A:
               {}
+            1A_l_t1:
+              {}
+            1A_l_t2:
+              {}
+            1A_l_t3:
+              {}
+            1A_r_t1:
+              {}
+            1A_r_t2:
+              {}
+            1A_r_t3:
+              {}
             5_placef_l:
               5_placef_l_t1:
                 {}
@@ -905,6 +949,8 @@ Visualization Manager:
             place_frame_10:
               {}
             place_frame_10_l:
+              {}
+            sa3_pick_point:
               {}
           robot1_pedestal:
             robot1_base_link:
@@ -977,6 +1023,8 @@ Visualization Manager:
                           robot3_flange:
                             robot3_end_effactor:
                               {}
+                            robot3_end_effactor_ff:
+                              {}
                             robot3_fanuc_flange:
                               {}
                             robot3_gripper_mount:
@@ -1001,6 +1049,8 @@ Visualization Manager:
                           robot4_flange:
                             robot4_end_effactor:
                               {}
+                            robot4_end_effactor_ff:
+                              {}
                             robot4_fanuc_flange:
                               {}
                             robot4_gripper_mount:
@@ -1009,8 +1059,6 @@ Visualization Manager:
               robot4_wbase:
                 {}
           sa3_main_jig:
-            {}
-          sa3_pick_point:
             {}
           sa3_place:
             {}
@@ -1103,25 +1151,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 9.536624908447266
+      Distance: 17.663257598876953
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 3.3687407970428467
-        Y: 1.3032116889953613
-        Z: 1.6132773160934448
+        X: 5.629241466522217
+        Y: 2.954813003540039
+        Z: 2.927539825439453
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.5999990701675415
+      Pitch: 0.24999931454658508
       Target Frame: world
       Value: Orbit (rviz_default_plugins)
-      Yaw: 4.710167407989502
+      Yaw: 4.670165061950684
     Saved: ~
 Window Geometry:
   Displays:

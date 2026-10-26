@@ -73,7 +73,6 @@ constexpr char kHomeState[] = "home";
 constexpr char kRobot1SleepState[] = "robot1_sleep";
 constexpr char kController[] = "/robot3_arm_controller/follow_joint_trajectory";
 constexpr char kRobot1Controller[] = "/robot1_arm_controller/follow_joint_trajectory";
-
 // Independent approach / retract offsets in WORLD frame: frame pose + offset.
 // Pick approach: -0.10 m along X.
 // Pick retract:  -0.20 m along Y.
@@ -82,7 +81,7 @@ constexpr char kRobot1Controller[] = "/robot1_arm_controller/follow_joint_trajec
 constexpr std::array<double, 3> kPickApproachOffset = {-0.10, 0.0, 0.0};
 constexpr std::array<double, 3> kPickRetractOffset = {0.0, -0.20, 0.0};
 constexpr std::array<double, 3> kPlaceApproachOffset = {0.0, 0.0, 0.30};
-constexpr std::array<double, 3> kPlaceRetractOffset = {-0.10, 0.0, 0.0};
+constexpr std::array<double, 3> kPlaceRetractOffset = {-0.05, 0.0, 0.0};
 
 constexpr double kPlanningTime = 15.0;
 constexpr int kMoveJPlanRetries = 3;  // Separate OMPL planning requests if one fails.
@@ -92,6 +91,8 @@ constexpr double kMoveJVel = 0.30;
 constexpr double kMoveJAcc = 0.20;
 constexpr double kMoveLVel = 0.20;
 constexpr double kMoveLAcc = 0.10;
+// Pilz LIN retries: each attempt uses the next (lower) velocity scale.
+constexpr std::array<double, 5> kMoveLVelScales = {kMoveLVel, 0.08, 0.04, 0.02, 0.01};
 
 
 // ---------------------------------------------------------------------------
@@ -293,15 +294,19 @@ bool movel(Ctx & ctx, const geometry_msgs::msg::Pose & target, const std::string
     return false;
   }
 
-  // Retry the Pilz LIN planning request up to kMoveLPlanRetries times.
-  // Execute only the first successful plan; do not retry controller execution here.
+  // Retry Pilz LIN with progressively lower velocity/acceleration scaling.
+  // Execute only the first successful plan.
   moveit::planning_interface::MoveGroupInterface::Plan plan;
   bool planned = false;
   int last_code = 0;
+  const int total = static_cast<int>(kMoveLVelScales.size());
 
-  for (int attempt = 1; attempt <= kMoveLPlanRetries; ++attempt) {
-    // Refresh the start state so each retry plans from where the robot actually is.
+  for (int attempt = 1; attempt <= total; ++attempt) {
+    const double scale = kMoveLVelScales[attempt - 1];
+
     mg.setStartStateToCurrentState();
+    mg.setMaxVelocityScalingFactor(scale);
+    mg.setMaxAccelerationScalingFactor(std::min(kMoveLAcc, scale));
 
     const auto result = mg.plan(plan);
     last_code = result.val;
@@ -310,15 +315,15 @@ bool movel(Ctx & ctx, const geometry_msgs::msg::Pose & target, const std::string
       planned = true;
       RCLCPP_INFO(
         ctx.node->get_logger(),
-        "[%s] LIN planning succeeded on attempt %d/%d",
-        name.c_str(), attempt, kMoveLPlanRetries);
+        "[%s] LIN planning succeeded on attempt %d/%d (velocity scale %.3f)",
+        name.c_str(), attempt, total, scale);
       break;
     }
 
     RCLCPP_WARN(
       ctx.node->get_logger(),
-      "[%s] LIN planning attempt %d/%d failed (code %d)",
-      name.c_str(), attempt, kMoveLPlanRetries, last_code);
+      "[%s] LIN planning attempt %d/%d failed at velocity scale %.3f (code %d)",
+      name.c_str(), attempt, total, scale, last_code);
   }
 
   mg.clearPoseTargets();
@@ -327,7 +332,7 @@ bool movel(Ctx & ctx, const geometry_msgs::msg::Pose & target, const std::string
     RCLCPP_ERROR(
       ctx.node->get_logger(),
       "[%s] LIN planning failed after %d attempts (last code %d)",
-      name.c_str(), kMoveLPlanRetries, last_code);
+      name.c_str(), total, last_code);
     return false;
   }
 
@@ -497,7 +502,7 @@ bool detachAssembly(Ctx & ctx)
 bool pickPlace(Ctx & ctx, const std::string & pick_frame, const std::string & place_frame)
 {
   const auto logger = ctx.node->get_logger();
-  const std::vector<std::string> touch_links = {kEndEffector, kGripperLink2};
+  const std::vector<std::string> touch_links = {kEndEffector, kGripperLink2,"robot3_sa3_grpr01"};
 
   geometry_msgs::msg::Pose pick;
   geometry_msgs::msg::Pose place;
@@ -529,7 +534,7 @@ bool pickPlace(Ctx & ctx, const std::string & pick_frame, const std::string & pl
 
   // 2. Allow intended contacts during pick: object <-> gripper, jig_clamp,
   // and sa3_main_jig. Active child pairs are enabled in attachAssembly().
-  if (!ctx.scene->setObjectCollisionsAllowed(ctx.object_id, touch_links, true) ||
+  if (!ctx.scene->setObjectCollisionsAllowed("rebar_3c", touch_links, true) ||
     !ctx.scene->setObjectCollisionsAllowed(ctx.object_id, {kJigClamp}, true) ||
     !ctx.scene->setObjectCollisionsAllowed(ctx.object_id, {kMainJig}, true))
   {
@@ -591,6 +596,68 @@ bool pickPlace(Ctx & ctx, const std::string & pick_frame, const std::string & pl
   return true;
 }
 
+// Resume an already-attached assembly at the PLACE APPROACH step.
+// No pick, no attachment, and no Robot 1 sleep motion is performed.
+bool placeOnlyFromAttached(Ctx & ctx, const std::string & place_frame)
+{
+  const auto logger = ctx.node->get_logger();
+  const std::vector<std::string> touch_links = {
+    kEndEffector, kGripperLink2, "robot3_sa3_grpr01"};
+
+  geometry_msgs::msg::Pose place;
+  if (!lookupPose(ctx, place_frame, place)) {
+    return false;
+  }
+  const auto place_approach = withOffset(place, kPlaceApproachOffset);
+  const auto place_retract = withOffset(place, kPlaceRetractOffset);
+
+  // Check the existing MoveIt planning scene, not just the current gripper pose.
+  if (!ctx.scene->verifyObjectState(ctx.object_id, false, true, kEndEffector)) {
+    RCLCPP_ERROR(logger,
+      "Resume aborted: '%s' must already be attached to '%s' in MoveIt.",
+      ctx.object_id.c_str(), kEndEffector);
+    return false;
+  }
+
+  // Recover the list of attached children, since attachAssembly() is skipped.
+  ctx.children_active.clear();
+  for (const auto & child : ctx.children) {
+    if (child == ctx.object_id) continue;
+    if (ctx.scene->verifyObjectState(child, false, true, kEndEffector)) {
+      ctx.children_active.push_back(child);
+    } else {
+      RCLCPP_INFO(logger,
+        "Resume: '%s' is not attached to Robot 3; leaving it untouched.",
+        child.c_str());
+    }
+  }
+
+  RCLCPP_INFO(logger,
+    "Resuming place-only with '%s' and %zu attached children. No pick or attach.",
+    ctx.object_id.c_str(), ctx.children_active.size());
+
+  // Maintain the same intended contact allowances as the original sequence.
+  // Restore them only after placement and retraction succeed.
+  if (!setPickCollisions(ctx, touch_links, true)) {
+    RCLCPP_ERROR(logger, "Could not establish assembly contact allowances.");
+    return false;
+  }
+
+  // Original steps 6-11, unchanged.
+  if (!movej(ctx, place_approach, "place approach")) return false;
+  if (!movel(ctx, place, "place")) return false;
+  if (!detachAssembly(ctx)) return false;
+  if (!movel(ctx, place_retract, "place retract")) return false;
+  if (!setPickCollisions(ctx, touch_links, false)) {
+    RCLCPP_ERROR(logger, "Failed to restore object collisions.");
+    return false;
+  }
+  if (!goHome(ctx)) return false;
+
+  RCLCPP_INFO(logger, "Place-only recovery completed.");
+  return true;
+}
+
 }  // namespace
 
 
@@ -603,7 +670,7 @@ int main(int argc, char ** argv)
   rclcpp::init(argc, argv);
 
   auto node = rclcpp::Node::make_shared(
-    "simple_pick_place",
+    "simple_pick_place_resume",
     rclcpp::NodeOptions().automatically_declare_parameters_from_overrides(true));
 
   // Parameters (override from launch / CLI).
@@ -663,35 +730,17 @@ int main(int argc, char ** argv)
   try {
     rclcpp::sleep_for(2s);
 
-    // Create both MoveGroups, but execute Robot 1's sleep motion first.
-    moveit::planning_interface::MoveGroupInterface robot1_move_group(node, kRobot1Group);
+    // Resume Robot 3 only: Robot 1 and all pick/attach steps are skipped.
     moveit::planning_interface::MoveGroupInterface move_group(node, kGroup);
     move_group.setPoseReferenceFrame(kWorld);
     move_group.setEndEffectorLink(kEndEffector);
 
-    auto robot1_fjt =
-      rclcpp_action::create_client<sa3_motion::FJT>(node, kRobot1Controller);
     auto fjt = rclcpp_action::create_client<sa3_motion::FJT>(node, kController);
-
-    if (!robot1_fjt->wait_for_action_server(10s)) {
-      RCLCPP_ERROR(
-        node->get_logger(), "Robot 1 controller '%s' unavailable.",
-        kRobot1Controller);
-    } else if (!fjt->wait_for_action_server(10s)) {
-      RCLCPP_ERROR(
-        node->get_logger(), "Robot 3 controller '%s' unavailable.", kController);
+    if (!fjt->wait_for_action_server(10s)) {
+      RCLCPP_ERROR(node->get_logger(),
+        "Robot 3 controller '%s' unavailable.", kController);
     } else {
       PlanningSceneObjects scene(node);
-
-      // Robot 1 context is used only for the named sleep-state move.
-      Ctx robot1_ctx;
-      robot1_ctx.node = node;
-      robot1_ctx.mg = &robot1_move_group;
-      robot1_ctx.tf = &tf_buffer;
-      robot1_ctx.fjt = robot1_fjt;
-      robot1_ctx.scene = &scene;
-
-      // Robot 3 context performs the existing pick/place process.
       Ctx ctx;
       ctx.node = node;
       ctx.mg = &move_group;
@@ -701,28 +750,10 @@ int main(int argc, char ** argv)
       ctx.object_id = object_id;
       ctx.children = children;
 
-      RCLCPP_INFO(
-        node->get_logger(),
-        "Step 1/2: moving Robot 1 to named state '%s' before Robot 3 starts.",
-        kRobot1SleepState);
-
-      if (goToNamedState(robot1_ctx, kRobot1SleepState, "robot1 sleep")) {
-        RCLCPP_INFO(
-          node->get_logger(),
-          "Robot 1 reached sleep state. Starting Robot 3 pick/place process.");
-
-        RCLCPP_INFO(
-          node->get_logger(),
-          "Pick: %s | Place: %s | Object: %s | Children: %zu",
-          pick_frame.c_str(), place_frame.c_str(), object_id.c_str(), children.size());
-
-        ok = pickPlace(ctx, pick_frame, place_frame);
-      } else {
-        RCLCPP_ERROR(
-          node->get_logger(),
-          "Robot 1 failed to reach sleep state; Robot 3 process will not start.");
-        ok = false;
-      }
+      RCLCPP_INFO(node->get_logger(),
+        "PLACE-ONLY RESUME: place=%s, already-attached main object=%s",
+        place_frame.c_str(), object_id.c_str());
+      ok = placeOnlyFromAttached(ctx, place_frame);
     }
   } catch (const std::exception & e) {
     RCLCPP_FATAL(node->get_logger(), "Unhandled exception: %s", e.what());
