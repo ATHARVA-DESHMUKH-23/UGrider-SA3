@@ -49,7 +49,7 @@ bool executeDirect(
   const rclcpp_action::Client<FJT>::SharedPtr & client,
   const moveit::planning_interface::MoveGroupInterface::Plan & plan)
 {
-  const auto & trajectory = plan.trajectory_.joint_trajectory;
+  const auto & trajectory = plan.trajectory.joint_trajectory;
 
   if (trajectory.points.empty()) {
     RCLCPP_ERROR(logger, "Planned trajectory contains no points.");

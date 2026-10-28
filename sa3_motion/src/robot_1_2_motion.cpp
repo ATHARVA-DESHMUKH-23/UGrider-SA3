@@ -451,7 +451,7 @@ bool executeDirect(
   Ctx & c, const moveit::planning_interface::MoveGroupInterface::Plan & plan,
   const std::string & planner, double plan_time, const geometry_msgs::msg::Pose & target)
 {
-  const auto & traj = plan.trajectory_.joint_trajectory;
+  const auto & traj = plan.trajectory.joint_trajectory;
   if (traj.points.empty()) {
     reportFailure(
       c, planner, "execution", MoveItErr::INVALID_MOTION_PLAN, plan_time, &target,

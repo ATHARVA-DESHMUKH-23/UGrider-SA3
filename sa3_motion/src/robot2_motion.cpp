@@ -358,7 +358,7 @@ bool movej(Ctx & c, const geometry_msgs::msg::Pose & target)
   }
   int exec_code = 0;
   std::string exec_note;
-  if (!sa3_motion::executeDirect(c.fjt, plan.trajectory_.joint_trajectory, exec_code, exec_note)) {
+  if (!sa3_motion::executeDirect(c.fjt, plan.trajectory.joint_trajectory, exec_code, exec_note)) {
     reportFailure(c, "OMPL", "execution", exec_code, dt, &target, exec_note);
     return false;
   }
@@ -442,7 +442,7 @@ bool movel(Ctx & c, const geometry_msgs::msg::Pose & target, bool * planning_fai
   }
   int exec_code = 0;
   std::string exec_note;
-  if (!sa3_motion::executeDirect(c.fjt, plan.trajectory_.joint_trajectory, exec_code, exec_note)) {
+  if (!sa3_motion::executeDirect(c.fjt, plan.trajectory.joint_trajectory, exec_code, exec_note)) {
     reportFailure(c, "LIN", "execution", exec_code, dt, &target, exec_note);
     return false;
   }
@@ -557,7 +557,7 @@ bool movec(
 
   int exec_code = 0;
   std::string exec_note;
-  if (!sa3_motion::executeDirect(c.fjt, plan.trajectory_.joint_trajectory,
+  if (!sa3_motion::executeDirect(c.fjt, plan.trajectory.joint_trajectory,
       exec_code, exec_note)) {
     reportFailure(c, "CIRC", "execution", exec_code, dt, &target, exec_note);
     return false;

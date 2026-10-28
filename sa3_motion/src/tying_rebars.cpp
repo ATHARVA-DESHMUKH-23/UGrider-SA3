@@ -768,12 +768,12 @@ bool runSequence(
         const int step_idx = stepNumber(a.stage);
         const std::string step_name = stageName(a.stage);
         if (planStage(logger, a, start_msg, plan, methods[i], code)) {
-          if (!plan.trajectory_.multi_dof_joint_trajectory.joint_names.empty()) {
+          if (!plan.trajectory.multi_dof_joint_trajectory.joint_names.empty()) {
             failPoint(logger, a, step_idx, step_name, methods[i], "planning",
               MoveItErr::FAILURE, "multi-DOF trajectory cannot be merged.");
             if (stop_on_first_failure) {stop = true;}
           } else {
-            jts[i] = plan.trajectory_.joint_trajectory;
+            jts[i] = plan.trajectory.joint_trajectory;
             moving[i] = true;
           }
         } else {
@@ -798,9 +798,9 @@ bool runSequence(
     ++tick;
     // ---- merge into one 12-joint trajectory, execute through the combined group ----
     MGI::Plan combined_plan;
-    combined_plan.start_state_ = start_msg;
+    combined_plan.start_state = start_msg;
     double shared = 0.0;
-    if (!mergeTrajectories(logger, jts[0], jts[1], combined_plan.trajectory_.joint_trajectory,
+    if (!mergeTrajectories(logger, jts[0], jts[1], combined_plan.trajectory.joint_trajectory,
         shared))
     {
       return false;
@@ -809,7 +809,7 @@ bool runSequence(
       logger, "tick %d: robot1 [%s | %s]  +  robot2 [%s | %s]  -> merged %zu joints, %.3f s",
       tick, a1.done() ? "done" : stageName(a1.stage), methods[0].c_str(),
       a2.done() ? "done" : stageName(a2.stage), methods[1].c_str(),
-      combined_plan.trajectory_.joint_trajectory.joint_names.size(), shared);
+      combined_plan.trajectory.joint_trajectory.joint_names.size(), shared);
 
     const auto executed = combined.execute(combined_plan);
     if (executed != moveit::core::MoveItErrorCode::SUCCESS) {

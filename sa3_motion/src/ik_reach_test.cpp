@@ -288,11 +288,11 @@ int main(int argc, char** argv)
       auto code = mg.plan(plan);  // plan only, never execute
       row.code = code.val;
       row.plan = (code == moveit::core::MoveItErrorCode::SUCCESS);
-      row.t = plan.planning_time_;
+      row.t = plan.planning_time;
 
       if (row.plan)
       {
-        const auto& pts = plan.trajectory_.joint_trajectory.points;
+        const auto& pts = plan.trajectory.joint_trajectory.points;
         row.pts = pts.size();
         for (size_t i = 1; i < pts.size(); ++i)
         {

@@ -182,7 +182,7 @@ bool planAndExecute(Ctx & ctx, const std::string & name)
 
   int code = 0;
   std::string note;
-  if (!sa3_motion::executeDirect(ctx.fjt, plan.trajectory_.joint_trajectory, code, note)) {
+  if (!sa3_motion::executeDirect(ctx.fjt, plan.trajectory.joint_trajectory, code, note)) {
     RCLCPP_ERROR(
       logger, "[%s] execution failed (code %d): %s", name.c_str(), code, note.c_str());
     return false;
@@ -257,7 +257,7 @@ bool movej(Ctx & ctx, const geometry_msgs::msg::Pose & target, const std::string
   int code = 0;
   std::string note;
   if (!sa3_motion::executeDirect(
-      ctx.fjt, plan.trajectory_.joint_trajectory, code, note))
+      ctx.fjt, plan.trajectory.joint_trajectory, code, note))
   {
     RCLCPP_ERROR(
       ctx.node->get_logger(),
@@ -339,7 +339,7 @@ bool movel(Ctx & ctx, const geometry_msgs::msg::Pose & target, const std::string
   int code = 0;
   std::string note;
   if (!sa3_motion::executeDirect(
-      ctx.fjt, plan.trajectory_.joint_trajectory, code, note))
+      ctx.fjt, plan.trajectory.joint_trajectory, code, note))
   {
     RCLCPP_ERROR(
       ctx.node->get_logger(),

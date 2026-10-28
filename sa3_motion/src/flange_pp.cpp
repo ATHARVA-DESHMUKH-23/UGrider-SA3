@@ -229,11 +229,11 @@ bool movel_combined(
     return false;
   }
 
-  moveit_msgs::msg::RobotState start_state_msg;
-  moveit::core::robotStateToRobotStateMsg(*start_state, start_state_msg);
+  moveit_msgs::msg::RobotState start_statemsg;
+  moveit::core::robotStateToRobotStateMsg(*start_state, start_statemsg);
 
   auto configureLin = [&](moveit::planning_interface::MoveGroupInterface & group) {
-    group.setStartState(start_state_msg);
+    group.setStartState(start_statemsg);
     group.setPlanningPipelineId("pilz_industrial_motion_planner");
     group.setPlannerId("LIN");
     group.setPlanningTime(kPlanningTime);
@@ -271,12 +271,12 @@ bool movel_combined(
     return false;
   }
 
-  const auto & jt1 = plan1.trajectory_.joint_trajectory;
-  const auto & jt2 = plan2.trajectory_.joint_trajectory;
+  const auto & jt1 = plan1.trajectory.joint_trajectory;
+  const auto & jt2 = plan2.trajectory.joint_trajectory;
   if (jt1.joint_names.empty() || jt2.joint_names.empty() ||
       jt1.points.empty() || jt2.points.empty() ||
-      !plan1.trajectory_.multi_dof_joint_trajectory.joint_names.empty() ||
-      !plan2.trajectory_.multi_dof_joint_trajectory.joint_names.empty()) {
+      !plan1.trajectory.multi_dof_joint_trajectory.joint_names.empty() ||
+      !plan2.trajectory.multi_dof_joint_trajectory.joint_names.empty()) {
     RCLCPP_ERROR(logger, "[%s] Cannot merge empty or multi-DOF LIN trajectories.", stage.c_str());
     return false;
   }
@@ -306,9 +306,9 @@ bool movel_combined(
       [](double a, double b) { return std::abs(a - b) < 1e-9; }), times.end());
 
   moveit::planning_interface::MoveGroupInterface::Plan combined_plan;
-  combined_plan.start_state_ = start_state_msg;
-  combined_plan.planning_time_ = plan1.planning_time_ + plan2.planning_time_;
-  auto & merged = combined_plan.trajectory_.joint_trajectory;
+  combined_plan.start_state = start_statemsg;
+  combined_plan.planning_time = plan1.planning_time + plan2.planning_time;
+  auto & merged = combined_plan.trajectory.joint_trajectory;
   merged.header = jt1.header;
   merged.joint_names = jt1.joint_names;
   merged.joint_names.insert(merged.joint_names.end(), jt2.joint_names.begin(), jt2.joint_names.end());

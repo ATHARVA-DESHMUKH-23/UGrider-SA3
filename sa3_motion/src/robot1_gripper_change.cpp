@@ -667,24 +667,24 @@ private:
     }
 
     for (const auto & p : plans) {
-      if (!p.trajectory_.multi_dof_joint_trajectory.joint_names.empty()) {
+      if (!p.trajectory.multi_dof_joint_trajectory.joint_names.empty()) {
         logE("[MOVEL] multi-DOF trajectories cannot be merged (" + label + ").");
         return false;
       }
     }
 
     MGI::Plan combined_plan;
-    combined_plan.start_state_ = start_msg;
-    combined_plan.planning_time_ = plans[0].planning_time_ + plans[1].planning_time_;
+    combined_plan.start_state = start_msg;
+    combined_plan.planning_time = plans[0].planning_time + plans[1].planning_time;
     double shared = 0.0;
     if (!mergeTrajectories(
-        node_->get_logger(), plans[0].trajectory_.joint_trajectory,
-        plans[1].trajectory_.joint_trajectory, combined_plan.trajectory_.joint_trajectory, shared))
+        node_->get_logger(), plans[0].trajectory.joint_trajectory,
+        plans[1].trajectory.joint_trajectory, combined_plan.trajectory.joint_trajectory, shared))
     {
       return false;
     }
     logI("[MOVEL] " + label + ": both LIN plans succeeded; executing merged " +
-      std::to_string(combined_plan.trajectory_.joint_trajectory.joint_names.size()) +
+      std::to_string(combined_plan.trajectory.joint_trajectory.joint_names.size()) +
       "-joint trajectory (" + std::to_string(shared) + " s).");
 
     if (!executeCombined(combined_plan, label)) {return false;}

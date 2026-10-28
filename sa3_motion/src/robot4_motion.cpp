@@ -608,7 +608,7 @@ bool movej(
 
   if (!sa3_motion::executeDirect(
       ctx.fjt,
-      plan.trajectory_.joint_trajectory,
+      plan.trajectory.joint_trajectory,
       exec_code,
       exec_note))
   {
@@ -689,7 +689,7 @@ bool movel(
 
   if (!sa3_motion::executeDirect(
       ctx.fjt,
-      plan.trajectory_.joint_trajectory,
+      plan.trajectory.joint_trajectory,
       exec_code,
       exec_note))
   {
@@ -783,7 +783,7 @@ bool goHome(Ctx & ctx)
 
   if (!sa3_motion::executeDirect(
       ctx.fjt,
-      plan.trajectory_.joint_trajectory,
+      plan.trajectory.joint_trajectory,
       exec_code,
       exec_note))
   {
