@@ -1,0 +1,124 @@
+<?xml version="1.0"?>
+<!-- Include this file once inside the combined robot.urdf.xacro. -->
+<robot xmlns:xacro="http://wiki.ros.org/xacro">
+
+  <!-- Global default; individually overridable for all four robots. -->
+  <xacro:arg name="hardware_mode" default="mock"/>
+  <xacro:arg name="robot1_hardware" default="$(arg hardware_mode)"/>
+  <xacro:arg name="robot2_hardware" default="$(arg hardware_mode)"/>
+  <xacro:arg name="robot3_hardware" default="$(arg hardware_mode)"/>
+  <xacro:arg name="robot4_hardware" default="$(arg hardware_mode)"/>
+
+  <!-- Per-controller network configuration. Only used in 'fanuc' mode. -->
+  <!-- Set the IPs to the actual physical/ROBOGUIDE controller IPs at launch. -->
+  <xacro:arg name="robot1_ip" default="192.168.2.3"/>
+  <xacro:arg name="robot2_ip" default="192.168.2.3"/>
+  <xacro:arg name="robot3_ip" default="192.168.2.3"/>
+  <xacro:arg name="robot4_ip" default="192.168.2.3"/>
+  <xacro:arg name="robot1_rmi_port" default="16002"/>
+  <xacro:arg name="robot2_rmi_port" default="16001"/>
+  <xacro:arg name="robot3_rmi_port" default="16001"/>
+  <xacro:arg name="robot4_rmi_port" default="16001"/>
+  <xacro:arg name="robot1_stream_motion_port" default="60015"/>
+  <xacro:arg name="robot2_stream_motion_port" default="60015"/>
+  <xacro:arg name="robot3_stream_motion_port" default="60015"/>
+  <xacro:arg name="robot4_stream_motion_port" default="60015"/>
+
+  <!-- FANUC's official Humble ros2_control macro exports position+velocity
+       state and position command (no effort state). -->
+  <xacro:macro name="sa3_controlled_joint" params="name">
+    <joint name="${name}">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- One hardware component per robot.  All coexist in ONE controller manager. -->
+  <xacro:macro name="sa3_robot_system" params="system prefix mode ip rmi_port stream_port">
+    <ros2_control name="${system}" type="system">
+      <hardware>
+        <xacro:if value="${mode == 'mock'}">
+          <plugin>mock_components/GenericSystem</plugin>
+        </xacro:if>
+        <xacro:if value="${mode == 'gazebo'}">
+          <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+        </xacro:if>
+        <xacro:if value="${mode == 'fanuc'}">
+          <plugin>fanuc_robot_driver/FanucHardwareInterface</plugin>
+          <param name="robot_ip">${ip}</param>
+          <param name="rmi_port">${rmi_port}</param>
+          <param name="stream_motion_port">${stream_port}</param>
+          <param name="gpio_configuration"></param>
+          <param name="payload_schedule">1</param>
+          <param name="out_cmd_interp_buff_target">4</param>
+          <param name="force_sensor_type">0</param>
+          <param name="motion_control">1</param>
+        </xacro:if>
+      </hardware>
+
+      <xacro:sa3_controlled_joint name="${prefix}J1"/>
+      <xacro:sa3_controlled_joint name="${prefix}J2"/>
+      <xacro:sa3_controlled_joint name="${prefix}J3"/>
+      <xacro:sa3_controlled_joint name="${prefix}J4"/>
+      <xacro:sa3_controlled_joint name="${prefix}J5"/>
+      <xacro:sa3_controlled_joint name="${prefix}J6"/>
+    </ros2_control>
+  </xacro:macro>
+
+  <xacro:sa3_robot_system system="Robot1System" prefix="robot1_"
+    mode="$(arg robot1_hardware)" ip="$(arg robot1_ip)"
+    rmi_port="$(arg robot1_rmi_port)" stream_port="$(arg robot1_stream_motion_port)"/>
+
+  <xacro:sa3_robot_system system="Robot2System" prefix="robot2_"
+    mode="$(arg robot2_hardware)" ip="$(arg robot2_ip)"
+    rmi_port="$(arg robot2_rmi_port)" stream_port="$(arg robot2_stream_motion_port)"/>
+
+  <xacro:sa3_robot_system system="Robot3System" prefix="robot3_"
+    mode="$(arg robot3_hardware)" ip="$(arg robot3_ip)"
+    rmi_port="$(arg robot3_rmi_port)" stream_port="$(arg robot3_stream_motion_port)"/>
+
+  <xacro:sa3_robot_system system="Robot4System" prefix="robot4_"
+    mode="$(arg robot4_hardware)" ip="$(arg robot4_ip)"
+    rmi_port="$(arg robot4_rmi_port)" stream_port="$(arg robot4_stream_motion_port)"/>
+
+  <!-- Gantry uses its own mock system, or Gazebo if *all* robots use Gazebo. -->
+  <ros2_control name="GantrySystem" type="system">
+    <hardware>
+      <xacro:if value="${'$(arg robot1_hardware)' == 'gazebo' and '$(arg robot2_hardware)' == 'gazebo' and '$(arg robot3_hardware)' == 'gazebo' and '$(arg robot4_hardware)' == 'gazebo'}">
+        <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+      </xacro:if>
+      <xacro:unless value="${'$(arg robot1_hardware)' == 'gazebo' and '$(arg robot2_hardware)' == 'gazebo' and '$(arg robot3_hardware)' == 'gazebo' and '$(arg robot4_hardware)' == 'gazebo'}">
+        <plugin>mock_components/GenericSystem</plugin>
+      </xacro:unless>
+    </hardware>
+
+    <joint name="gantry_slide_joint">
+      <command_interface name="position">
+        <param name="min">0.0</param><param name="max">4.0</param>
+      </command_interface>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="gantry_down_joint">
+      <command_interface name="position">
+        <param name="min">0.0</param><param name="max">2.0</param>
+      </command_interface>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+
+  <!-- Gazebo Classic mode is allowed ONLY if all four robots use gazebo.
+       Mixed mock/fanuc runs use the standalone ros2_control_node. -->
+  <xacro:if value="${'$(arg robot1_hardware)' == 'gazebo' and '$(arg robot2_hardware)' == 'gazebo' and '$(arg robot3_hardware)' == 'gazebo' and '$(arg robot4_hardware)' == 'gazebo'}">
+    <gazebo>
+      <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
+        <robot_param>robot_description</robot_param>
+        <robot_param_node>robot_state_publisher</robot_param_node>
+        <parameters>$(find sa2_description)/config/ros2_controller.yaml</parameters>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+
+</robot>

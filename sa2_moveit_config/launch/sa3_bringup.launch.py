@@ -1,186 +1,114 @@
+"""SA3 full bringup with per-robot FANUC/mock hardware selection."""
+
 import os
 
 from ament_index_python.packages import get_package_share_directory
-
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-
-from launch.actions import TimerAction
 from moveit_configs_utils import MoveItConfigsBuilder
 
+
 def generate_launch_description():
+    description_pkg = get_package_share_directory("sa2_description")
+    moveit_pkg = get_package_share_directory("sa2_moveit_config")
 
-    # =========================================================
-    # PACKAGE DIRECTORIES
-    # =========================================================
+    # Expose the same arguments provided by sa3_mixed_hardware.launch.py.
+    declarations = [
+        DeclareLaunchArgument(
+            "hardware_mode", default_value="mock",
+            choices=["mock", "fanuc", "gazebo"],
+            description="Default hardware mode for all four robots",
+        ),
+        DeclareLaunchArgument(
+            "use_rviz", default_value="false", choices=["true", "false"],
+            description="Launch description RViz (normally keep false when using MoveIt RViz)",
+        ),
+    ]
+    forwarded_args = {
+        "hardware_mode": LaunchConfiguration("hardware_mode"),
+        "use_rviz": LaunchConfiguration("use_rviz"),
+    }
 
-    description_pkg = get_package_share_directory(
-        "sa2_description"
-    )
+    for i in range(1, 5):
+        mode_key = f"robot{i}_hardware"
+        declarations.append(
+            DeclareLaunchArgument(
+                mode_key,
+                default_value=LaunchConfiguration("hardware_mode"),
+                choices=["mock", "fanuc", "gazebo"],
+            )
+        )
+        forwarded_args[mode_key] = LaunchConfiguration(mode_key)
+        for suffix, default in (
+            ("ip", "192.168.2.3"),
+            ("rmi_port", "16001"),
+            ("stream_motion_port", "60015"),
+        ):
+            arg = f"robot{i}_{suffix}"
+            declarations.append(DeclareLaunchArgument(arg, default_value=default))
+            forwarded_args[arg] = LaunchConfiguration(arg)
 
-    moveit_pkg = get_package_share_directory(
-        "sa2_moveit_config"
-    )
-
-    # =========================================================
-    # 1. ROS2 CONTROLLER BRINGUP
-    #
-    # Equivalent to:
-    #
-    # ros2 launch sa2_description ros2_controller.launch.py
-    # =========================================================
-
+    # Hardware + joint controllers + robot and environment state publishers.
     ros2_controller_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(
-                description_pkg,
-                "launch",
-                "ros2_controller.launch.py"
-            )
-        )
+            os.path.join(description_pkg, "launch", "sa3_mixed_hardware.launch.py")
+        ),
+        launch_arguments=forwarded_args.items(),
     )
 
-    # =========================================================
-    # 2. MOVE GROUP
-    #
-    # Equivalent to:
-    #
-    # ros2 launch sa2_moveit_config move_group.launch.py
-    # =========================================================
-
+    # Main MoveIt planning process (unchanged).
     move_group_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(
-                moveit_pkg,
-                "launch",
-                "move_group.launch.py"
-            )
+            os.path.join(moveit_pkg, "launch", "move_group.launch.py")
         )
     )
-
-    # =========================================================
-    # 3. WORKCELL VISUALIZER abd rebars visualizer
-    # =========================================================
 
     workcell_visualizer = Node(
         package="sa2_description",
         executable="workcell_visualizer.py",
         output="screen",
     )
-
     rebar_visualizer = Node(
-        package="sa2_description",
-        executable="rebar_visualizer.py",
-        output="screen",
+        package="sa2_description", executable="rebar_visualizer.py", output="screen"
     )
-
     gripper_visualizer = Node(
-            package="sa2_description",
-            executable="gripper_visualizer.py",
-            output="screen",
-        )
-
-    # =========================================================
-    # 4. ENVIRONMENT COLLISION
-    #
-    # Equivalent to:
-    #
-    # ros2 run sa2_description environment_collision
-    # =========================================================
-
+        package="sa2_description", executable="gripper_visualizer.py", output="screen"
+    )
     environment_collision = Node(
-        package="sa2_description",
-        executable="environment_collision",
-        output="screen",
+        package="sa2_description", executable="environment_collision", output="screen"
+    )
+    planning_scene = Node(
+        package="sa3_motion", executable="rebar_planning_scene_node", output="screen"
     )
 
-    planning_scence = Node(
-            package="sa3_motion",
-            executable="rebar_planning_scene_node",
-            output="screen",
-        )
-
-    # =========================================================
-    # 5. MOVEIT RVIZ
-    #
-    # Equivalent to:
-    #
-    # rviz2 -d
-    # /home/atharva/ros_ws/sa2/src/sa2_moveit_config/config/moveit.rviz
-    # =========================================================
-
-    rviz_config = os.path.join(
-        moveit_pkg,
-        "config",
-        "moveit.rviz"
-    )
-
+    rviz_config = os.path.join(moveit_pkg, "config", "moveit.rviz")
     moveit_rviz = Node(
-        package="rviz2",
-        executable="rviz2",
-        name="moveit_rviz",
-        output="screen",
-        arguments=[
-            "-d",
-            rviz_config
-        ],
+        package="rviz2", executable="rviz2", name="moveit_rviz",
+        output="screen", arguments=["-d", rviz_config],
     )
-
-    # =========================================================
-    # 6. IK / OMPL REACH TEST (robot1)
-    #
-    # Equivalent to:
-    #
-    # ros2 run sa3_motion ik_reach_test   (with moveit params)
-    # =========================================================
 
     moveit_config = MoveItConfigsBuilder(
         "sa3_robots", package_name="sa2_moveit_config"
     ).to_moveit_configs()
-
     ik_reach_test = Node(
-        package="sa3_motion",
-        executable="ik_reach_test",
-        output="screen",
+        package="sa3_motion", executable="ik_reach_test", output="screen",
         parameters=[moveit_config.to_dict()],
     )
+    ik_reach_test_delayed = TimerAction(period=20.0, actions=[ik_reach_test])
 
-    # start after move_group, visualizer and collision scene are up
-    ik_reach_test_delayed = TimerAction(
-        period=20.0,
-        actions=[ik_reach_test],
+    return LaunchDescription(
+        declarations + [
+            ros2_controller_launch,
+            move_group_launch,
+            workcell_visualizer,
+            rebar_visualizer,
+            gripper_visualizer,
+            environment_collision,
+            planning_scene,
+            # moveit_rviz,            # Optional: uncomment for MoveIt RViz.
+            # ik_reach_test_delayed,  # Optional: uncomment for reachability test.
+        ]
     )
-
-    # =========================================================
-    # LAUNCH EVERYTHING
-    # =========================================================
-
-    return LaunchDescription([
-
-        # 1. Robot + ros2_control + controllers
-        ros2_controller_launch,
-
-        # 2. MoveIt move_group
-        move_group_launch,
-
-        # 3. Workcell & rebar visualizer
-        workcell_visualizer,
-        rebar_visualizer,
-        gripper_visualizer,
-        # movable_rebar_tf,
-        # movable_rebar_marker,
-
-        # 4. Environment collision
-        environment_collision,
-        planning_scence,
-
-        # # 5. MoveIt RViz
-        # moveit_rviz,
-
-        # 6. IK + OMPL reachability test (plan only)
-        # ik_reach_test_delayed,
-
-    ])

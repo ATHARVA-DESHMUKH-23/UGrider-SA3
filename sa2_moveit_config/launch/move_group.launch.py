@@ -213,8 +213,18 @@ def generate_launch_description():
         .pilz_cartesian_limits(
             file_path="config/pilz_cartesian_limits.yaml",
         )
+        
 
         .to_moveit_configs()
+    )
+    # =========================================================
+    # TRAJECTORY EXECUTION CONFIGURATION
+    # =========================================================
+
+    trajectory_execution_yaml = os.path.join(
+        moveit_pkg,
+        "config",
+        "trajectory_execution.yaml"
     )
 
     # =========================================================
@@ -236,7 +246,8 @@ def generate_launch_description():
         ],
 
         parameters=[
-            moveit_config.to_dict()
+            moveit_config.to_dict(),
+            trajectory_execution_yaml,
         ],
     )
 

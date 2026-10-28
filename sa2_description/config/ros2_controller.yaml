@@ -29,14 +29,24 @@ robot1_arm_controller:
       - robot1_J4
       - robot1_J5
       - robot1_J6
-
     command_interfaces:
       - position
-
     state_interfaces:
       - position
       - velocity
-
+    open_loop_control: false
+    set_last_command_interface_value_as_state_on_activation: false
+    state_publish_rate: 125.0
+    action_monitor_rate: 20.0
+    constraints:
+      goal_time: 10.0
+      stopped_velocity_tolerance: 0.01
+      robot1_J1: {goal: 0.01}
+      robot1_J2: {goal: 0.01}
+      robot1_J3: {goal: 0.01}
+      robot1_J4: {goal: 0.01}
+      robot1_J5: {goal: 0.01}
+      robot1_J6: {goal: 0.01}
 
 robot2_arm_controller:
   ros__parameters:
@@ -47,14 +57,24 @@ robot2_arm_controller:
       - robot2_J4
       - robot2_J5
       - robot2_J6
-
     command_interfaces:
       - position
-
     state_interfaces:
       - position
       - velocity
-
+    open_loop_control: false
+    set_last_command_interface_value_as_state_on_activation: false
+    state_publish_rate: 125.0
+    action_monitor_rate: 20.0
+    constraints:
+      goal_time: 10.0
+      stopped_velocity_tolerance: 0.01
+      robot2_J1: {goal: 0.01}
+      robot2_J2: {goal: 0.01}
+      robot2_J3: {goal: 0.01}
+      robot2_J4: {goal: 0.01}
+      robot2_J5: {goal: 0.01}
+      robot2_J6: {goal: 0.01}
 
 robot3_arm_controller:
   ros__parameters:
@@ -65,14 +85,24 @@ robot3_arm_controller:
       - robot3_J4
       - robot3_J5
       - robot3_J6
-
     command_interfaces:
       - position
-
     state_interfaces:
       - position
       - velocity
-
+    open_loop_control: false
+    set_last_command_interface_value_as_state_on_activation: false
+    state_publish_rate: 125.0
+    action_monitor_rate: 20.0
+    constraints:
+      goal_time: 10.0
+      stopped_velocity_tolerance: 0.01
+      robot3_J1: {goal: 0.01}
+      robot3_J2: {goal: 0.01}
+      robot3_J3: {goal: 0.01}
+      robot3_J4: {goal: 0.01}
+      robot3_J5: {goal: 0.01}
+      robot3_J6: {goal: 0.01}
 
 robot4_arm_controller:
   ros__parameters:
@@ -83,14 +113,24 @@ robot4_arm_controller:
       - robot4_J4
       - robot4_J5
       - robot4_J6
-
     command_interfaces:
       - position
-
     state_interfaces:
       - position
       - velocity
-
+    open_loop_control: false
+    set_last_command_interface_value_as_state_on_activation: false
+    state_publish_rate: 125.0
+    action_monitor_rate: 20.0
+    constraints:
+      goal_time: 10.0
+      stopped_velocity_tolerance: 0.01
+      robot4_J1: {goal: 0.01}
+      robot4_J2: {goal: 0.01}
+      robot4_J3: {goal: 0.01}
+      robot4_J4: {goal: 0.01}
+      robot4_J5: {goal: 0.01}
+      robot4_J6: {goal: 0.01}
 
 gantry_controller:
   ros__parameters:

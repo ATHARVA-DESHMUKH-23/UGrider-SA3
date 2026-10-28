@@ -1,11 +1,13 @@
 // Combined Robot 3 + Robot 4 pick/place node.
-// Plans both arms together through the SRDF group "robot3_robot4_arms".
-// All motion stages use OMPL MoveJ-style joint-space planning.
+// Combined transitions use OMPL; dual-arm LIN moves are planned per arm,
+// merged into one 12-joint trajectory, and executed through the combined group.
 // Verify all frames, object IDs, touch links, and controller execution in RViz/mock first.
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <utility>
 #include <stdexcept>
 #include <memory>
 #include <string>
@@ -15,6 +17,8 @@
 #include <geometry_msgs/msg/pose.hpp>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/robot_state/robot_state.h>
+#include <moveit/robot_state/conversions.h>
+#include <trajectory_msgs/msg/joint_trajectory_point.hpp>
 #include <moveit_msgs/msg/move_it_error_codes.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2/LinearMath/Quaternion.h>
@@ -42,8 +46,8 @@ constexpr char kWorld[] = "world";
 constexpr double kPlanningTime = 15.0;
 constexpr int kPlanningAttempts = 10;
 constexpr int kRetries = 3;
-constexpr double kVelocity = 0.30;
-constexpr double kAcceleration = 0.20;
+constexpr double kVelocity = 0.10;
+constexpr double kAcceleration = 0.10;
 constexpr double kIkTimeout = 1.0;
 
 // Retain the offsets from the supplied single-arm nodes.
@@ -153,6 +157,212 @@ std::vector<geometry_msgs::msg::Pose> arcThrough3(
   return out;
 }
 
+// Sample one planned trajectory at a requested time after time-scaling it.
+// factor > 1 stretches the trajectory to the shared duration.
+trajectory_msgs::msg::JointTrajectoryPoint sampleTrajectory(
+  const trajectory_msgs::msg::JointTrajectory & trajectory,
+  double scaled_time, double factor)
+{
+  const auto & points = trajectory.points;
+  trajectory_msgs::msg::JointTrajectoryPoint out;
+  if (points.empty()) return out;
+
+  const double source_time = scaled_time / factor;
+  auto pointTime = [](const trajectory_msgs::msg::JointTrajectoryPoint & p) {
+    return rclcpp::Duration(p.time_from_start).seconds();
+  };
+
+  std::size_t left = 0;
+  std::size_t right = 0;
+  double alpha = 0.0;
+
+  if (source_time >= pointTime(points.back())) {
+    left = right = points.size() - 1;
+  } else {
+    for (std::size_t i = 1; i < points.size(); ++i) {
+      if (pointTime(points[i]) >= source_time) {
+        left = i - 1;
+        right = i;
+        const double t0 = pointTime(points[left]);
+        const double t1 = pointTime(points[right]);
+        alpha = (t1 > t0) ? std::clamp((source_time - t0) / (t1 - t0), 0.0, 1.0) : 0.0;
+        break;
+      }
+    }
+  }
+
+  const auto & a = points[left];
+  const auto & b = points[right];
+  auto interpolate = [alpha](const std::vector<double> & va,
+                              const std::vector<double> & vb,
+                              std::vector<double> & out_values,
+                              double scale) {
+    if (va.empty() || va.size() != vb.size()) return false;
+    out_values.resize(va.size());
+    for (std::size_t i = 0; i < va.size(); ++i)
+      out_values[i] = (va[i] + alpha * (vb[i] - va[i])) * scale;
+    return true;
+  };
+
+  if (!interpolate(a.positions, b.positions, out.positions, 1.0)) return {};
+  // If either plan omits derivatives, leave that derivative array empty.
+  interpolate(a.velocities, b.velocities, out.velocities, 1.0 / factor);
+  interpolate(a.accelerations, b.accelerations, out.accelerations, 1.0 / (factor * factor));
+  return out;
+}
+
+// Plan both arms with Pilz LIN from the same captured start state, merge their
+// joint trajectories on a shared time axis, then execute only through the
+// combined group. No per-point trajectory debug logging is emitted.
+bool movel_combined(
+  const rclcpp::Logger & logger,
+  moveit::planning_interface::MoveGroupInterface & robot1,
+  moveit::planning_interface::MoveGroupInterface & robot2,
+  moveit::planning_interface::MoveGroupInterface & combinedgroup,
+  const geometry_msgs::msg::Pose & goal1,
+  const geometry_msgs::msg::Pose & goal2,
+  const std::string & stage)
+{
+  auto start_state = combinedgroup.getCurrentState(10.0);
+  if (!start_state) {
+    RCLCPP_ERROR(logger, "[%s] Current combined robot state unavailable.", stage.c_str());
+    return false;
+  }
+
+  moveit_msgs::msg::RobotState start_state_msg;
+  moveit::core::robotStateToRobotStateMsg(*start_state, start_state_msg);
+
+  auto configureLin = [&](moveit::planning_interface::MoveGroupInterface & group) {
+    group.setStartState(start_state_msg);
+    group.setPlanningPipelineId("pilz_industrial_motion_planner");
+    group.setPlannerId("LIN");
+    group.setPlanningTime(kPlanningTime);
+    group.setNumPlanningAttempts(1);
+    group.setMaxVelocityScalingFactor(0.1);
+    group.setMaxAccelerationScalingFactor(0.1);
+    group.clearPoseTargets();
+    group.clearPathConstraints();
+  };
+
+  configureLin(robot1);
+  configureLin(robot2);
+
+  if (!robot1.setPoseTarget(goal1, kRobot3Link) ||
+      !robot2.setPoseTarget(goal2, kRobot4Link)) {
+    RCLCPP_ERROR(logger, "[%s] One of the individual LIN pose targets was rejected.", stage.c_str());
+    robot1.clearPoseTargets();
+    robot2.clearPoseTargets();
+    return false;
+  }
+
+  moveit::planning_interface::MoveGroupInterface::Plan plan1, plan2;
+  const auto result1 = robot1.plan(plan1);
+  robot1.clearPoseTargets();
+  if (result1 != moveit::core::MoveItErrorCode::SUCCESS) {
+    RCLCPP_ERROR(logger, "[%s] Robot1 LIN planning failed (code %d).", stage.c_str(), result1.val);
+    robot2.clearPoseTargets();
+    return false;
+  }
+
+  const auto result2 = robot2.plan(plan2);
+  robot2.clearPoseTargets();
+  if (result2 != moveit::core::MoveItErrorCode::SUCCESS) {
+    RCLCPP_ERROR(logger, "[%s] Robot2 LIN planning failed (code %d).", stage.c_str(), result2.val);
+    return false;
+  }
+
+  const auto & jt1 = plan1.trajectory_.joint_trajectory;
+  const auto & jt2 = plan2.trajectory_.joint_trajectory;
+  if (jt1.joint_names.empty() || jt2.joint_names.empty() ||
+      jt1.points.empty() || jt2.points.empty() ||
+      !plan1.trajectory_.multi_dof_joint_trajectory.joint_names.empty() ||
+      !plan2.trajectory_.multi_dof_joint_trajectory.joint_names.empty()) {
+    RCLCPP_ERROR(logger, "[%s] Cannot merge empty or multi-DOF LIN trajectories.", stage.c_str());
+    return false;
+  }
+
+  auto durationOf = [](const trajectory_msgs::msg::JointTrajectory & jt) {
+    return rclcpp::Duration(jt.points.back().time_from_start).seconds();
+  };
+  const double duration1 = durationOf(jt1);
+  const double duration2 = durationOf(jt2);
+  if (duration1 <= 0.0 || duration2 <= 0.0) {
+    RCLCPP_ERROR(logger, "[%s] One of the LIN trajectories has invalid duration.", stage.c_str());
+    return false;
+  }
+
+  // Stretch the shorter plan to the longer plan's duration, then sample both
+  // trajectories at the union of their timestamps.
+  const double shared_duration = std::max(duration1, duration2);
+  const double factor1 = shared_duration / duration1;
+  const double factor2 = shared_duration / duration2;
+  std::vector<double> times{0.0, shared_duration};
+  for (const auto & point : jt1.points)
+    times.push_back(rclcpp::Duration(point.time_from_start).seconds() * factor1);
+  for (const auto & point : jt2.points)
+    times.push_back(rclcpp::Duration(point.time_from_start).seconds() * factor2);
+  std::sort(times.begin(), times.end());
+  times.erase(std::unique(times.begin(), times.end(),
+      [](double a, double b) { return std::abs(a - b) < 1e-9; }), times.end());
+
+  moveit::planning_interface::MoveGroupInterface::Plan combined_plan;
+  combined_plan.start_state_ = start_state_msg;
+  combined_plan.planning_time_ = plan1.planning_time_ + plan2.planning_time_;
+  auto & merged = combined_plan.trajectory_.joint_trajectory;
+  merged.header = jt1.header;
+  merged.joint_names = jt1.joint_names;
+  merged.joint_names.insert(merged.joint_names.end(), jt2.joint_names.begin(), jt2.joint_names.end());
+
+  for (double t : times) {
+    auto p1 = sampleTrajectory(jt1, t, factor1);
+    auto p2 = sampleTrajectory(jt2, t, factor2);
+    if (p1.positions.size() != jt1.joint_names.size() ||
+        p2.positions.size() != jt2.joint_names.size()) {
+      RCLCPP_ERROR(logger, "[%s] Failed to sample one of the LIN trajectories.", stage.c_str());
+      return false;
+    }
+
+    trajectory_msgs::msg::JointTrajectoryPoint point;
+    point.positions = p1.positions;
+    point.positions.insert(point.positions.end(), p2.positions.begin(), p2.positions.end());
+
+    if (p1.velocities.size() == jt1.joint_names.size() &&
+        p2.velocities.size() == jt2.joint_names.size()) {
+      point.velocities = p1.velocities;
+      point.velocities.insert(point.velocities.end(), p2.velocities.begin(), p2.velocities.end());
+    }
+    if (p1.accelerations.size() == jt1.joint_names.size() &&
+        p2.accelerations.size() == jt2.joint_names.size()) {
+      point.accelerations = p1.accelerations;
+      point.accelerations.insert(point.accelerations.end(),
+                                  p2.accelerations.begin(), p2.accelerations.end());
+    }
+    // Populate builtin_interfaces/Duration directly for ROS 2 Jazzy.
+    const auto whole_seconds = static_cast<int32_t>(std::floor(t));
+    auto nanoseconds = static_cast<int64_t>(
+      std::llround((t - static_cast<double>(whole_seconds)) * 1e9));
+    point.time_from_start.sec = whole_seconds;
+    if (nanoseconds >= 1000000000LL) {
+      point.time_from_start.sec += 1;
+      nanoseconds -= 1000000000LL;
+    }
+    point.time_from_start.nanosec = static_cast<uint32_t>(nanoseconds);
+    merged.points.push_back(std::move(point));
+  }
+
+  RCLCPP_INFO(logger,
+    "[%s] Both LIN plans succeeded; executing merged %zu-joint trajectory (%.3f s).",
+    stage.c_str(), merged.joint_names.size(), shared_duration);
+  const auto executed = combinedgroup.execute(combined_plan);
+  if (executed != moveit::core::MoveItErrorCode::SUCCESS) {
+    RCLCPP_ERROR(logger, "[%s] Combined LIN execution failed (code %d).", stage.c_str(), executed.val);
+    return false;
+  }
+
+  RCLCPP_INFO(logger, "[%s] Combined LIN execution succeeded.", stage.c_str());
+  return true;
+}
+
 // Solve each end-effector IK against the same RobotState, then plan one combined
 // 12-joint goal. This avoids overwriting one arm's pose target with the other.
 bool planAndExecuteBoth(
@@ -228,9 +438,48 @@ bool moveBoth(
   return planAndExecuteBoth(logger, group, p3, p4, stage);
 }
 
+// Plan and execute one collision-checked 12-joint MoveJ to the SRDF named home state.
+bool moveCombinedHome(
+  const rclcpp::Logger & logger,
+  moveit::planning_interface::MoveGroupInterface & combined)
+{
+  combined.setStartStateToCurrentState();
+  combined.setPlanningPipelineId("ompl");
+  combined.setPlannerId("RRTConnectkConfigDefault");
+  combined.setPlanningTime(kPlanningTime);
+  combined.setNumPlanningAttempts(kPlanningAttempts);
+  combined.setMaxVelocityScalingFactor(kVelocity);
+  combined.setMaxAccelerationScalingFactor(kAcceleration);
+  combined.clearPoseTargets();
+  combined.clearPathConstraints();
+
+  if (!combined.setNamedTarget("home")) {
+    RCLCPP_ERROR(logger, "Named state 'home' is not defined for '%s'.", kCombinedGroup);
+    return false;
+  }
+
+  moveit::planning_interface::MoveGroupInterface::Plan plan;
+  const auto planned = combined.plan(plan);
+  if (planned != moveit::core::MoveItErrorCode::SUCCESS) {
+    RCLCPP_ERROR(logger, "Combined HOME planning failed (code %d).", planned.val);
+    return false;
+  }
+
+  const auto executed = combined.execute(plan);
+  if (executed != moveit::core::MoveItErrorCode::SUCCESS) {
+    RCLCPP_ERROR(logger, "Combined HOME execution failed (code %d).", executed.val);
+    return false;
+  }
+
+  RCLCPP_INFO(logger, "Both arms reached combined HOME.");
+  return true;
+}
+
 bool runSequence(
   const rclcpp::Node::SharedPtr & node,
   moveit::planning_interface::MoveGroupInterface & combined,
+  moveit::planning_interface::MoveGroupInterface & robot3,
+  moveit::planning_interface::MoveGroupInterface & robot4,
   tf2_ros::Buffer & tf,
   PlanningSceneObjects & scene,
   ArmConfig & a3, ArmConfig & a4,
@@ -271,26 +520,34 @@ bool runSequence(
     return false;
   }
 
-  // 1) Move both arms to pick approach in one combined plan.
-  if (!moveBoth(logger, combined, pickApproach3, pickApproach4, "pick approach")) return false;
+  // 1) Keep the initial pick-approach movement as one combined OMPL plan.
+  if (!moveBoth(logger, combined, pickApproach3, pickApproach4, "pick approach")) {
+    return false;
+  }
 
-  // 2) Allow only each rebar's gripper-touch links.
+  // 2) Allow only each rebar's gripper-touch links during the pick.
   if (!scene.setObjectCollisionsAllowed(a3.object_id, a3.touch_links, true) ||
       !scene.setObjectCollisionsAllowed(a4.object_id, a4.touch_links, true)) {
     RCLCPP_ERROR(logger, "Failed to configure rebar/gripper contact allowances.");
     return false;
   }
 
-  // 3) Move both arms to their pick poses together.
-  if (!moveBoth(logger, combined, pick3, pick4, "pick")) return false;
+  // 3) Plan both pick LIN trajectories independently, merge, and execute together.
+  if (!movel_combined(logger, robot3, robot4, combined, pick3, pick4,
+      "pick approach -> pick")) {
+    RCLCPP_ERROR(logger, "Stopping sequence: combined pick LIN failed.");
+    return false;
+  }
 
   // 4) Attach both objects, preserving their world poses.
   if (!scene.attachWorldObjectPreservingPose(combined, a3.object_id, a3.link, a3.touch_links)) {
-    RCLCPP_ERROR(logger, "Failed to attach %s to %s.", a3.object_id.c_str(), a3.link.c_str());
+    RCLCPP_ERROR(logger, "Failed to attach %s to %s.",
+      a3.object_id.c_str(), a3.link.c_str());
     return false;
   }
   if (!scene.attachWorldObjectPreservingPose(combined, a4.object_id, a4.link, a4.touch_links)) {
-    RCLCPP_ERROR(logger, "Failed to attach %s to %s. Robot 3 object remains attached for recovery.",
+    RCLCPP_ERROR(logger,
+      "Failed to attach %s to %s. Robot 3 object remains attached for recovery.",
       a4.object_id.c_str(), a4.link.c_str());
     return false;
   }
@@ -301,34 +558,47 @@ bool runSequence(
     RCLCPP_ERROR(logger, "Failed to enable rebar/inventory contact during retract.");
     return false;
   }
-  if (!moveBoth(logger, combined, pickApproach3, pickApproach4, "pick retract")) return false;
+
+  // 6) Retract both arms from pick using the combined LIN function.
+  if (!movel_combined(logger, robot3, robot4, combined,
+      pickApproach3, pickApproach4, "pick -> pick retract")) {
+    RCLCPP_ERROR(logger, "Combined pick retract LIN failed; objects remain attached.");
+    return false;
+  }
+
   if (!scene.setObjectCollisionsAllowed(a3.object_id, {a3.inventory_id}, false) ||
       !scene.setObjectCollisionsAllowed(a4.object_id, {a4.inventory_id}, false)) {
     RCLCPP_ERROR(logger, "Failed to restore inventory collision checking.");
     return false;
   }
 
-  // 6) Carry both rebars along their arcs. Each waypoint is a single combined plan.
+  // 7) Carry both rebars along their arcs. Each paired waypoint uses combined LIN.
   for (std::size_t i = 0; i < arc3.size(); ++i) {
-    if (!moveBoth(logger, combined, arc3[i], arc4[i],
+    if (!movel_combined(logger, robot3, robot4, combined, arc3[i], arc4[i],
         "arc waypoint " + std::to_string(i + 1) + "/" + std::to_string(arc3.size()))) {
       RCLCPP_ERROR(logger, "Arc failed; attached rebars remain attached for recovery.");
       return false;
     }
   }
 
-  // 7) Permit rebar-to-jig contact for placement (robot-to-jig checks remain enabled).
+  // 8) Permit rebar-to-jig contact for placement; robot-to-jig checks remain enabled.
   if (!scene.setObjectCollisionsAllowed(a3.object_id, {"jig_clamp"}, true) ||
       !scene.setObjectCollisionsAllowed(a4.object_id, {"jig_clamp"}, true)) {
     RCLCPP_ERROR(logger, "Failed to allow rebar/jig contact.");
     return false;
   }
 
-  // 8) Move to place approach and then place, with both arms planned together.
-  if (!moveBoth(logger, combined, placeApproach3, placeApproach4, "place approach") ||
-      !moveBoth(logger, combined, place3, place4, "place")) return false;
+  // 9) Place approach and place both use the combined LIN function.
+  if (!movel_combined(logger, robot3, robot4, combined,
+      placeApproach3, placeApproach4, "place approach")) {
+    return false;
+  }
+  if (!movel_combined(logger, robot3, robot4, combined,
+      place3, place4, "place")) {
+    return false;
+  }
 
-  // 9) Detach each rebar into the world at its actual release pose.
+  // 10) Detach each rebar into the world at its actual release pose.
   if (!scene.detachObjectToWorldPreservingPose(combined, a3.object_id)) {
     RCLCPP_ERROR(logger, "Failed to detach %s.", a3.object_id.c_str());
     return false;
@@ -338,15 +608,25 @@ bool runSequence(
     return false;
   }
 
-  // 10) Retract both arms, then restore gripper collision checks.
-  if (!moveBoth(logger, combined, placeApproach3, placeApproach4, "place retract")) return false;
+  // 11) Retract both arms using combined LIN, then restore gripper collision checks.
+  if (!movel_combined(logger, robot3, robot4, combined,
+      placeApproach3, placeApproach4, "place retract")) {
+    return false;
+  }
   if (!scene.setObjectCollisionsAllowed(a3.object_id, a3.touch_links, false) ||
       !scene.setObjectCollisionsAllowed(a4.object_id, a4.touch_links, false)) {
-    RCLCPP_ERROR(logger, "Objects placed, but failed to restore gripper collision checking.");
+    RCLCPP_ERROR(logger,
+      "Objects placed, but failed to restore gripper collision checking.");
     return false;
   }
 
-  RCLCPP_INFO(logger, "Combined Robot 3 + Robot 4 pick/place completed.");
+  // 12) Once place retract is complete, return both arms home together.
+  if (!moveCombinedHome(logger, combined)) {
+    RCLCPP_ERROR(logger, "Combined HOME motion failed after place retract.");
+    return false;
+  }
+
+  RCLCPP_INFO(logger, "Combined Robot 3 + Robot 4 pick/place and HOME completed.");
   return true;
 }
 
@@ -431,15 +711,23 @@ int main(int argc, char ** argv)
 
     RCLCPP_INFO(node->get_logger(), "Initializing combined group '%s'.", kCombinedGroup);
     moveit::planning_interface::MoveGroupInterface combined(node, kCombinedGroup);
+    moveit::planning_interface::MoveGroupInterface robot3(node, kRobot3Group);
+    moveit::planning_interface::MoveGroupInterface robot4(node, kRobot4Group);
     combined.setPoseReferenceFrame(kWorld);
+    robot3.setPoseReferenceFrame(kWorld);
+    robot4.setPoseReferenceFrame(kWorld);
     combined.setPlanningTime(kPlanningTime);
+    robot3.setPlanningTime(kPlanningTime);
+    robot4.setPlanningTime(kPlanningTime);
 
-    if (!combined.getCurrentState(10.0)) {
+    if (!combined.getCurrentState(10.0) ||
+        !robot3.getCurrentState(10.0) ||
+        !robot4.getCurrentState(10.0)) {
       RCLCPP_ERROR(node->get_logger(), "Combined group's current state unavailable.");
     } else {
       PlanningSceneObjects scene(node);
       success = runSequence(
-        node, combined, tf_buffer, scene, a3, a4,
+        node, combined, robot3, robot4, tf_buffer, scene, a3, a4,
         std::max<int64_t>(2, node->get_parameter("arc_points").as_int()));
     }
 

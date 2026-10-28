@@ -20,10 +20,20 @@ motion_sequence:
         #     place_frame: place_frame_10
         #     object_id: rebar_4c
 
-        # - attach_tool
+        - attach_tool
       mode: parallel
       retries: 1
       on_failure: abort
+
+
+    - name: "Pick/place web rings & shear clamps"
+      executables:
+        - robot1_motion
+        # - robot2_motion
+      mode: parallel
+      retries: 1
+      on_failure: abort
+
 
     # - name: "Pick/place web flanges"
     #   executables:

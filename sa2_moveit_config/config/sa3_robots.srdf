@@ -12,6 +12,23 @@
     <group name="robot4_arm">
         <chain base_link="robot4_base_link" tip_link="robot4_end_effactor" />
     </group>
+
+    <group name="sa3_robots_1_2">
+        <group name="robot1_arm" />
+        <group name="robot2_arm" />
+    </group>
+    <group name="robot3_robot4_arms">
+        <group name="robot3_arm"/>
+        <group name="robot4_arm"/>
+    </group>
+    <group name="sa3_all_robots">
+        <group name="robot1_arm" />
+        <group name="robot2_arm" />
+        <group name="robot3_arm" />
+        <group name="robot4_arm" />
+    </group>
+
+
     <group_state name="home" group="robot1_arm">
         <joint name="robot1_J1" value="0" />
         <joint name="robot1_J2" value="0" />
@@ -54,20 +71,35 @@
         <joint name="robot4_J5" value="0" />
         <joint name="robot4_J6" value="0" />
     </group_state>
-    <group name="sa3_robots_1_2">
-        <group name="robot1_arm" />
-        <group name="robot2_arm" />
-    </group>
-    <group name="robot3_robot4_arms">
-        <group name="robot3_arm"/>
-        <group name="robot4_arm"/>
-    </group>
-    <group name="sa3_all_robots">
-        <group name="robot1_arm" />
-        <group name="robot2_arm" />
-        <group name="robot3_arm" />
-        <group name="robot4_arm" />
-    </group>
+    
+    <group_state name="home" group="sa3_robots_1_2">
+        <joint name="robot1_J1" value="0" />
+        <joint name="robot1_J2" value="0" />
+        <joint name="robot1_J3" value="0" />
+        <joint name="robot1_J4" value="0" />
+        <joint name="robot1_J5" value="0" />
+        <joint name="robot1_J6" value="0" />
+        <joint name="robot2_J1" value="0" />
+        <joint name="robot2_J2" value="0" />
+        <joint name="robot2_J3" value="0" />
+        <joint name="robot2_J4" value="0" />
+        <joint name="robot2_J5" value="0" />
+        <joint name="robot2_J6" value="0" />
+    </group_state>
+    <group_state name="home" group="robot3_robot4_arms">
+        <joint name="robot3_J1" value="0" />
+        <joint name="robot3_J2" value="0" />
+        <joint name="robot3_J3" value="0" />
+        <joint name="robot3_J4" value="0" />
+        <joint name="robot3_J5" value="0" />
+        <joint name="robot3_J6" value="0" />
+        <joint name="robot4_J1" value="0" />
+        <joint name="robot4_J2" value="0" />
+        <joint name="robot4_J3" value="0" />
+        <joint name="robot4_J4" value="0" />
+        <joint name="robot4_J5" value="0" />
+        <joint name="robot4_J6" value="0" />
+    </group_state>
     <group_state name="home" group="sa3_all_robots">
         <joint name="robot1_J1" value="0" />
         <joint name="robot1_J2" value="0" />

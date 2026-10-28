@@ -43,6 +43,12 @@ ros2 launch sa3_motion sa3_motion_sequence_yaml.launch.py \
 
 For Jazzy, source the corresponding Jazzy setup instead.
 
+
+## FOR HARDWARE LAUNCH
+
+```bash
+ros2 launch sa2_moveit_config sa3_bringup.launch.py   robot1_hardware:=mock   robot2_hardware:=mock   robot3_hardware:=fanuc   robot3_ip:=192.168.2.3   robot4_hardware:=mock
+```
 ## Configuration
 
 The simulation is primarily configured through two YAML files:
@@ -88,6 +94,12 @@ ros2 launch sa3_motion sa3_motion_sequence_yaml.launch.py \
 ros2 run sa3_motion <node_name>   --ros-args   --params-file ~/ros_ws/sa3_j/src/src/sa3_motion/config/move_grouph.yaml
 ```
 
+## change tolerance to avoid moveit failures
+```bash
+ros2 param set /move_group \
+  trajectory_execution.allowed_start_tolerance 0.02
+```
+0.02 rad =1.14 deg by defualt its 0.01
 
 For Jazzy, source the corresponding Jazzy setup instead.
 

@@ -48,7 +48,7 @@
 
   <!-- ros2_control -->
   <xacro:include
-    filename="$(find sa2_description)/urdf/ros2_controller.urdf.xacro"/>
+    filename="$(find sa2_description)/urdf/sa3_ros2_controller.urdf.xacro"/>
   <xacro:include
     filename="$(find sa2_description)/urdf/gantry.urdf.xacro"/>
   
