@@ -474,6 +474,47 @@ ament_target_dependencies(flange_pp
   tf2_ros
 )
 
+# ============================================================
+# Shear links pick/place (robot1 + robot2, combined execution)
+# ============================================================
+
+add_executable(shear_links_pp
+  src/shear_links_pp.cpp
+)
+
+target_include_directories(shear_links_pp PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(shear_links_pp
+  rclcpp
+  moveit_ros_planning_interface
+  moveit_core
+  moveit_msgs
+  geometry_msgs
+  trajectory_msgs
+  tf2
+  tf2_ros
+)
+
+add_executable(tying_rebars
+  src/tying_rebars.cpp
+)
+
+ament_target_dependencies(tying_rebars
+  rclcpp
+  moveit_ros_planning_interface
+  moveit_core
+  moveit_msgs
+  geometry_msgs
+  trajectory_msgs
+  tf2
+  tf2_ros
+)
+
+
+
 
 # ============================================================
 # Link Planning Scene Objects to robot motion nodes
@@ -500,7 +541,9 @@ target_link_libraries(robot3_sa3pp
 target_link_libraries(flange_pp
   planning_scene_objects
 )
-
+target_link_libraries(shear_links_pp
+  planning_scene_objects
+)
 # ============================================================
 # Install executables
 # ============================================================
@@ -524,8 +567,10 @@ install(
     attach_tool
     robot3_sa3pp
     flange_pp
-
+    shear_links_pp
     gantry_move
+    tying_rebars
+
   DESTINATION lib/${PROJECT_NAME}
 )
 
