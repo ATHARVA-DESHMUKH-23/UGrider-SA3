@@ -61,6 +61,7 @@
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
 
 #include "sa3_motion/planning_scene_objects.hpp"
+#include "sa3_motion/workcell_program.hpp"
 
 using namespace std::chrono_literals;
 using MoveItErr = moveit_msgs::msg::MoveItErrorCodes;
@@ -72,28 +73,100 @@ namespace
 {
 
 constexpr char kNodeName[] = "shear_links_pp";
-constexpr char kCombinedGroup[] = "sa3_robots_1_2";
+// YAML overrides are loaded before constructing MoveGroupInterface objects.
+std::string kCombinedGroup = "sa3_robots_1_2";
 constexpr char kWorld[] = "world";
+std::string kRobot1Group = "robot1_arm", kRobot1Link = "robot1_end_effactor";
+std::string kRobot2Group = "robot2_arm", kRobot2Link = "robot2_end_effactor";
+std::array<double, 3> kApproachOffset = {0.0, -0.25, 0.0};
+std::string kApproachFrame = "world";
+std::string kJigClampId = "jig_clamp";
+double kPlanningTime = 15.0;
+int kOmplAttempts = 10, kPlanRetries = 3;
+double kMoveJVelocity = 0.30, kMoveJAcceleration = 0.20;
+double kMoveLAcceleration = 0.10, kMoveCAcceleration = 0.10;
+std::vector<double> kLinVelScales = {0.10, 0.05, 0.03, 0.02, 0.01};
+std::vector<double> kCircVelScales = {0.10, 0.05, 0.03, 0.02, 0.01};
+std::vector<std::string> kTransitStrategies = {"moveL", "moveC", "moveJ"};
+std::vector<sa3_yaml::Step> kConfiguredStages;
+std::string kRobot1Ring = "web_ring", kRobot2Ring = "web_ring_2";
+std::vector<std::string> kRobot1GripperLinks, kRobot2GripperLinks;
+double kRobot1ViaX = 0.235, kRobot2ViaX = 5.22;
+std::vector<std::string> kRobot1PairSpecs, kRobot2PairSpecs;
 
-constexpr char kRobot1Group[] = "robot1_arm";
-constexpr char kRobot1Link[] = "robot1_end_effactor";   // (sic) matches SRDF
-constexpr char kRobot2Group[] = "robot2_arm";
-constexpr char kRobot2Link[] = "robot2_end_effactor";   // (sic) matches SRDF
+void loadShearProgram(const rclcpp::Node::SharedPtr & node) {
+  const auto w = sa3_yaml::loadWorkcell(node);
+  const auto c = sa3_yaml::require(w, "shear_links_pp", "workcell");
+  const auto p = sa3_yaml::require(c, "planning", "workcell.shear_links_pp");
+  kCombinedGroup = sa3_yaml::name(sa3_yaml::require(c, "combined_group", "shear_links_pp"), "combined_group");
+  if (c["world_frame"].as<std::string>("world") != "world") throw std::runtime_error("shear_links_pp world_frame must be world");
+  kJigClampId = sa3_yaml::name(sa3_yaml::require(c, "jig_object_id", "shear_links_pp"), "jig_object_id");
+  kPlanningTime = sa3_yaml::finite(p["planning_time"], "shear planning_time");
+  kOmplAttempts = p["ompl_attempts"].as<int>();
+  kPlanRetries = p["plan_retries"].as<int>();
+  kMoveJVelocity = sa3_yaml::finite(p["movej_velocity"], "movej_velocity");
+  kMoveJAcceleration = sa3_yaml::finite(p["movej_acceleration"], "movej_acceleration");
+  kMoveLAcceleration = sa3_yaml::finite(p["movel_acceleration"], "movel_acceleration");
+  kMoveCAcceleration = sa3_yaml::finite(p["movec_acceleration"], "movec_acceleration");
+  kLinVelScales = sa3_yaml::scales(p["lin_velocity_scales"], "shear LIN scales");
+  kCircVelScales = sa3_yaml::scales(p["circ_velocity_scales"], "shear CIRC scales");
+  kTransitStrategies = sa3_yaml::strings(p["transit_strategies"], "transit_strategies");
+  if (kTransitStrategies != std::vector<std::string>{"moveL", "moveC", "moveJ"})
+    throw std::runtime_error("Transit fallback must remain moveL -> moveC -> moveJ for this implementation");
+  if (kPlanningTime <= 0 || kOmplAttempts < 1 || kPlanRetries < 1 ||
+      kMoveJVelocity <= 0 || kMoveJVelocity > 1 || kMoveJAcceleration <= 0 || kMoveJAcceleration > 1 ||
+      kMoveLAcceleration <= 0 || kMoveLAcceleration > 1 || kMoveCAcceleration <= 0 || kMoveCAcceleration > 1)
+    throw std::runtime_error("Invalid shear planning settings");
+  const auto approach = sa3_yaml::require(c, "approach", "shear_links_pp");
+  kApproachOffset = sa3_yaml::xyz(approach["xyz"], "shear approach xyz");
+  kApproachFrame = approach["offset_frame"].as<std::string>();
+  if (kApproachFrame != "world" && kApproachFrame != "local")
+    throw std::runtime_error("shear approach offset_frame must be world/local");
 
-constexpr std::array<double, 3> kApproachOffset = {0.0, -0.25, 0.0};
-
-const std::string kJigClampId = "jig_clamp";
-
-constexpr double kPlanningTime = 15.0;
-constexpr int kOmplAttempts = 10;
-constexpr int kPlanRetries = 3;
-
-constexpr double kMoveJVelocity = 0.30;
-constexpr double kMoveJAcceleration = 0.20;
-constexpr double kMoveLAcceleration = 0.10;
-constexpr double kMoveCAcceleration = 0.10;
-constexpr std::array<double, 5> kLinVelScales = {0.10, 0.05, 0.03, 0.02, 0.01};
-constexpr std::array<double, 5> kCircVelScales = {0.10, 0.05, 0.03, 0.02, 0.01};
+  auto arm = [&](const char * key, std::string & group, std::string & link, std::string & ring,
+                 double & via, std::vector<std::string> & touch, std::vector<std::string> & pairs) {
+    const auto a = sa3_yaml::require(c, key, "shear_links_pp");
+    group = sa3_yaml::name(a["group"], std::string(key) + ".group");
+    link = sa3_yaml::name(a["planning_link"], std::string(key) + ".planning_link");
+    ring = sa3_yaml::name(a["web_ring"], std::string(key) + ".web_ring");
+    via = sa3_yaml::finite(a["via_world_x"], std::string(key) + ".via_world_x");
+    touch = sa3_yaml::strings(a["gripper_touch_links"], std::string(key) + ".gripper_touch_links");
+    const auto entries = sa3_yaml::require(a, "pairs", key);
+    if (!entries.IsSequence()) throw std::runtime_error("shear pairs must be a list");
+    pairs.clear();
+    for (const auto & entry : entries) {
+      const auto pick = sa3_yaml::name(entry["pick_frame"], "pick_frame");
+      const auto place = sa3_yaml::name(entry["place_frame"], "place_frame");
+      const auto object = sa3_yaml::name(entry["object_id"], "object_id");
+      const auto d = sa3_yaml::xyz(entry["pick_offset"], "pick_offset");
+      std::ostringstream spec;
+      spec.precision(17);
+      spec << pick << ',' << place << ',' << object << ',' << d[0] << ',' << d[1] << ',' << d[2];
+      pairs.push_back(spec.str());
+    }
+  };
+  arm("robot1", kRobot1Group, kRobot1Link, kRobot1Ring, kRobot1ViaX, kRobot1GripperLinks, kRobot1PairSpecs);
+  arm("robot2", kRobot2Group, kRobot2Link, kRobot2Ring, kRobot2ViaX, kRobot2GripperLinks, kRobot2PairSpecs);
+  auto sequence = sa3_yaml::require(w, "planner_sequence", "workcell");
+  auto program = sa3_yaml::require(sequence, "shear_links_pp", "planner_sequence");
+  kConfiguredStages = sa3_yaml::steps(program["stages"], "planner_sequence.shear_links_pp.stages");
+  const std::vector<std::string> references = {"pick_approach", "pick", "pick_approach", "place_approach", "place", "place_approach"};
+  const std::vector<std::string> motions = {"moveJ", "moveL", "moveL", "fallback", "moveL", "moveL"};
+  const std::vector<std::vector<std::string>> actions = {
+    {"allow_pick_contact"}, {"attach_rebar", "allow_web_ring_contact"},
+    {"restore_pick_contact"}, {"allow_place_contact"}, {"detach_rebar"},
+    {"restore_place_contact", "complete_pair"}};
+  if (kConfiguredStages.size() != references.size()) throw std::runtime_error("shear requires six ordered stages");
+  for (std::size_t i = 0; i < references.size(); ++i) {
+    sa3_yaml::expectedStep(kConfiguredStages[i], references[i], motions[i], actions[i]);
+    if (kConfiguredStages[i].xyz != std::array<double, 3>{0.,0.,0.} || kConfiguredStages[i].offset_frame != "world")
+      throw std::runtime_error("shear stage xyz must be zero: approach is configured under shear_links_pp.approach");
+  }
+  const auto finish = sa3_yaml::steps(program["finish"], "shear finish");
+  if (finish.size()!=1) throw std::runtime_error("shear requires combined home step");
+  sa3_yaml::expectedStep(finish[0], "home", "moveJ");
+  RCLCPP_INFO(node->get_logger(), "Shear YAML program loaded: robot1=%zu pairs, robot2=%zu pairs", kRobot1PairSpecs.size(), kRobot2PairSpecs.size());
+}
 
 // ===========================================================================
 // types
@@ -373,51 +446,46 @@ bool planTransit(
   const rclcpp::Logger & logger, Arm & a, const moveit_msgs::msg::RobotState & start,
   MGI::Plan & plan, std::string & method)
 {
-  RCLCPP_INFO(logger, "%stransit strategy 1/3: LIN direct", tagOf(a).c_str());
-  if (planLin(logger, a, start, a.place_approach, plan)) {
-    method = "LIN direct";
-    return true;
-  }
-  RCLCPP_WARN(
-    logger, "%sLIN direct failed. Strategy 2/3: CIRC via x=%.3f", tagOf(a).c_str(), a.via_x);
-  if (planCirc(logger, a, start, a.via, a.place_approach, plan)) {
-    method = "CIRC via";
-    return true;
-  }
-  RCLCPP_WARN(logger, "%sCIRC failed. Strategy 3/3: OMPL movej direct.", tagOf(a).c_str());
-  if (planOmpl(logger, a, start, a.place_approach, plan)) {
-    method = "OMPL movej";
-    return true;
+  for (const auto & strategy : kTransitStrategies) {
+    if (strategy == "moveL" && planLin(logger, a, start, a.place_approach, plan)) {
+      method = "LIN direct"; return true;
+    }
+    if (strategy == "moveC" && planCirc(logger, a, start, a.via, a.place_approach, plan)) {
+      method = "CIRC via"; return true;
+    }
+    if (strategy == "moveJ" && planOmpl(logger, a, start, a.place_approach, plan)) {
+      method = "OMPL movej"; return true;
+    }
   }
   RCLCPP_ERROR(logger, "%sall three transit strategies failed.", tagOf(a).c_str());
   return false;
 }
 
+// Execute the currently configured (validated) SA1-style YAML planner step.
+// The fixed six-step stage order is safety-checked during configuration load.
 bool planStage(
   const rclcpp::Logger & logger, Arm & a, const moveit_msgs::msg::RobotState & start,
   MGI::Plan & plan, std::string & method)
 {
-  switch (a.stage) {
-    case Stage::kPickApproach:
-      method = "OMPL movej";
-      return planOmpl(logger, a, start, a.pick_approach, plan);
-    case Stage::kPick:
-      method = "LIN";
-      return planLin(logger, a, start, a.pick, plan);
-    case Stage::kPickRetract:
-      method = "LIN";
-      return planLin(logger, a, start, a.pick_approach, plan);
-    case Stage::kTransit:
-      return planTransit(logger, a, start, plan, method);
-    case Stage::kPlace:
-      method = "LIN";
-      return planLin(logger, a, start, a.place, plan);
-    case Stage::kPlaceRetract:
-      method = "LIN";
-      return planLin(logger, a, start, a.place_approach, plan);
-    default:
-      return false;
+  const auto & step = kConfiguredStages.at(static_cast<std::size_t>(a.stage));
+  RCLCPP_INFO(logger, "%sYAML step %s: %s -> %s", tagOf(a).c_str(),
+              step.id.c_str(), step.motion.c_str(), step.reference.c_str());
+  if (step.motion == "fallback") return planTransit(logger, a, start, plan, method);
+  const geometry_msgs::msg::Pose * target = nullptr;
+  if (step.reference == "pick") target = &a.pick;
+  else if (step.reference == "pick_approach") target = &a.pick_approach;
+  else if (step.reference == "place") target = &a.place;
+  else if (step.reference == "place_approach") target = &a.place_approach;
+  if (target == nullptr) return false;
+  if (step.motion == "moveJ") {
+    method = "OMPL movej";
+    return planOmpl(logger, a, start, *target, plan);
   }
+  if (step.motion == "moveL") {
+    method = "LIN";
+    return planLin(logger, a, start, *target, plan);
+  }
+  return false;
 }
 
 // ===========================================================================
@@ -597,8 +665,8 @@ bool beginPair(
 
   a.pick = pick;
   a.place = place;
-  a.pick_approach = offsetWorld(pick, kApproachOffset);
-  a.place_approach = offsetWorld(place, kApproachOffset);
+  a.pick_approach = sa3_yaml::offset(pick, kApproachOffset, kApproachFrame);
+  a.place_approach = sa3_yaml::offset(place, kApproachOffset, kApproachFrame);
   a.via = a.place_approach;
   a.via.position.x = a.via_x;
 
@@ -616,88 +684,47 @@ bool beginPair(
 // Scene operations after the stage's motion has been executed, then advance.
 bool finishStage(const rclcpp::Logger & logger, PlanningSceneObjects & scene, Arm & a)
 {
+  const auto & step = kConfiguredStages.at(static_cast<std::size_t>(a.stage));
   const std::string rebar = a.rebar();
-  switch (a.stage) {
-    case Stage::kPickApproach:
-      // gripper <-> rebar collision OFF until after the pick retract.
-      if (!scene.setObjectCollisionsAllowed(rebar, a.gripper_links, true)) {
-        RCLCPP_ERROR(logger, "%sfailed to allow gripper/rebar contact.", tagOf(a).c_str());
-        return false;
-      }
-      a.stage = Stage::kPick;
-      break;
-
-    case Stage::kPick:
-      if (!scene.attachWorldObjectPreservingPose(*a.mg, rebar, a.link, a.gripper_links) ||
-        !scene.verifyObjectState(rebar, false, true, a.link))
-      {
-        RCLCPP_ERROR(logger, "%sfailed to attach '%s'.", tagOf(a).c_str(), rebar.c_str());
-        return false;
-      }
-      RCLCPP_INFO(logger, "%sATTACHED: %s follows '%s'.", tagOf(a).c_str(), rebar.c_str(),
-        a.link.c_str());
-      // The attached rebar is still inside the rack slot while retracting.
-      if (!scene.setCollisionPairAllowed(rebar, a.web_ring, true)) {
-        RCLCPP_ERROR(logger, "%sfailed to allow %s <-> %s.", tagOf(a).c_str(), rebar.c_str(),
-          a.web_ring.c_str());
-        return false;
-      }
-      a.stage = Stage::kPickRetract;
-      break;
-
-    case Stage::kPickRetract:
-      if (!scene.setCollisionPairAllowed(rebar, a.web_ring, false) ||
-        !scene.setObjectCollisionsAllowed(rebar, a.gripper_links, false))
-      {
-        RCLCPP_ERROR(logger, "%sfailed to restore collisions after pick retract.",
-          tagOf(a).c_str());
-        return false;
-      }
-      a.stage = Stage::kTransit;
-      break;
-
-    case Stage::kTransit:
-      // jig_clamp <-> rebar and gripper <-> rebar OFF until after the place retract.
-      if (!scene.setObjectCollisionsAllowed(rebar, a.gripper_links, true) ||
-        !scene.setCollisionPairAllowed(rebar, kJigClampId, true))
-      {
-        RCLCPP_ERROR(logger, "%sfailed to allow place contacts.", tagOf(a).c_str());
-        return false;
-      }
-      a.stage = Stage::kPlace;
-      break;
-
-    case Stage::kPlace:
-      if (!scene.detachObjectToWorldPreservingPose(*a.mg, rebar) ||
-        !scene.verifyObjectState(rebar, true, false))
-      {
-        RCLCPP_ERROR(logger, "%sfailed to detach '%s'.", tagOf(a).c_str(), rebar.c_str());
-        return false;
-      }
-      RCLCPP_INFO(logger, "%sRELEASED: '%s' is now a world object.", tagOf(a).c_str(),
-        rebar.c_str());
-      a.stage = Stage::kPlaceRetract;
-      break;
-
-    case Stage::kPlaceRetract:
-      if (!scene.setObjectCollisionsAllowed(rebar, a.gripper_links, false) ||
-        !scene.setCollisionPairAllowed(rebar, kJigClampId, false))
-      {
-        RCLCPP_ERROR(logger, "%sfailed to restore place collisions.", tagOf(a).c_str());
-        return false;
-      }
-      RCLCPP_INFO(logger, "%s---- pair done ----", tagOf(a).c_str());
+  for (const auto & action : step.after_actions) {
+    bool ok = true;
+    if (action == "allow_pick_contact") {
+      ok = scene.setObjectCollisionsAllowed(rebar, a.gripper_links, true);
+    } else if (action == "attach_rebar") {
+      ok = scene.attachWorldObjectPreservingPose(*a.mg, rebar, a.link, a.gripper_links) &&
+        scene.verifyObjectState(rebar, false, true, a.link);
+    } else if (action == "allow_web_ring_contact") {
+      ok = scene.setCollisionPairAllowed(rebar, a.web_ring, true);
+    } else if (action == "restore_pick_contact") {
+      ok = scene.setCollisionPairAllowed(rebar, a.web_ring, false) &&
+        scene.setObjectCollisionsAllowed(rebar, a.gripper_links, false);
+    } else if (action == "allow_place_contact") {
+      ok = scene.setObjectCollisionsAllowed(rebar, a.gripper_links, true) &&
+        scene.setCollisionPairAllowed(rebar, kJigClampId, true);
+    } else if (action == "detach_rebar") {
+      ok = scene.detachObjectToWorldPreservingPose(*a.mg, rebar) &&
+        scene.verifyObjectState(rebar, true, false);
+    } else if (action == "restore_place_contact") {
+      ok = scene.setObjectCollisionsAllowed(rebar, a.gripper_links, false) &&
+        scene.setCollisionPairAllowed(rebar, kJigClampId, false);
+    } else if (action == "complete_pair") {
       ++a.completed;
       ++a.idx;
       a.pair_ready = false;
-      a.stage = (a.idx < a.pairs.size()) ? Stage::kPickApproach : Stage::kDone;
-      if (a.stage == Stage::kDone) {
-        RCLCPP_INFO(logger, "[%s] all pairs finished; arm will hold its pose.", a.name.c_str());
-      }
-      break;
-
-    default:
-      break;
+      a.stage = a.idx < a.pairs.size() ? Stage::kPickApproach : Stage::kDone;
+      RCLCPP_INFO(logger, "[%s] completed pair %zu/%zu", a.name.c_str(), a.completed, a.pairs.size());
+    } else {
+      RCLCPP_ERROR(logger, "Unknown shear YAML action: %s", action.c_str());
+      return false;
+    }
+    if (!ok) {
+      RCLCPP_ERROR(logger, "%sYAML action '%s' failed", tagOf(a).c_str(), action.c_str());
+      return false;
+    }
+  }
+  // Stage progression is fixed to the validated six-step safety program.
+  if (step.after_actions.empty() || step.after_actions.back() != "complete_pair") {
+    a.stage = static_cast<Stage>(static_cast<int>(a.stage) + 1);
   }
   return true;
 }
@@ -731,7 +758,7 @@ bool moveCombinedHome(const rclcpp::Logger & logger, MGI & combined)
   combined.clearPathConstraints();
 
   if (!combined.setNamedTarget("home")) {
-    RCLCPP_ERROR(logger, "Named state 'home' is not defined for '%s'.", kCombinedGroup);
+    RCLCPP_ERROR(logger, "Named state 'home' is not defined for '%s'.", kCombinedGroup.c_str());
     return false;
   }
   MGI::Plan plan;
@@ -941,6 +968,7 @@ int main(int argc, char ** argv)
   try {
     ok = [&]() -> bool
       {
+        loadShearProgram(node);
         RCLCPP_INFO(node->get_logger(), "Waiting for MoveIt, joint states and TF.");
         rclcpp::sleep_for(2s);
 
@@ -967,48 +995,19 @@ int main(int argc, char ** argv)
         a1.name = "robot1";
         a1.link = kRobot1Link;
         a1.mg = &robot1;
-        a1.web_ring = "web_ring";
-        a1.via_x = loadDouble(node, "robot1_via_x", 0.235);
-        a1.gripper_links = {
-          kRobot1Link, "robot1_tool_mount", "robot1_J6_link",
-          "robot1_schunk_base", "robot1_schunk_link7", "robot1_schunk_link8"};
-
+        a1.web_ring = kRobot1Ring;
+        a1.via_x = loadDouble(node, "robot1_via_x", kRobot1ViaX);
+        a1.gripper_links = kRobot1GripperLinks;
         a2.name = "robot2";
         a2.link = kRobot2Link;
         a2.mg = &robot2;
-        a2.web_ring = "web_ring_2";
-        a2.via_x = loadDouble(node, "robot2_via_x", 5.22);
-        a2.gripper_links = {
-          kRobot2Link, "robot2_tool_mount", "robot2_J6_link",
-          "robot2_schunk_base", "robot2_schunk_link7", "robot2_schunk_link8"};
+        a2.web_ring = kRobot2Ring;
+        a2.via_x = loadDouble(node, "robot2_via_x", kRobot2ViaX);
+        a2.gripper_links = kRobot2GripperLinks;
+        // YAML list is authoritative; optional ROS pair-list overrides remain supported.
+        if (!loadPairs(node, "robot1_pick_place_pairs", kRobot1PairSpecs, a1.pairs) ||
+            !loadPairs(node, "robot2_pick_place_pairs", kRobot2PairSpecs, a2.pairs)) return false;
 
-        // Pair lists: override with robot1_pick_place_pairs / robot2_pick_place_pairs in YAML.
-        // An empty list for one arm means that arm just holds while the other works.
-        const std::vector<std::string> default_pairs_1 = {
-          "5pf,5_placef_l,rebar_5a,0.0,0.0,0.0",
-          "13pf,13_placef1_l,rebar_13_1,0.0,0.0,0.0",
-          "13pf,13_placef2_l,rebar_13_2,0.10,0.0,0.0",
-          "13pf,13_placef3_l,rebar_13_3,0.20,0.0,0.0",
-          "13pf,13_placef4_l,rebar_13_4,0.30,0.0,0.0",
-          "14pf,14_placef1_l,rebar_14_1,0.0,0.0,0.0",
-          "14pf,14_placef2_l,rebar_14_2,0.20,0.0,0.0",
-          "14pf,14_placef3_l,rebar_14_3,0.40,0.0,0.0",
-          "14pf,14_placef4_l,rebar_14_4,0.60,0.0,0.0"};
-        const std::vector<std::string> default_pairs_2 = {
-          "6pf,6_placef_r,rebar_6,0.0,0.0,0.0",
-          "13_1pf,13_placef1_r,rebar_13_1_R,0.0,0.0,0.0",
-          "13_1pf,13_placef2_r,rebar_13_2_R,0.118,0.0,0.0",
-          "13_2pf,13_placef3_r,rebar_13_3_R,0.0,0.0,0.0",
-          "14_4pf,14_placef4_r,rebar_14_1_R,0.0,0.0,0.0",
-          "14_4pf,14_placef3_r,rebar_14_2_R,0.112,0.0,0.0",
-          "14_4pf,14_placef2_r,rebar_14_3_R,0.224,0.0,0.0",
-          "14_4pf,14_placef1_r,rebar_14_4_R,0.336,0.0,0.0"};
-
-        if (!loadPairs(node, "robot1_pick_place_pairs", default_pairs_1, a1.pairs) ||
-          !loadPairs(node, "robot2_pick_place_pairs", default_pairs_2, a2.pairs))
-        {
-          return false;
-        }
         a1.stage = a1.pairs.empty() ? Stage::kDone : Stage::kPickApproach;
         a2.stage = a2.pairs.empty() ? Stage::kDone : Stage::kPickApproach;
 

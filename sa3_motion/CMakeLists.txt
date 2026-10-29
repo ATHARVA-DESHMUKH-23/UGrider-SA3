@@ -318,7 +318,13 @@ ament_target_dependencies(robot1_gripper_change
   sensor_msgs
   tf2
   tf2_ros
+  ament_index_cpp
 )
+
+target_link_libraries(robot1_gripper_change
+  yaml-cpp
+)
+
 
 # ============================================================
 # YAML-driven MoveIt Planning Scene Objects
@@ -496,7 +502,13 @@ ament_target_dependencies(shear_links_pp
   trajectory_msgs
   tf2
   tf2_ros
+  ament_index_cpp
 )
+
+target_link_libraries(shear_links_pp
+  yaml-cpp
+)
+
 
 add_executable(tying_rebars
   src/tying_rebars.cpp
@@ -511,7 +523,18 @@ ament_target_dependencies(tying_rebars
   trajectory_msgs
   tf2
   tf2_ros
+  ament_index_cpp
 )
+
+target_include_directories(tying_rebars PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+target_link_libraries(tying_rebars
+  yaml-cpp
+)
+
 
 
 

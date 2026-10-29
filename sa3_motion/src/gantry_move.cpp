@@ -7,6 +7,10 @@
 #include <functional>
 #include <future>
 #include <array>
+#include <set>
+#include <sstream>
+#include <ament_index_cpp/get_package_share_directory.hpp>
+#include <yaml-cpp/yaml.h>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -40,6 +44,178 @@
 #include "tf2_ros/transform_listener.h"
 #include "sa3_motion/planning_scene_objects.hpp"
 
+// The SA1-style declarative planner record. The schema is validated before
+// any motion starts; pose offsets and collision actions come from workcell.yaml.
+struct ConfiguredGantryOffset
+{
+  std::string frame{"world"};
+  std::array<double, 3> xyz{0.0, 0.0, 0.0};
+};
+
+struct ConfiguredGantryStep
+{
+  std::string id, description, motion, planner, reference, joint;
+  std::string offset_frame{"world"}, rpy_frame{"local"};
+  std::array<double, 3> xyz{0.0, 0.0, 0.0};
+  std::array<double, 3> rpy{0.0, 0.0, 0.0};
+  std::vector<ConfiguredGantryOffset> candidates;
+  std::vector<std::string> before_actions, after_actions;
+  bool ik_check{false};
+};
+
+static std::array<double, 3> configuredVector3(
+  const YAML::Node & item, const std::string & field, const std::string & id)
+{
+  const auto values = item[field];
+  if (!values || !values.IsSequence() || values.size() != 3) {
+    throw std::runtime_error(id + ": '" + field + "' must be [x, y, z].");
+  }
+  std::array<double, 3> result{};
+  for (std::size_t i = 0; i < 3; ++i) {
+    result[i] = values[i].as<double>();
+    if (!std::isfinite(result[i])) {
+      throw std::runtime_error(id + ": nonfinite '" + field + "'.");
+    }
+  }
+  return result;
+}
+
+static std::vector<std::string> configuredActions(
+  const YAML::Node & item, const std::string & field, const std::string & id)
+{
+  const auto actions = item[field];
+  if (!actions) return {};
+  if (!actions.IsSequence()) {
+    throw std::runtime_error(id + ": '" + field + "' must be a list.");
+  }
+  const std::set<std::string> allowed = {
+    "settle", "attach_gantry", "detach_gantry", "prepare_robot3_pick",
+    "attach_robot3", "allow_jig_contact", "detach_robot3",
+    "lift_gantry_start_parallel_return", "wait_gantry_parallel_return"};
+  std::vector<std::string> result;
+  for (const auto & entry : actions) {
+    const auto name = entry.as<std::string>();
+    if (!allowed.count(name)) {
+      throw std::runtime_error(id + ": unsupported action '" + name + "'.");
+    }
+    result.push_back(name);
+  }
+  return result;
+}
+
+static std::vector<ConfiguredGantryStep> readConfiguredGantrySteps(
+  const YAML::Node & sequence, bool robot_steps)
+{
+  if (!sequence || !sequence.IsSequence() || sequence.size() == 0) {
+    throw std::runtime_error("workcell.planner_sequence.gantry_move requires nonempty gantry/robot3 lists.");
+  }
+  std::vector<ConfiguredGantryStep> result;
+  std::set<std::string> ids;
+  for (const auto & item : sequence) {
+    ConfiguredGantryStep step;
+    step.id = item["id"].as<std::string>();
+    if (step.id.empty() || !ids.insert(step.id).second) {
+      throw std::runtime_error("Empty or duplicate gantry planner step id: " + step.id);
+    }
+    step.description = item["description"].as<std::string>(step.id);
+    step.motion = item["motion"].as<std::string>();
+    step.reference = item["reference"].as<std::string>();
+    step.planner = item["planner"].as<std::string>("");
+    step.joint = item["joint"].as<std::string>("");
+    step.offset_frame = item["offset_frame"].as<std::string>("world");
+    step.rpy_frame = item["rpy_frame"].as<std::string>("local");
+    for (const auto & frame : {step.offset_frame, step.rpy_frame}) {
+      if (frame != "world" && frame != "local") {
+        throw std::runtime_error(step.id + ": offset_frame/rpy_frame must be world or local.");
+      }
+    }
+    if (!robot_steps) {
+      if (step.motion != "joint" ||
+          (step.joint != "horizontal" && step.joint != "vertical") ||
+          (step.reference != "pick" && step.reference != "home" && step.reference != "handoff")) {
+        throw std::runtime_error(step.id + ": invalid gantry joint motion/reference.");
+      }
+    } else {
+      if (step.motion != "moveJ" && step.motion != "moveL") {
+        throw std::runtime_error(step.id + ": Robot 3 motion must be moveJ or moveL.");
+      }
+      if (step.reference != "pick_frame" && step.reference != "place_frame" && step.reference != "home") {
+        throw std::runtime_error(step.id + ": unknown Robot 3 reference.");
+      }
+      if (step.motion == "moveL" && step.planner != "pilz" && step.planner != "cartesian") {
+        throw std::runtime_error(step.id + ": moveL planner must be pilz or cartesian.");
+      }
+      if (step.reference == "home" && step.motion != "moveJ") {
+        throw std::runtime_error(step.id + ": home must be a moveJ.");
+      }
+      if (step.reference != "home") {
+        step.xyz = configuredVector3(item, "xyz", step.id);
+        step.rpy = configuredVector3(item, "rpy", step.id);
+      }
+      step.ik_check = item["ik_check"].as<bool>(false);
+      const auto candidates = item["candidates"];
+      if (candidates) {
+        if (!candidates.IsSequence() || candidates.size() == 0 ||
+            step.motion != "moveL" || step.planner != "cartesian") {
+          throw std::runtime_error(step.id + ": candidates require nonempty list and Cartesian MoveL.");
+        }
+        for (const auto & c : candidates) {
+          ConfiguredGantryOffset offset;
+          offset.frame = c["offset_frame"].as<std::string>();
+          if (offset.frame != "world" && offset.frame != "local") {
+            throw std::runtime_error(step.id + ": candidate offset_frame must be world/local.");
+          }
+          offset.xyz = configuredVector3(c, "xyz", step.id + ".candidate");
+          step.candidates.push_back(offset);
+        }
+      }
+    }
+    step.before_actions = configuredActions(item, "before_actions", step.id);
+    step.after_actions = configuredActions(item, "after_actions", step.id);
+    result.push_back(std::move(step));
+  }
+  // Safety interlocks deliberately prevent YAML edits from reordering scene
+  // ownership or commanding the gantry away while Robot 3 is still in contact.
+  const std::vector<std::string> expected_ids = robot_steps ?
+    std::vector<std::string>{"R1","R2","R3","R4","R5","R6","R7"} :
+    std::vector<std::string>{"G1","G2","G3","G4","G5"};
+  const std::vector<std::vector<std::string>> expected_before = robot_steps ?
+    std::vector<std::vector<std::string>>{{"prepare_robot3_pick"},{},{},{"allow_jig_contact"},{},{},{}} :
+    std::vector<std::vector<std::string>>(5);
+  const std::vector<std::vector<std::string>> expected_after = robot_steps ?
+    std::vector<std::vector<std::string>>{{},{"attach_robot3"},{"lift_gantry_start_parallel_return"},{},{"detach_robot3"},{"wait_gantry_parallel_return"},{}} :
+    std::vector<std::vector<std::string>>{{},{"settle","attach_gantry","settle"},{},{},{"settle","detach_gantry"}};
+  if (result.size() != expected_ids.size()) {
+    throw std::runtime_error("gantry_move: missing required safety-gated planner steps.");
+  }
+  for (std::size_t i = 0; i < result.size(); ++i) {
+    if (result[i].id != expected_ids[i] ||
+        result[i].before_actions != expected_before[i] ||
+        result[i].after_actions != expected_after[i]) {
+      throw std::runtime_error("gantry_move: invalid safety action ordering at step " + result[i].id);
+    }
+  }
+  if (!robot_steps) {
+    const std::vector<std::pair<std::string,std::string>> targets = {
+      {"horizontal","pick"},{"vertical","pick"},{"vertical","home"},
+      {"horizontal","handoff"},{"vertical","handoff"}};
+    for (std::size_t i=0;i<result.size();++i) {
+      if (result[i].joint != targets[i].first || result[i].reference != targets[i].second) {
+        throw std::runtime_error("gantry_move: unsafe gantry joint order at " + result[i].id);
+      }
+    }
+  } else if (result[0].candidates.empty() || result[0].reference != "pick_frame" ||
+             result[1].motion != "moveL" || result[1].planner != "pilz" || result[1].reference != "pick_frame" ||
+             result[2].motion != "moveL" || result[2].planner != "cartesian" || result[2].reference != "pick_frame" ||
+             result[3].motion != "moveL" || result[3].planner != "cartesian" || result[3].reference != "place_frame" ||
+             result[4].motion != "moveL" || result[4].planner != "cartesian" || result[4].reference != "place_frame" ||
+             result[5].motion != "moveL" || result[5].planner != "cartesian" || result[5].reference != "place_frame" ||
+             result[6].reference != "home" || result[6].motion != "moveJ") {
+    throw std::runtime_error("gantry_move: Robot 3 safety-gated pick/place planner shape is invalid.");
+  }
+  return result;
+}
+
 using namespace std::chrono_literals;
 
 class GantryMotion final : public rclcpp::Node
@@ -54,89 +230,90 @@ public:
     const rclcpp::NodeOptions & options = rclcpp::NodeOptions())
   : Node("gantry_move", options)
   {
+    loadWorkcellProgram();
     // parameterOrDeclare() is used for every parameter because main() enables
     // automatically_declare_parameters_from_overrides(true). Plain
     // declare_parameter() would throw ParameterAlreadyDeclared for any value
     // that the params file sets.
-    controller_action_ = parameterOrDeclare<std::string>(
+    controller_action_ = configuredParameterOrDeclare<std::string>(
       "controller_action",
       "/gantry_controller/follow_joint_trajectory");
 
-    horizontal_joint_ = parameterOrDeclare<std::string>(
+    horizontal_joint_ = configuredParameterOrDeclare<std::string>(
       "horizontal_joint", "gantry_slide_joint");
 
-    vertical_joint_ = parameterOrDeclare<std::string>(
+    vertical_joint_ = configuredParameterOrDeclare<std::string>(
       "vertical_joint", "gantry_down_joint");
 
-    object_id_ = parameterOrDeclare<std::string>(
+    object_id_ = configuredParameterOrDeclare<std::string>(
       "rebar_object_id", "rebar_1A");
 
-    attach_link_ = parameterOrDeclare<std::string>(
+    attach_link_ = configuredParameterOrDeclare<std::string>(
       "attach_link", "gantry_part_link");
 
-    move_group_name_ = parameterOrDeclare<std::string>(
+    move_group_name_ = configuredParameterOrDeclare<std::string>(
       "move_group_name", "robot3_arm");
 
-    horizontal_home_ = parameterOrDeclare<double>("horizontal_home_m", 0.0);
-    vertical_home_ = parameterOrDeclare<double>("vertical_home_m", 0.0);
-    robot3_group_name_ = parameterOrDeclare<std::string>("robot3_group", "robot3_arm");
-    robot3_link_ = parameterOrDeclare<std::string>("robot3_planning_link", "robot3_end_effactor");
-    rebar_id_ = parameterOrDeclare<std::string>("robot_rebar_object_id", "rebar_1A");
-    pick3_frame_ = parameterOrDeclare<std::string>("robot3_pick_frame", "bm_pkL");
-    place3_frame_ = parameterOrDeclare<std::string>("robot3_place_frame", "bm_pfl");
+    horizontal_home_ = configuredParameterOrDeclare<double>("horizontal_home_m", 0.0);
+    vertical_home_ = configuredParameterOrDeclare<double>("vertical_home_m", 0.0);
+    robot3_group_name_ = configuredParameterOrDeclare<std::string>("robot3_group", "robot3_arm");
+    robot3_link_ = configuredParameterOrDeclare<std::string>("robot3_planning_link", "robot3_end_effactor");
+    rebar_id_ = configuredParameterOrDeclare<std::string>("robot_rebar_object_id", "rebar_1A");
+    pick3_frame_ = configuredParameterOrDeclare<std::string>("robot3_pick_frame", "bm_pkL");
+    place3_frame_ = configuredParameterOrDeclare<std::string>("robot3_place_frame", "bm_pfl");
     // Collision object / link the carried rebar is allowed to touch while it is
     // being placed. Set to an empty string to disable the allowance.
-    jig_clamp_name_ = parameterOrDeclare<std::string>("jig_clamp_name", "jig_clamp");
+    jig_clamp_name_ = configuredParameterOrDeclare<std::string>("jig_clamp_name", "jig_clamp");
     // Optional: collision objects the carried rebar may touch during transport
     // (for example the inventory rack it was resting on). Empty by default;
     // every entry removes collision protection against that object.
-    rebar_contact_objects_ = parameterOrDeclare<std::vector<std::string>>(
+    rebar_contact_objects_ = configuredParameterOrDeclare<std::vector<std::string>>(
       "rebar_allowed_contact_objects", std::vector<std::string>{});
-    approach_height_ = parameterOrDeclare<double>("approach_height_m", 0.60);
+    approach_height_ = configuredParameterOrDeclare<double>("approach_height_m", 0.60);
     // Robot 3 stops this far in front of the place frame before the final MoveL.
-    place_approach_distance_ = parameterOrDeclare<double>("place_approach_distance_m", 0.10);
+    place_approach_distance_ = configuredParameterOrDeclare<double>("place_approach_distance_m", 0.10);
     // Pick approach defaults to a vertical lift in the world frame.
     // The selected pick approach pose is also used as the post-pick retract pose.
-    pick_approach_dx_ = parameterOrDeclare<double>("pick_approach_dx_m", 0.0);
-    pick_approach_dz_ = parameterOrDeclare<double>("pick_approach_dz_m", 0.60);
+    pick_approach_dx_ = configuredParameterOrDeclare<double>("pick_approach_dx_m", 0.0);
+    pick_approach_dz_ = configuredParameterOrDeclare<double>("pick_approach_dz_m", 0.60);
 
     // Gantry first picks rebar_1A at the inventory position, then transports
     // it to the existing hand-off position for the unchanged Robot 3 sequence.
-    horizontal_pick_target_ = parameterOrDeclare<double>(
+    horizontal_pick_target_ = configuredParameterOrDeclare<double>(
       "horizontal_pick_target_m", 0.0);
-    vertical_pick_target_ = parameterOrDeclare<double>(
+    vertical_pick_target_ = configuredParameterOrDeclare<double>(
       "vertical_pick_target_m", 4.1);
 
-    horizontal_target_ = parameterOrDeclare<double>(
+    horizontal_target_ = configuredParameterOrDeclare<double>(
       "horizontal_target_m", -6.0);
-    vertical_target_ = parameterOrDeclare<double>(
+    vertical_target_ = configuredParameterOrDeclare<double>(
       "down_target_m", 1.2);
 
-    speed_ = parameterOrDeclare<double>("speed_mps", 0.30);
-    acceleration_ = parameterOrDeclare<double>(
+    speed_ = configuredParameterOrDeclare<double>("speed_mps", 0.30);
+    acceleration_ = configuredParameterOrDeclare<double>(
       "acceleration_mps2", 0.50);
 
-    horizontal_min_ = parameterOrDeclare<double>(
+    horizontal_min_ = configuredParameterOrDeclare<double>(
       "horizontal_min_m", -10.6);
-    horizontal_limit_ = parameterOrDeclare<double>(
+    horizontal_limit_ = configuredParameterOrDeclare<double>(
       "horizontal_limit_m", 10.6);
 
-    vertical_limit_ = parameterOrDeclare<double>(
+    vertical_limit_ = configuredParameterOrDeclare<double>(
       "vertical_limit_m", 6.6);
 
-    settle_time_sec_ = parameterOrDeclare<double>(
+    settle_time_sec_ = configuredParameterOrDeclare<double>(
       "settle_time_sec", 0.5);
 
-    trajectory_timeout_sec_ = parameterOrDeclare<double>(
+    trajectory_timeout_sec_ = configuredParameterOrDeclare<double>(
       "trajectory_timeout_sec", 60.0);
 
     // Auto-start: run the sequence once, by itself, after startup.
-    auto_start_ = parameterOrDeclare<bool>("auto_start", true);
+    auto_start_ = configuredParameterOrDeclare<bool>("auto_start", true);
 
-    start_delay_sec_ = parameterOrDeclare<double>(
+    start_delay_sec_ = configuredParameterOrDeclare<double>(
       "start_delay_sec", 3.0);
 
-    ready_timeout_sec_ = parameterOrDeclare<double>(
+    ready_timeout_sec_ = configuredParameterOrDeclare<double>(
       "ready_timeout_sec", 90.0);
 
     validateParameters();
@@ -312,6 +489,85 @@ private:
   double ready_timeout_sec_{90.0};
 
   std::thread worker_;
+
+  YAML::Node yaml_parameters_;
+  std::vector<ConfiguredGantryStep> gantry_planner_steps_, robot3_planner_steps_;
+  std::vector<std::string> robot3_touch_links_;
+  double planning_time_{15.0};
+  double home_velocity_{0.50}, home_acceleration_{0.40};
+  double cartesian_velocity_{0.15}, cartesian_acceleration_{0.10};
+  double cartesian_translation_step_{0.01}, cartesian_rotation_step_{0.03};
+  double cartesian_eef_step_{0.01}, cartesian_min_fraction_{0.99};
+  double pilz_velocity_{0.20}, pilz_acceleration_{0.10};
+
+  // Load before declaring regular parameters: explicit --ros-args/-p/launch
+  // overrides win over the defaults stored in workcell.gantry_move.
+  void loadWorkcellProgram()
+  {
+    const auto pkg = parameterOrDeclare<std::string>(
+      "workcell_config_package", "sa2_description");
+    const auto file = parameterOrDeclare<std::string>(
+      "workcell_config_file", "config/workcell.yaml");
+    const auto override_path = parameterOrDeclare<std::string>(
+      "workcell_config_path", "");
+    const std::string path = override_path.empty() ?
+      ament_index_cpp::get_package_share_directory(pkg) + "/" + file :
+      override_path;
+    const auto root = YAML::LoadFile(path);
+    const auto workcell = root["workcell"];
+    const auto config = workcell["gantry_move"];
+    const auto sequence = workcell["planner_sequence"]["gantry_move"];
+    if (!config || !config.IsMap() || !sequence || !sequence.IsMap()) {
+      throw std::runtime_error("Missing workcell.gantry_move or planner_sequence.gantry_move in " + path);
+    }
+    yaml_parameters_ = config["ros_parameters"];
+    if (!yaml_parameters_ || !yaml_parameters_.IsMap()) {
+      throw std::runtime_error("workcell.gantry_move.ros_parameters must be a mapping.");
+    }
+    gantry_planner_steps_ = readConfiguredGantrySteps(sequence["gantry"], false);
+    robot3_planner_steps_ = readConfiguredGantrySteps(sequence["robot3"], true);
+    const auto links = config["robot3_touch_links"];
+    if (!links || !links.IsSequence() || links.size() == 0) {
+      throw std::runtime_error("workcell.gantry_move.robot3_touch_links required.");
+    }
+    for (const auto & link : links) {
+      robot3_touch_links_.push_back(link.as<std::string>());
+      if (robot3_touch_links_.back().empty()) {
+        throw std::runtime_error("gantry_move robot3_touch_links cannot include empty links.");
+      }
+    }
+    const auto planning = config["planning"];
+    const auto planningValue = [&](const std::string & key, double min, double max) {
+      const double value = planning[key].as<double>();
+      if (!std::isfinite(value) || value < min || value > max) {
+        throw std::runtime_error("gantry_move.planning." + key + " out of range.");
+      }
+      return value;
+    };
+    planning_time_ = planningValue("planning_time", 0.1, 600.0);
+    home_velocity_ = planningValue("joint_movej_velocity", 0.001, 1.0);
+    home_acceleration_ = planningValue("joint_movej_acceleration", 0.001, 1.0);
+    cartesian_velocity_ = planningValue("cartesian_velocity", 0.001, 1.0);
+    cartesian_acceleration_ = planningValue("cartesian_acceleration", 0.001, 1.0);
+    cartesian_translation_step_ = planningValue("cartesian_max_translation_step_m", 0.001, 0.20);
+    cartesian_rotation_step_ = planningValue("cartesian_max_rotation_step_rad", 0.001, 1.0);
+    cartesian_eef_step_ = planningValue("cartesian_eef_step_m", 0.001, 0.20);
+    cartesian_min_fraction_ = planningValue("cartesian_min_fraction", 0.90, 1.0);
+    pilz_velocity_ = planningValue("pilz_velocity", 0.001, 1.0);
+    pilz_acceleration_ = planningValue("pilz_acceleration", 0.001, 1.0);
+    RCLCPP_INFO(get_logger(), "Loaded %zu gantry and %zu Robot3 YAML steps from %s",
+      gantry_planner_steps_.size(), robot3_planner_steps_.size(), path.c_str());
+  }
+
+  template<typename T>
+  T configuredParameterOrDeclare(
+    const std::string & name, const T & original_default)
+  {
+    if (yaml_parameters_[name]) {
+      return parameterOrDeclare<T>(name, yaml_parameters_[name].as<T>());
+    }
+    return parameterOrDeclare<T>(name, original_default);
+  }
 
   template<typename T>
   T parameterOrDeclare(
@@ -698,13 +954,13 @@ private:
   {
     group.setStartStateToCurrentState();
     group.setPoseReferenceFrame("world");
-    group.setPlanningTime(15.0);
+    group.setPlanningTime(planning_time_);
     // Pilz LIN can fail when the IK solution changes sharply between nearby
     // Cartesian samples. Allow a per-motion scale so the final place approach
     // can run much more slowly than ordinary retract motions.
     const double safe_linear_velocity = std::clamp(linear_velocity_scaling, 0.005, 0.40);
-    group.setMaxVelocityScalingFactor(linear ? safe_linear_velocity : 0.60);
-    group.setMaxAccelerationScalingFactor(linear ? std::min(0.10, safe_linear_velocity) : 0.50);
+    group.setMaxVelocityScalingFactor(linear ? safe_linear_velocity : home_velocity_);
+    group.setMaxAccelerationScalingFactor(linear ? std::min(pilz_acceleration_, safe_linear_velocity) : home_acceleration_);
     group.clearPoseTargets();
     group.clearPathConstraints();
     group.setPlanningPipelineId(linear ? "pilz_industrial_motion_planner" : "ompl");
@@ -763,9 +1019,7 @@ private:
   bool planAndExecuteCartesianMoveL(
     MoveGroup & group,
     const geometry_msgs::msg::Pose & target,
-    const std::string & label,
-    double max_translation_step_m = 0.01,
-    double max_rotation_step_rad = 0.03)
+    const std::string & label)
   {
     const auto current_stamped = group.getCurrentPose(robot3_link_);
     if (current_stamped.header.frame_id.empty()) {
@@ -793,9 +1047,9 @@ private:
     target_q.normalize();
     const double angle = start_q.angleShortestPath(target_q);
     const int translation_steps = static_cast<int>(std::ceil(
-      distance / std::max(0.001, max_translation_step_m)));
+      distance / std::max(0.001, cartesian_translation_step_)));
     const int rotation_steps = static_cast<int>(std::ceil(
-      angle / std::max(0.005, max_rotation_step_rad)));
+      angle / std::max(0.001, cartesian_rotation_step_)));
     const int steps = std::clamp(std::max({1, translation_steps, rotation_steps}), 1, 2000);
 
     std::vector<geometry_msgs::msg::Pose> waypoints;
@@ -817,8 +1071,8 @@ private:
     group.setStartStateToCurrentState();
     group.clearPoseTargets();
     group.clearPathConstraints();
-    group.setMaxVelocityScalingFactor(0.15);
-    group.setMaxAccelerationScalingFactor(0.10);
+    group.setMaxVelocityScalingFactor(cartesian_velocity_);
+    group.setMaxAccelerationScalingFactor(cartesian_acceleration_);
 
     moveit_msgs::msg::RobotTrajectory trajectory;
     moveit_msgs::msg::MoveItErrorCodes error_code;
@@ -828,11 +1082,11 @@ private:
       label.c_str(), distance, angle, steps);
 
     const double fraction = group.computeCartesianPath(
-      waypoints, 0.01, 0.0, trajectory, true, &error_code);
+      waypoints, cartesian_eef_step_, 0.0, trajectory, true, &error_code);
     RCLCPP_INFO(
       get_logger(), "%s: Cartesian path fraction %.3f, MoveIt error code %d.",
       label.c_str(), fraction, error_code.val);
-    if (fraction < 0.99 || trajectory.joint_trajectory.points.empty()) {
+    if (fraction < cartesian_min_fraction_ || trajectory.joint_trajectory.points.empty()) {
       RCLCPP_ERROR(
         get_logger(),
         "%s: Cartesian MoveL path incomplete (fraction %.3f); refusing to execute a partial path or use MoveJ.",
@@ -930,7 +1184,7 @@ private:
     }
 
     group.setStartStateToCurrentState();
-    group.setPlanningTime(15.0);
+    group.setPlanningTime(planning_time_);
     group.setMaxVelocityScalingFactor(0.40);
     group.setMaxAccelerationScalingFactor(0.30);
     group.clearPoseTargets();
@@ -1046,7 +1300,7 @@ private:
   {
     group.setStartStateToCurrentState();
     group.setPoseReferenceFrame("world");
-    group.setPlanningTime(15.0);
+    group.setPlanningTime(planning_time_);
     group.setNumPlanningAttempts(10);
     group.setMaxVelocityScalingFactor(0.40);
     group.setMaxAccelerationScalingFactor(0.30);
@@ -1101,8 +1355,8 @@ private:
     group.setStartStateToCurrentState();
     group.setPlanningPipelineId("ompl");
     group.setPlannerId("RRTConnectkConfigDefault");
-    group.setMaxVelocityScalingFactor(0.50);
-    group.setMaxAccelerationScalingFactor(0.40);
+    group.setMaxVelocityScalingFactor(home_velocity_);
+    group.setMaxAccelerationScalingFactor(home_acceleration_);
     group.setJointValueTarget(home);
     MoveGroup::Plan plan;
     const auto planned = group.plan(plan);
@@ -1119,651 +1373,262 @@ private:
     return true;
   }
 
-  // NOTE: This sequence updates MoveIt's planning scene; it does not actuate a physical gripper.
-  // The rebar is attached to Robot 3 only. Robot 4 is not used.
-  //
-  // Motion sequence:
-  //   1. MoveL (Cartesian path) to a SIDE pick approach, then MoveL into the pick frame.
-  //   2. Attach the rebar to Robot 3.
-  //   3. Only after Robot 3 has picked the rebar, raise and return the gantry home.
-  //   4. Robot 3 uses MoveL to 10 cm pre-place, straight MoveL into place,
-  //      retracts sideways along placement-frame local +Y, then returns home.
-  bool runRobotPickPlace()
+  geometry_msgs::msg::Pose offsetConfiguredPose(
+    const geometry_msgs::msg::Pose & base,
+    const std::array<double, 3> & xyz,
+    const std::string & frame,
+    const std::array<double, 3> & rpy = {0.0, 0.0, 0.0},
+    const std::string & rotation_frame = "local") const
   {
-    if (!robot3_group_ || !scene_objects_ || !tf_buffer_) {
-      RCLCPP_ERROR(get_logger(), "Robot 3 MoveIt/TF interfaces are not initialized.");
-      return false;
+    geometry_msgs::msg::Pose target = base;
+    tf2::Quaternion reference(base.orientation.x, base.orientation.y,
+      base.orientation.z, base.orientation.w);
+    if (reference.length2() < 1e-12) {
+      throw std::runtime_error("Invalid TF reference quaternion in YAML planner target.");
     }
-    if (!scene_objects_->verifyObjectState(rebar_id_, true, false)) {
-      RCLCPP_ERROR(get_logger(), "Expected '%s' in the world before robot pick.", rebar_id_.c_str());
-      return false;
+    reference.normalize();
+    tf2::Vector3 delta(xyz[0], xyz[1], xyz[2]);
+    if (frame == "local") delta = tf2::quatRotate(reference, delta);
+    target.position.x += delta.x();
+    target.position.y += delta.y();
+    target.position.z += delta.z();
+    tf2::Quaternion rotation;
+    rotation.setRPY(rpy[0], rpy[1], rpy[2]);
+    tf2::Quaternion new_orientation = rotation_frame == "local" ?
+      reference * rotation : rotation * reference;
+    new_orientation.normalize();
+    target.orientation.x = new_orientation.x();
+    target.orientation.y = new_orientation.y();
+    target.orientation.z = new_orientation.z();
+    target.orientation.w = new_orientation.w();
+    return target;
+  }
+
+  bool executeRobot3ConfiguredMotion(
+    const ConfiguredGantryStep & step,
+    const geometry_msgs::msg::Pose & pick,
+    const geometry_msgs::msg::Pose & place)
+  {
+    const std::string label = step.id + " " + step.description;
+    if (step.reference == "home") {
+      return moveHome(*robot3_group_, robot3_home_, label);
     }
-
-    geometry_msgs::msg::Pose pick3, place3;
-    if (!lookupPose(pick3_frame_, pick3) || !lookupPose(place3_frame_, place3)) {
-      return false;
-    }
-
-    // Robot 3 approaches the rebar from the side. After pickup and gantry
-    // clearance, it moves to the 10 cm pre-place pose, places, then retracts
-    // along the same linear approach path and returns to its captured home state.
-    geometry_msgs::msg::Pose place3_safe = place3;
-
-    RCLCPP_INFO(
-      get_logger(), "Pick frame '%s' in world: xyz=[%.3f, %.3f, %.3f] quat=[%.3f, %.3f, %.3f, %.3f]",
-      pick3_frame_.c_str(), pick3.position.x, pick3.position.y, pick3.position.z,
-      pick3.orientation.x, pick3.orientation.y, pick3.orientation.z, pick3.orientation.w);
-
-    // The gripper mesh is link 'robot3_sa3_grpr01' (robot3_end_effactor has no
-    // collision geometry), so it must be in the touch-link list. Allow contact
-    // with the rebar BEFORE the approach: the gripper envelops the rebar here.
-    const std::vector<std::string> touch_links = {
-      robot3_link_, "robot3_J6_link", "robot3_sa3_grpr01"
-    };
-    if (!scene_objects_->setObjectCollisionsAllowed(rebar_id_, touch_links, true)) {
-      RCLCPP_ERROR(get_logger(), "Could not allow rebar/gripper contact for Robot 3.");
-      return false;
-    }
-
-    // Is the pick pose itself reachable (collisions ignored)?
-    {
+    const auto & reference = step.reference == "pick_frame" ? pick : place;
+    const auto base_target = offsetConfiguredPose(
+      reference, step.xyz, step.offset_frame, step.rpy, step.rpy_frame);
+    if (!step.candidates.empty()) {
       std::map<std::string, double> unused;
-      const bool reachable = solveCollisionFreeIk(
-        *robot3_group_, pick3, unused, "Robot 3 pick pose check", false, 3.0);
-      RCLCPP_INFO(
-        get_logger(), "Pick pose IK with collisions ignored: %s",
-        reachable ? "SOLUTION FOUND" : "NO SOLUTION");
-    }
-
-    // SIDE approach candidates only: stay at the pick frame's Z and approach
-    // from X/Y directions. Deliberately do not try the old vertical-above
-    // candidates, because Robot 3 must come in from the side, not bottom-to-top.
-    // The selected approach pose is saved so Robot 3 can retract back to it
-    // with MoveL after attaching the rebar, before the gantry starts lifting.
-    struct ApproachCandidate
-    {
-      bool local;
-      std::array<double, 3> offset;
-    };
-    const std::vector<ApproachCandidate> approach_candidates = {
-      // World-frame side approaches, no Z displacement.
-      {false, {-0.30,  0.00, 0.00}},
-      {false, { 0.30,  0.00, 0.00}},
-      {false, { 0.00, -0.30, 0.00}},
-      {false, { 0.00,  0.30, 0.00}},
-      {false, {-0.50,  0.00, 0.00}},
-      {false, { 0.50,  0.00, 0.00}},
-      {false, { 0.00, -0.50, 0.00}},
-      {false, { 0.00,  0.50, 0.00}},
-      // Tool-frame side approaches, also with zero local Z offset.
-      {true, {-0.30,  0.00, 0.00}},
-      {true, { 0.30,  0.00, 0.00}},
-      {true, { 0.00, -0.30, 0.00}},
-      {true, { 0.00,  0.30, 0.00}},
-      {true, {-0.50,  0.00, 0.00}},
-      {true, { 0.50,  0.00, 0.00}},
-      {true, { 0.00, -0.50, 0.00}},
-      {true, { 0.00,  0.50, 0.00}}
-    };
-
-    bool pick_approach_reached = false;
-    for (std::size_t i = 0; i < approach_candidates.size(); ++i) {
-      const auto & c = approach_candidates[i];
-      auto candidate = pick3;
-
-      if (c.local) {
-        tf2::Quaternion q(
-          pick3.orientation.x, pick3.orientation.y,
-          pick3.orientation.z, pick3.orientation.w);
-        if (q.length2() < 1e-12) {
+      const bool pick_reachable = solveCollisionFreeIk(
+        *robot3_group_, reference, unused, label + " exact pick IK diagnostic", false, 3.0);
+      RCLCPP_INFO(get_logger(), "%s exact pose IK ignoring collisions: %s",
+        label.c_str(), pick_reachable ? "FOUND" : "NOT FOUND");
+      for (std::size_t i = 0; i < step.candidates.size(); ++i) {
+        const auto & candidate_offset = step.candidates[i];
+        const auto target = offsetConfiguredPose(base_target,
+          candidate_offset.xyz, candidate_offset.frame);
+        if (!solveCollisionFreeIk(
+             *robot3_group_, target, unused, label + " approach candidate", true, 3.0)) {
+          RCLCPP_WARN(get_logger(), "%s: candidate %zu/%zu failed collision-aware IK.",
+            label.c_str(), i + 1, step.candidates.size());
           continue;
         }
-        q.normalize();
-        const tf2::Vector3 w = tf2::quatRotate(
-          q, tf2::Vector3(c.offset[0], c.offset[1], c.offset[2]));
-        candidate.position.x += w.x();
-        candidate.position.y += w.y();
-        candidate.position.z += w.z();
-      } else {
-        candidate.position.x += c.offset[0];
-        candidate.position.y += c.offset[1];
-        candidate.position.z += c.offset[2];
+        if (planAndExecuteCartesianMoveL(*robot3_group_, target,
+              label + " candidate " + std::to_string(i + 1))) {
+          return true;
+        }
+        RCLCPP_WARN(get_logger(), "%s: Cartesian MoveL candidate %zu failed; trying next.",
+          label.c_str(), i + 1);
       }
-
-      std::map<std::string, double> unused;
-      if (!solveCollisionFreeIk(
-          *robot3_group_, candidate, unused, "Robot 3 pick approach candidate", true, 3.0))
-      {
-        RCLCPP_WARN(
-          get_logger(), "Pick approach candidate %zu/%zu (%s %.2f %.2f %.2f) has no IK; skipping.",
-          i + 1, approach_candidates.size(), c.local ? "local" : "world",
-          c.offset[0], c.offset[1], c.offset[2]);
-        continue;
-      }
-
-      RCLCPP_INFO(
-        get_logger(), "Trying SIDE pick approach candidate %zu/%zu (%s dx=%.2f dy=%.2f dz=%.2f) with MoveL.",
-        i + 1, approach_candidates.size(), c.local ? "local" : "world",
-        c.offset[0], c.offset[1], c.offset[2]);
-
-      // Use Cartesian MoveL to reach the side-pick approach pose as requested.
-      // Do not fall back to MoveJ/OMPL if the Cartesian path is incomplete.
-      if (planAndExecuteCartesianMoveL(
-            *robot3_group_, candidate, "Robot 3 side pick approach MoveL"))
-      {
-        pick_approach_reached = true;
-        break;
-      }
-
-      RCLCPP_WARN(
-        get_logger(), "Pick approach candidate %zu/%zu could not be planned to; trying the next one.",
-        i + 1, approach_candidates.size());
-    }
-
-    if (!pick_approach_reached) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "No pick approach candidate could be reached; stopping before pick. "
-        "Check which link collides with the rebar in the move_group log.");
+      RCLCPP_ERROR(get_logger(), "%s: no collision-free side approach succeeded.", label.c_str());
       return false;
     }
-
-    // Rebar/gripper contact was already allowed before the approach (see above).
-    RCLCPP_INFO(get_logger(), "Robot 3 uses MoveL from the side-approach pose into its pick frame.");
-    if (!planAndExecutePose(*robot3_group_, pick3, true, "Robot 3 pick MoveL")) {
-      RCLCPP_ERROR(get_logger(), "Robot 3 pick motion failed; gantry will not return home automatically.");
-      return false;
-    }
-
-    if (!scene_objects_->attachWorldObjectPreservingPose(*robot3_group_, rebar_id_, robot3_link_, touch_links)) {
-      RCLCPP_ERROR(get_logger(), "Failed to attach '%s' to Robot 3 after the pick motion.", rebar_id_.c_str());
-      return false;
-    }
-    if (!scene_objects_->verifyObjectState(rebar_id_, false, true, robot3_link_)) {
-      RCLCPP_ERROR(get_logger(), "Could not verify Robot 3 attachment of '%s'.", rebar_id_.c_str());
-      return false;
-    }
-
-    // Optional: let the carried rebar touch listed objects (see parameter
-    // 'rebar_allowed_contact_objects'). Empty by default.
-    if (!rebar_contact_objects_.empty()) {
-      if (!scene_objects_->setObjectCollisionsAllowed(
-            rebar_id_, rebar_contact_objects_, true)) {
-        RCLCPP_ERROR(
-          get_logger(), "Could not allow '%s' contact with the configured objects.",
-          rebar_id_.c_str());
-        return false;
-      }
-      RCLCPP_WARN(
-        get_logger(),
-        "Rebar contact allowed with %zu configured object(s); collision "
-        "protection against them is OFF.",
-        rebar_contact_objects_.size());
-    }
-
-    // After picking and attaching the rebar, retract exactly 10 cm along
-    // the Robot 3 tool-frame NEGATIVE X axis. This is the tool's local -X,
-    // transformed into world coordinates using the pick-frame orientation;
-    // it is not world -X and is not selected from the side-approach direction.
-    // Keep the pick orientation fixed and execute a straight Cartesian MoveL
-    // while the gantry remains stationary. The gantry may lift only after this
-    // retract completes successfully.
-    geometry_msgs::msg::Pose post_pick_retract_pose = pick3;
-    constexpr double post_pick_retract_distance_m = 0.10;
-    tf2::Quaternion pick_tool_q(
-      pick3.orientation.x, pick3.orientation.y,
-      pick3.orientation.z, pick3.orientation.w);
-    if (pick_tool_q.length2() < 1e-12) {
-      RCLCPP_ERROR(get_logger(), "Invalid tool orientation at the pick pose; cannot calculate tool -X retract.");
-      return false;
-    }
-    pick_tool_q.normalize();
-    const tf2::Vector3 tool_negative_x_world = tf2::quatRotate(
-      pick_tool_q, tf2::Vector3(-1.0, 0.0, 0.0));
-    post_pick_retract_pose.position.x += post_pick_retract_distance_m * tool_negative_x_world.x();
-    post_pick_retract_pose.position.y += post_pick_retract_distance_m * tool_negative_x_world.y();
-    post_pick_retract_pose.position.z += post_pick_retract_distance_m * tool_negative_x_world.z();
-
-    RCLCPP_INFO(
-      get_logger(),
-      "Robot 3 picked the rebar. Retracting %.0f cm along tool-frame -X with MoveL before the gantry lifts.",
-      post_pick_retract_distance_m * 100.0);
-    {
-      std::map<std::string, double> retract_ik;
-      if (!solveCollisionFreeIk(
-            *robot3_group_, post_pick_retract_pose, retract_ik,
-            "Robot 3 10 cm post-pick retract pose", true, 5.0))
-      {
-        RCLCPP_ERROR(
-          get_logger(),
-          "The 10 cm post-pick retract pose has no collision-free IK solution. Rebar remains attached; stopping before gantry lift.");
+    if (step.ik_check) {
+      std::map<std::string, double> joint_goal;
+      if (!solveCollisionFreeIk(*robot3_group_, base_target, joint_goal,
+        label + " precheck", true, 5.0)) {
         return false;
       }
     }
-    if (!planAndExecuteCartesianMoveL(
-          *robot3_group_, post_pick_retract_pose,
-          "Robot 3 post-pick 10 cm retract MoveL"))
-    {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Robot 3 picked the rebar but could not complete the 10 cm retract MoveL. Keeping the gantry stationary for recovery.");
+    if (step.motion == "moveJ") {
+      return planAndExecuteMoveJ(*robot3_group_, base_target, label);
+    }
+    if (step.planner == "pilz") {
+      return planAndExecutePose(*robot3_group_, base_target, true,
+        label, pilz_velocity_);
+    }
+    // A single continuous Cartesian trajectory: no MoveJ fallback, no
+    // execution when MoveIt reports an incomplete path.
+    return planAndExecuteCartesianMoveL(*robot3_group_, base_target, label);
+  }
+
+  // Executes the original safety-gated sequence, but all per-step joint
+  // references, offsets, candidates and actions are read from workcell.yaml.
+  bool performSequence()
+  {
+    if (!move_group_ || !robot3_group_ || !scene_objects_ || !tf_buffer_) {
+      RCLCPP_ERROR(get_logger(), "MoveIt/TF interfaces are not initialized.");
+      return false;
+    }
+    if (!trajectory_client_->wait_for_action_server(5s)) {
+      RCLCPP_ERROR(get_logger(), "Gantry joint trajectory controller unavailable.");
+      return false;
+    }
+    double horizontal = 0.0, vertical = 0.0;
+    if (!waitForJointState(horizontal_joint_, horizontal) ||
+        !waitForJointState(vertical_joint_, vertical)) return false;
+    if (!scene_objects_->verifyObjectState(object_id_, true, false)) {
+      RCLCPP_ERROR(get_logger(), "Rebar '%s' must be a world object before gantry pick.",
+        object_id_.c_str());
       return false;
     }
 
-    // Now Robot 3 has picked the rebar and cleared the hand-off area. Raise the
-    // gantry and wait for the vertical lift to finish. Once raised, the gantry
-    // starts its horizontal return in a background thread while Robot 3 begins
-    // the MoveL approach to the place frame; neither waits for the other's
-    // horizontal/place travel to finish.
-    RCLCPP_INFO(
-      get_logger(),
-      "Robot 3 has retracted clear of the hand-off area; raising the gantry. Parallel travel starts after the lift completes.");
-    if (!moveJointTo(vertical_joint_, vertical_home_)) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Gantry failed to raise after Robot 3 picked the rebar; stopping Robot 3 place motion.");
+    auto settle = [&]() {
+      rclcpp::sleep_for(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>(settle_time_sec_)));
+    };
+
+    auto executeJointStep = [&](const ConfiguredGantryStep & step) {
+      const bool horizontal_axis = step.joint == "horizontal";
+      const auto & joint = horizontal_axis ? horizontal_joint_ : vertical_joint_;
+      const double target = step.reference == "home" ?
+        (horizontal_axis ? horizontal_home_ : vertical_home_) :
+        step.reference == "pick" ?
+        (horizontal_axis ? horizontal_pick_target_ : vertical_pick_target_) :
+        (horizontal_axis ? horizontal_target_ : vertical_target_);
+      RCLCPP_INFO(get_logger(), "[%s] %s: %s -> %.3f m",
+        step.id.c_str(), step.description.c_str(), joint.c_str(), target);
+      return moveJointTo(joint, target);
+    };
+    for (const auto & step : gantry_planner_steps_) {
+      // The pre-validated G1..G5 actions/order protects the rebar during
+      // loading, raised transport, and hand-off.
+      if (!executeJointStep(step)) return false;
+      for (const auto & action : step.after_actions) {
+        if (action == "settle") {
+          settle();
+        } else if (action == "attach_gantry") {
+          RCLCPP_INFO(get_logger(), "[%s] attaching %s to gantry link %s",
+            step.id.c_str(), object_id_.c_str(), attach_link_.c_str());
+          if (!scene_objects_->attachWorldObjectPreservingPose(
+              *move_group_, object_id_, attach_link_, {attach_link_})) return false;
+          if (!scene_objects_->verifyObjectState(object_id_, false, true, attach_link_)) {
+            RCLCPP_ERROR(get_logger(), "Gantry attachment verification failed.");
+            return false;
+          }
+        } else if (action == "detach_gantry") {
+          RCLCPP_INFO(get_logger(), "[%s] hand-off joint positions: %s, %s",
+            step.id.c_str(), horizontal_joint_.c_str(), vertical_joint_.c_str());
+          const auto link_pose = move_group_->getCurrentPose(attach_link_);
+          RCLCPP_INFO(get_logger(), "[%s] gantry attachment link %s pose frame=%s xyz=[%.6f,%.6f,%.6f]",
+            step.id.c_str(), attach_link_.c_str(), link_pose.header.frame_id.c_str(),
+            link_pose.pose.position.x, link_pose.pose.position.y, link_pose.pose.position.z);
+          if (!scene_objects_->detachObjectToWorldPreservingPose(
+              *move_group_, object_id_)) return false;
+          if (!scene_objects_->verifyObjectState(object_id_, true, false)) {
+            RCLCPP_ERROR(get_logger(), "Gantry detach verification failed.");
+            return false;
+          }
+          const auto pose_after = move_group_->getCurrentPose(attach_link_);
+          RCLCPP_INFO(get_logger(), "[%s] AFTER hand-off gantry link %s xyz=[%.6f,%.6f,%.6f]",
+            step.id.c_str(), attach_link_.c_str(), pose_after.pose.position.x,
+            pose_after.pose.position.y, pose_after.pose.position.z);
+        }
+      }
+    }
+
+    if (!scene_objects_->verifyObjectState(rebar_id_, true, false)) {
+      RCLCPP_ERROR(get_logger(), "Robot 3 expects '%s' in the world after hand-off.",
+        rebar_id_.c_str());
+      return false;
+    }
+    geometry_msgs::msg::Pose pick, place;
+    if (!lookupPose(pick3_frame_, pick) || !lookupPose(place3_frame_, place)) {
       return false;
     }
 
     bool horizontal_return_success = false;
-    std::thread horizontal_return_thread(
-      [this, &horizontal_return_success]() {
-        RCLCPP_INFO(
-          get_logger(),
-          "Gantry has reached its raised position. Returning horizontally to home in parallel with Robot 3 MoveL.");
-        horizontal_return_success = moveJointTo(horizontal_joint_, horizontal_home_);
-        if (horizontal_return_success) {
-          RCLCPP_INFO(get_logger(), "Gantry horizontal return to home completed.");
-        } else {
-          RCLCPP_ERROR(
-            get_logger(),
-            "Gantry horizontal return failed while Robot 3 was performing its pick/place sequence.");
-        }
-      });
-
-    // If any later Robot 3 step exits early, still join the background thread
-    // before this function returns. This avoids a dangling reference to the
-    // local result variable and prevents a joinable std::thread destructor.
-    struct JoinHorizontalReturnOnExit
-    {
+    bool horizontal_return_started = false;
+    std::thread horizontal_return_thread;
+    struct JoinReturnThread {
       std::thread & thread;
-      ~JoinHorizontalReturnOnExit()
-      {
-        if (thread.joinable()) {
-          thread.join();
+      ~JoinReturnThread() { if (thread.joinable()) thread.join(); }
+    } join_on_exit{horizontal_return_thread};
+
+    // Each action is explicitly declared by its YAML step, and the reader
+    // validates the exact critical action order before any motion starts.
+    auto executeAction = [&](const std::string & action) -> bool {
+      if (action == "prepare_robot3_pick") {
+        return scene_objects_->setObjectCollisionsAllowed(
+          rebar_id_, robot3_touch_links_, true);
+      }
+      if (action == "attach_robot3") {
+        return scene_objects_->attachWorldObjectPreservingPose(
+          *robot3_group_, rebar_id_, robot3_link_, robot3_touch_links_) &&
+          scene_objects_->verifyObjectState(rebar_id_, false, true, robot3_link_)
+          && (rebar_contact_objects_.empty() ||
+            scene_objects_->setObjectCollisionsAllowed(
+              rebar_id_, rebar_contact_objects_, true));
+      }
+      if (action == "lift_gantry_start_parallel_return") {
+        if (!scene_objects_->verifyObjectState(rebar_id_, false, true, robot3_link_)) {
+          RCLCPP_ERROR(get_logger(), "Cannot lift gantry: Robot 3 has not attached the rebar.");
+          return false;
+        }
+        // This action occurs ONLY after R3's 10 cm retract MoveL succeeded.
+        if (!moveJointTo(vertical_joint_, vertical_home_)) return false;
+        horizontal_return_started = true;
+        horizontal_return_thread = std::thread([&]() {
+          horizontal_return_success = moveJointTo(horizontal_joint_, horizontal_home_);
+          if (!horizontal_return_success) {
+            RCLCPP_ERROR(get_logger(), "Parallel gantry horizontal return failed.");
+          }
+        });
+        return true;
+      }
+      if (action == "allow_jig_contact") {
+        if (jig_clamp_name_.empty()) return true;
+        return scene_objects_->setObjectCollisionsAllowed(
+          rebar_id_, std::vector<std::string>{jig_clamp_name_}, true);
+      }
+      if (action == "detach_robot3") {
+        return scene_objects_->detachObjectToWorldPreservingPose(*robot3_group_, rebar_id_)
+          && scene_objects_->verifyObjectState(rebar_id_, true, false);
+      }
+      if (action == "wait_gantry_parallel_return") {
+        if (!horizontal_return_started) {
+          RCLCPP_ERROR(get_logger(), "Gantry return never started; cannot proceed to home.");
+          return false;
+        }
+        if (horizontal_return_thread.joinable()) horizontal_return_thread.join();
+        return horizontal_return_success;
+      }
+      RCLCPP_ERROR(get_logger(), "Unknown configured robot action '%s'.", action.c_str());
+      return false;
+    };
+
+    for (const auto & step : robot3_planner_steps_) {
+      RCLCPP_INFO(get_logger(), "[%s] %s", step.id.c_str(), step.description.c_str());
+      for (const auto & action : step.before_actions) {
+        if (!executeAction(action)) {
+          RCLCPP_ERROR(get_logger(), "[%s] before action '%s' failed.",
+            step.id.c_str(), action.c_str());
+          return false;
         }
       }
-    } join_horizontal_return_on_exit{horizontal_return_thread};
-
-    RCLCPP_INFO(
-      get_logger(),
-      "Gantry is raised. Robot 3 is starting its MoveL approach now; it will not wait for the gantry's horizontal return to finish.");
-
-    // FIX: allow the carried rebar to touch the jig clamp while it is being
-    // placed. Without this, the place pose (rebar seated in the clamp) is in
-    // collision, so planning to it aborts after the full 15 s planning time.
-    // Robot-to-clamp collision checking stays enabled; only rebar<->clamp is
-    // allowed. This is done before the approach is chosen so the IK checks
-    // match the real placement.
-    if (!jig_clamp_name_.empty()) {
-      if (!scene_objects_->setObjectCollisionsAllowed(
-            rebar_id_, std::vector<std::string>{jig_clamp_name_}, true)) {
-        RCLCPP_ERROR(
-          get_logger(), "Could not allow contact between '%s' and '%s'.",
-          rebar_id_.c_str(), jig_clamp_name_.c_str());
+      if (!executeRobot3ConfiguredMotion(step, pick, place)) {
+        RCLCPP_ERROR(get_logger(), "[%s] motion failed; stopping safely. Inspect attachment state.",
+          step.id.c_str());
         return false;
       }
-      RCLCPP_WARN(
-        get_logger(),
-        "Placement contact enabled: '%s' may touch '%s'. Robot-to-clamp "
-        "collision checking remains enabled.",
-        rebar_id_.c_str(), jig_clamp_name_.c_str());
-    }
-
-    // Construct the exact 10 cm pre-place target along the place frame's
-    // local -X axis. Preserve the configured place pose and orientation.
-    geometry_msgs::msg::Pose place3_pre = place3;
-    tf2::Quaternion place_q(
-      place3.orientation.x, place3.orientation.y,
-      place3.orientation.z, place3.orientation.w);
-    if (place_q.length2() < 1e-12) {
-      RCLCPP_ERROR(
-        get_logger(), "Place frame '%s' has an invalid orientation quaternion.",
-        place3_frame_.c_str());
-      return false;
-    }
-    place_q.normalize();
-    const tf2::Vector3 pre_offset = tf2::quatRotate(
-      place_q, tf2::Vector3(-place_approach_distance_, 0.0, 0.0));
-    place3_pre.position.x += pre_offset.x();
-    place3_pre.position.y += pre_offset.y();
-    place3_pre.position.z += pre_offset.z();
-
-    // Go directly from the post-pick pose to the exact 10 cm pre-place pose.
-    // This is one continuous Cartesian MoveL trajectory, not 20 separately
-    // executed segments and not a MoveJ/OMPL fallback.
-    RCLCPP_INFO(
-      get_logger(),
-      "Robot 3 moving directly with MoveL to the pose %.3f m before '%s'.",
-      place_approach_distance_, place3_frame_.c_str());
-
-    {
-      std::map<std::string, double> preplace_ik;
-      if (!solveCollisionFreeIk(
-            *robot3_group_, place3_pre, preplace_ik,
-            "Robot 3 exact 10 cm pre-place pose", true, 5.0))
-      {
-        RCLCPP_ERROR(
-          get_logger(),
-          "The exact 10 cm pre-place pose has no collision-free IK solution. Rebar remains attached; stopping for recovery.");
-        return false;
+      for (const auto & action : step.after_actions) {
+        if (!executeAction(action)) {
+          RCLCPP_ERROR(get_logger(), "[%s] after action '%s' failed.",
+            step.id.c_str(), action.c_str());
+          return false;
+        }
       }
     }
-
-    if (!planAndExecuteCartesianMoveL(
-          *robot3_group_, place3_pre,
-          "Robot 3 continuous MoveL to exact 10 cm pre-place pose"))
-    {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Robot 3 could not reach the 10 cm pre-place pose with one continuous MoveL path. Rebar remains attached; stopping for recovery.");
-      return false;
-    }
-
-    // Final insertion: a straight MoveL from the 10 cm pre-place pose directly
-    // to the configured place frame. Do not replace this with MoveJ.
-    RCLCPP_INFO(
-      get_logger(), "Robot 3 is at the pre-place pose; moving straight to '%s' using MoveL.",
-      place3_frame_.c_str());
-    if (!planAndExecuteCartesianMoveL(
-          *robot3_group_, place3, "Robot 3 final straight MoveL to place frame"))
-    {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Robot 3 could not move straight from pre-place to the place frame. Rebar remains attached for recovery.");
-      return false;
-    }
-
-    if (!scene_objects_->detachObjectToWorldPreservingPose(*robot3_group_, rebar_id_)) {
-      RCLCPP_ERROR(get_logger(), "Failed to detach '%s' into the world at the place frame.", rebar_id_.c_str());
-      return false;
-    }
-
-    // After placement, retract sideways along the placement frame's LOCAL +Y
-    // axis (not back along the local -X insertion/approach line). Use the same
-    // configured clearance distance, then return home only after this MoveL
-    // succeeds. Keep the place orientation unchanged during the sideways move.
-    geometry_msgs::msg::Pose place3_retract_side = place3;
-    const tf2::Vector3 side_retract_offset = tf2::quatRotate(
-      place_q, tf2::Vector3(0.0, place_approach_distance_, 0.0));
-    place3_retract_side.position.x += side_retract_offset.x();
-    place3_retract_side.position.y += side_retract_offset.y();
-    place3_retract_side.position.z += side_retract_offset.z();
-
-    RCLCPP_INFO(
-      get_logger(),
-      "Rebar placed. Robot 3 retracting with MoveL by %.3f m along placement frame local +Y.",
-      place_approach_distance_);
-    {
-      std::map<std::string, double> retract_ik;
-      if (!solveCollisionFreeIk(
-            *robot3_group_, place3_retract_side, retract_ik,
-            "Robot 3 sideways retract pose (local +Y)", true, 5.0))
-      {
-        RCLCPP_ERROR(
-          get_logger(),
-          "The sideways retract pose along local +Y has no collision-free IK solution. Rebar is placed; leaving Robot 3 stopped for recovery.");
-        return false;
-      }
-    }
-    if (!planAndExecuteCartesianMoveL(
-          *robot3_group_, place3_retract_side,
-          "Robot 3 sideways MoveL retract along placement-frame local +Y"))
-    {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Robot 3 placed the rebar but could not retract sideways along local +Y. Leaving robot stopped for recovery.");
-      return false;
-    }
-
-    // Wait for the gantry's parallel horizontal return only after Robot 3 has
-    // completed the place and sideways retract. This ensures the gantry is
-    // clear before Robot 3 begins its own home-return motion, without delaying
-    // Robot 3's initial MoveL approach to the placement area.
-    if (horizontal_return_thread.joinable()) {
-      RCLCPP_INFO(
-        get_logger(),
-        "Robot 3 has completed placement and sideways retraction; checking that the gantry horizontal return has finished before Robot 3 goes home.");
-      horizontal_return_thread.join();
-    }
-    if (!horizontal_return_success) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Robot 3 placed and retracted the rebar, but the gantry did not return horizontally to home. Robot 3 will not start its home-return motion.");
-      return false;
-    }
-
-    // Once clear of the jig and once the gantry is home, return Robot 3 to the
-    // joint state captured at startup. moveHome uses OMPL joint-space planning
-    // (MoveJ-style), not LIN.
-    RCLCPP_INFO(
-      get_logger(),
-      "Robot 3 is clear of the jig and the gantry is home; returning Robot 3 to its startup/home joint position.");
-    if (!moveHome(*robot3_group_, robot3_home_, "Robot 3")) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Robot 3 placed and retracted the rebar but could not return home.");
-      return false;
-    }
-
-    RCLCPP_INFO(
-      get_logger(),
-      "Robot 3 sequence completed: side-pick approach MoveL, pick MoveL, post-pick retract MoveL, gantry lift, parallel gantry horizontal return and Robot 3 MoveL to place, straight MoveL insertion, sideways MoveL retract along placement-frame local +Y, then return to Robot 3 home.");
-    return true;
-  }
-
-  bool performSequence()
-  {
-    if (move_group_ == nullptr || scene_objects_ == nullptr) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "MoveIt interfaces have not been initialized.");
-      return false;
-    }
-
-    if (!trajectory_client_->wait_for_action_server(5s)) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Gantry trajectory controller is not available.");
-      return false;
-    }
-
-    double horizontal_position = 0.0;
-    double vertical_position = 0.0;
-
-    if (!waitForJointState(horizontal_joint_, horizontal_position) ||
-        !waitForJointState(vertical_joint_, vertical_position)) {
-      return false;
-    }
-
-    if (!scene_objects_->verifyObjectState(object_id_, true, false)) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "MoveIt object '%s' must exist in the world and must not "
-        "already be attached.",
-        object_id_.c_str());
-      return false;
-    }
-
-    // 1. Keep the gantry raised while moving to the rebar pickup position.
-    RCLCPP_INFO(
-      get_logger(),
-      "Step 1/6: moving horizontally to rebar pickup target %.3f m.",
-      horizontal_pick_target_);
-    if (!moveJointTo(horizontal_joint_, horizontal_pick_target_)) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Failed to reach horizontal rebar pickup target; stopping.");
-      return false;
-    }
-
-    // 2. Lower to the requested pickup position. The rebar collision object
-    //    must already be placed at this physical/modelled pickup location.
-    RCLCPP_INFO(
-      get_logger(),
-      "Step 2/6: lowering to rebar pickup target %.3f m.",
-      vertical_pick_target_);
-    if (!moveJointTo(vertical_joint_, vertical_pick_target_)) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Failed to lower to the rebar pickup target; stopping.");
-      return false;
-    }
-
-    rclcpp::sleep_for(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::duration<double>(settle_time_sec_)));
-
-    // 3. Attach only after the gantry has reached the pickup position.
-    RCLCPP_INFO(
-      get_logger(),
-      "Step 3/6: picking '%s' by attaching it to '%s'.",
-      object_id_.c_str(), attach_link_.c_str());
-    if (!scene_objects_->attachWorldObjectPreservingPose(
-          *move_group_, object_id_, attach_link_, {attach_link_})) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Failed to attach '%s' at the pickup position. Stopping.",
-        object_id_.c_str());
-      return false;
-    }
-
-    rclcpp::sleep_for(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::duration<double>(settle_time_sec_)));
-
-    // 4. Raise before any horizontal transport.
-    RCLCPP_INFO(
-      get_logger(),
-      "Step 4/6: raising gantry to vertical home %.3f m.",
-      vertical_home_);
-    if (!moveJointTo(vertical_joint_, vertical_home_)) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Gantry failed to raise; rebar remains attached and horizontal "
-        "transport is cancelled.");
-      return false;
-    }
-
-    // 5. Transport the attached rebar to the existing 3.7 m hand-off position.
-    RCLCPP_INFO(
-      get_logger(),
-      "Step 5/6: transporting rebar horizontally to %.3f m.",
-      horizontal_target_);
-    if (!moveJointTo(horizontal_joint_, horizontal_target_)) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Horizontal transport failed; rebar remains attached.");
-      return false;
-    }
-
-    // 6. Lower at the existing hand-off position, then release the rebar.
-    RCLCPP_INFO(
-      get_logger(),
-      "Step 6/6: lowering to hand-off target %.3f m.",
-      vertical_target_);
-    if (!moveJointTo(vertical_joint_, vertical_target_)) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Failed to lower at the hand-off position; rebar remains attached.");
-      return false;
-    }
-
-    rclcpp::sleep_for(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::duration<double>(settle_time_sec_)));
-
-    RCLCPP_INFO(
-      get_logger(),
-      "DETACH DEBUG [gantry_move] BEGIN: object='%s', attach_link='%s'.",
-      object_id_.c_str(), attach_link_.c_str());
-
-    // Debug only: record gantry joint positions and the attachment-link pose
-    // immediately before calling the existing detach implementation.
-    double debug_horizontal = 0.0;
-    double debug_vertical = 0.0;
-    const bool have_debug_horizontal =
-      getJointPosition(horizontal_joint_, debug_horizontal);
-    const bool have_debug_vertical =
-      getJointPosition(vertical_joint_, debug_vertical);
-
-    RCLCPP_INFO(
-      get_logger(),
-      "DETACH DEBUG [gantry_move] joints: %s=%.6f m (%s), %s=%.6f m (%s).",
-      horizontal_joint_.c_str(), debug_horizontal,
-      have_debug_horizontal ? "available" : "unavailable",
-      vertical_joint_.c_str(), debug_vertical,
-      have_debug_vertical ? "available" : "unavailable");
-
-    const auto debug_link_pose = move_group_->getCurrentPose(attach_link_);
-    RCLCPP_INFO(
-      get_logger(),
-      "DETACH DEBUG [gantry_move] MoveIt pose for link '%s' (frame='%s'): "
-      "xyz=[%.6f, %.6f, %.6f], quat=[%.6f, %.6f, %.6f, %.6f].",
-      attach_link_.c_str(), debug_link_pose.header.frame_id.c_str(),
-      debug_link_pose.pose.position.x,
-      debug_link_pose.pose.position.y,
-      debug_link_pose.pose.position.z,
-      debug_link_pose.pose.orientation.x,
-      debug_link_pose.pose.orientation.y,
-      debug_link_pose.pose.orientation.z,
-      debug_link_pose.pose.orientation.w);
-
-    RCLCPP_INFO(
-      get_logger(),
-      "Detaching '%s' into the world at the hand-off position.",
-      object_id_.c_str());
-    if (!scene_objects_->detachObjectToWorldPreservingPose(
-          *move_group_, object_id_)) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Failed to detach '%s'. Check the MoveIt planning scene.",
-        object_id_.c_str());
-      return false;
-    }
-
-    const auto debug_link_pose_after = move_group_->getCurrentPose(attach_link_);
-    RCLCPP_INFO(
-      get_logger(),
-      "DETACH DEBUG [gantry_move] AFTER detach: link '%s' pose (frame='%s'): "
-      "xyz=[%.6f, %.6f, %.6f], quat=[%.6f, %.6f, %.6f, %.6f].",
-      attach_link_.c_str(), debug_link_pose_after.header.frame_id.c_str(),
-      debug_link_pose_after.pose.position.x,
-      debug_link_pose_after.pose.position.y,
-      debug_link_pose_after.pose.position.z,
-      debug_link_pose_after.pose.orientation.x,
-      debug_link_pose_after.pose.orientation.y,
-      debug_link_pose_after.pose.orientation.z,
-      debug_link_pose_after.pose.orientation.w);
-
-    RCLCPP_INFO(
-      get_logger(),
-      "Gantry transported '%s' to the hand-off position and detached it.",
-      object_id_.c_str());
-
-    // Robot 3 must first pick and attach the rebar. The gantry return to its
-    // raised start/clear position happens inside runRobotPickPlace() immediately
-    // after that attachment succeeds, before Robot 3 starts the place motion.
-    RCLCPP_INFO(get_logger(), "Starting Robot 3 side-pick sequence; gantry will return home after the rebar is attached.");
-
-    if (!runRobotPickPlace()) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "Robot 3 pick/place phase failed. Inspect robot position and "
-        "planning-scene state before recovery.");
-      return false;
-    }
-
+    RCLCPP_INFO(get_logger(), "Gantry + Robot 3 YAML planner sequence completed.");
     return true;
   }
 

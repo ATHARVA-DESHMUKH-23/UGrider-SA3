@@ -53,6 +53,7 @@
 #include <tf2_ros/transform_listener.h>
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
+#include "sa3_motion/workcell_program.hpp"
 
 using namespace std::chrono_literals;
 using MGI = moveit::planning_interface::MoveGroupInterface;
@@ -62,18 +63,13 @@ using JTP = trajectory_msgs::msg::JointTrajectoryPoint;
 namespace
 {
 constexpr char kReferenceFrame[] = "world";
-constexpr char kCombinedGroup[] = "sa3_robots_1_2";
-
-constexpr double kApproachZ = 0.50;
-constexpr double kPlanningTime = 15.0;
-constexpr int kMoveJPlanRetries = 3;   // separate combined OMPL requests per MOVEJ
-constexpr int kOmplAttempts = 10;
-constexpr double kIkTimeout = 1.0;
-
-constexpr double kMoveJVelocity = 0.30;
-constexpr double kMoveJAcceleration = 0.20;
-constexpr double kMoveLVelocity = 0.20;
-constexpr double kMoveLAcceleration = 0.10;
+std::string kCombinedGroup = "sa3_robots_1_2";
+double kPlanningTime = 15.0;
+int kMoveJPlanRetries = 3, kOmplAttempts = 10;
+double kIkTimeout = 1.0;
+double kMoveJVelocity = 0.30, kMoveJAcceleration = 0.20;
+double kMoveLVelocity = 0.20, kMoveLAcceleration = 0.10;
+std::vector<sa3_yaml::Step> kGripperSteps;
 
 // ---------------------------------------------------------------------------
 // Per-robot configuration
@@ -90,18 +86,70 @@ struct RobotConfig
   std::vector<std::string> arm_links;    // links that may overlap a gripper at its dock
 };
 
-RobotConfig makeConfig(const std::string & r)   // r = "robot1" | "robot2"
-{
-  RobotConfig c;
-  c.name = r;
-  c.group = r + "_arm";
-  c.planning_link = r + "_tool_mount";
-  c.schunk_dock_frame = r + "_shuck_dock";
-  c.gun_dock_frame = r + "_tyinggun_dock";
-  c.schunk_ids = {r + "_schunk_base", r + "_schunk_link7", r + "_schunk_link8"};
-  c.gun_id = r + "_tying_gun";
-  c.arm_links = {c.planning_link, r + "_J4_link", r + "_J5_link", r + "_J6_link"};
-  return c;
+RobotConfig gRobot1Config, gRobot2Config;
+
+RobotConfig makeConfig(const std::string & name) {
+  if (name == "robot1") return gRobot1Config;
+  if (name == "robot2") return gRobot2Config;
+  throw std::runtime_error("Unknown robot name for gripper changer: " + name);
+}
+
+void loadGripperProgram(const rclcpp::Node::SharedPtr & node) {
+  const auto w = sa3_yaml::loadWorkcell(node);
+  const auto c = sa3_yaml::require(w, "robot1_gripper_change", "workcell");
+  if (c["world_frame"].as<std::string>("world") != "world")
+    throw std::runtime_error("gripper change world_frame must be world");
+  kCombinedGroup = sa3_yaml::name(c["combined_group"], "gripper combined_group");
+  const auto p = sa3_yaml::require(c, "planning", "gripper change");
+  kPlanningTime = sa3_yaml::finite(p["planning_time"], "gripper planning_time");
+  kMoveJPlanRetries = p["movej_plan_retries"].as<int>();
+  kOmplAttempts = p["ompl_attempts"].as<int>();
+  kIkTimeout = sa3_yaml::finite(p["ik_timeout"], "gripper ik_timeout");
+  kMoveJVelocity = sa3_yaml::finite(p["movej_velocity"], "gripper movej_velocity");
+  kMoveJAcceleration = sa3_yaml::finite(p["movej_acceleration"], "gripper movej_acceleration");
+  kMoveLVelocity = sa3_yaml::finite(p["movel_velocity"], "gripper movel_velocity");
+  kMoveLAcceleration = sa3_yaml::finite(p["movel_acceleration"], "gripper movel_acceleration");
+  if (kPlanningTime <= 0 || kMoveJPlanRetries < 1 || kOmplAttempts < 1 || kIkTimeout <= 0 ||
+      kMoveJVelocity <= 0 || kMoveJVelocity > 1 || kMoveJAcceleration <= 0 || kMoveJAcceleration > 1 ||
+      kMoveLVelocity <= 0 || kMoveLVelocity > 1 || kMoveLAcceleration <= 0 || kMoveLAcceleration > 1)
+    throw std::runtime_error("Invalid gripper planning settings");
+  auto arm = [&](const char * name, RobotConfig & r) {
+    const auto a = sa3_yaml::require(c, name, "robot1_gripper_change");
+    r.name = name;
+    r.group = sa3_yaml::name(a["group"], "gripper group");
+    r.planning_link = sa3_yaml::name(a["planning_link"], "gripper planning_link");
+    r.schunk_dock_frame = sa3_yaml::name(a["schunk_dock_frame"], "schunk_dock_frame");
+    r.gun_dock_frame = sa3_yaml::name(a["gun_dock_frame"], "gun_dock_frame");
+    r.schunk_ids = sa3_yaml::strings(a["schunk_object_ids"], "schunk_object_ids");
+    if (r.schunk_ids.size()!=3) throw std::runtime_error("Schunk must have three scene parts");
+    r.gun_id = sa3_yaml::name(a["gun_object_id"], "gun_object_id");
+    r.arm_links = sa3_yaml::strings(a["arm_touch_links"], "arm_touch_links");
+    if (r.arm_links.empty()) throw std::runtime_error("arm_touch_links must not be empty");
+  };
+  arm("robot1", gRobot1Config);
+  arm("robot2", gRobot2Config);
+  const auto program = sa3_yaml::require(
+    sa3_yaml::require(w, "planner_sequence", "workcell"),
+    "robot1_gripper_change", "planner_sequence");
+  kGripperSteps = sa3_yaml::steps(program["steps"], "planner_sequence.robot1_gripper_change.steps");
+  if (kGripperSteps.size() != 6) throw std::runtime_error("gripper change requires six ordered steps");
+  const std::vector<std::string> ref = {"schunk_dock", "schunk_dock", "schunk_dock", "gun_dock", "gun_dock", "gun_dock"};
+  const std::vector<std::string> motion = {"moveJ", "moveL", "moveL", "moveJ", "moveL", "moveL"};
+  const std::vector<std::vector<std::string>> actions = {
+    {}, {"detach_schunk", "allow_schunk_contacts"},
+    {"restore_schunk_contacts", "allow_gun_contacts"}, {},
+    {"attach_tying_gun"}, {"restore_gun_contacts"}};
+  for (std::size_t i=0; i<kGripperSteps.size(); ++i) {
+    const auto & step = kGripperSteps[i];
+    sa3_yaml::expectedStep(step, ref[i], motion[i], actions[i]);
+    if (step.offset_frame != "world" || step.xyz[0] != 0.0 || step.xyz[1] != 0.0)
+      throw std::runtime_error("Gripper steps must use WORLD Z dock approaches for this implementation");
+    const bool dock = i==1 || i==4;
+    if ((dock && step.xyz[2] != 0.0) || (!dock && (step.xyz[2] <= 0.0 || step.xyz[2] > 1.0)))
+      throw std::runtime_error("Gripper dock positions must be exact; approach Z must be >0 and <=1m");
+  }
+  // A missing or reordered critical attach/detach action is rejected at startup.
+  RCLCPP_INFO(node->get_logger(), "Loaded %zu gripper-change steps from workcell YAML", kGripperSteps.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -338,56 +386,72 @@ public:
   bool run()
   {
     for (auto & a : arms_) {
-      if (!lookupPose(a, a.cfg.schunk_dock_frame, a.schunk_dock)) {return false;}
-      if (!lookupPose(a, a.cfg.gun_dock_frame, a.gun_dock)) {return false;}
-
-      // The Schunk gripper must already be attached (by the attach node).
+      if (!lookupPose(a, a.cfg.schunk_dock_frame, a.schunk_dock)) return false;
+      if (!lookupPose(a, a.cfg.gun_dock_frame, a.gun_dock)) return false;
       if (psi_.getAttachedObjects(a.cfg.schunk_ids).size() != a.cfg.schunk_ids.size()) {
-        logE(a, "Schunk parts are not all attached to " + a.cfg.planning_link +
-          "; run the attach node first.");
+        logE(a, "Schunk parts are not all attached; run attach_tool first.");
         return false;
       }
     }
-
-    const auto schunk_approach1 = offsetZ(arms_[0].schunk_dock, kApproachZ);
-    const auto schunk_approach2 = offsetZ(arms_[1].schunk_dock, kApproachZ);
-    const auto gun_approach1 = offsetZ(arms_[0].gun_dock, kApproachZ);
-    const auto gun_approach2 = offsetZ(arms_[1].gun_dock, kApproachZ);
-
-    logI("starting combined gripper change sequence.");
-
-    if (!movejBoth(schunk_approach1, schunk_approach2, "TF1 approach")) {return false;}
-    if (!movelBoth(arms_[0].schunk_dock, arms_[1].schunk_dock, "TF1 dock")) {return false;}
-
-    for (auto & a : arms_) {
-      if (!detachSchunk(a)) {return false;}
+    bool schunk_contacts_allowed = false;
+    bool gun_contacts_allowed = false;
+    // Restore temporary ACM changes on *every* failure path, including a
+    // failed plan or attachment. This does not imply hardware recovery.
+    const auto restore = [&]() {
+      bool ok = true;
+      if (schunk_contacts_allowed) {
+        for (auto & a : arms_) ok = setContacts(a, a.cfg.schunk_ids, false) && ok;
+        schunk_contacts_allowed = false;
+      }
+      if (gun_contacts_allowed) {
+        for (auto & a : arms_) ok = setContacts(a, {a.cfg.gun_id}, false) && ok;
+        gun_contacts_allowed = false;
+      }
+      return ok;
+    };
+    for (const auto & step : kGripperSteps) {
+      std::array<geometry_msgs::msg::Pose, 2> targets;
+      for (std::size_t i=0; i<arms_.size(); ++i) {
+        const auto & ref = step.reference == "schunk_dock" ?
+          arms_[i].schunk_dock : arms_[i].gun_dock;
+        targets[i] = sa3_yaml::offset(ref, step.xyz, step.offset_frame);
+      }
+      const auto label = step.id + " " + step.description;
+      logI("YAML step " + label + " [" + step.motion + "]");
+      const bool moved = step.motion == "moveJ" ?
+        movejBoth(targets[0], targets[1], label) :
+        movelBoth(targets[0], targets[1], label);
+      if (!moved) {restore(); return false;}
+      for (const auto & action : step.after_actions) {
+        bool ok = true;
+        if (action == "detach_schunk") {
+          for (auto & a : arms_) ok = detachSchunk(a) && ok;
+        } else if (action == "allow_schunk_contacts") {
+          schunk_contacts_allowed = true;
+          for (auto & a : arms_) ok = setContacts(a, a.cfg.schunk_ids, true) && ok;
+        } else if (action == "restore_schunk_contacts") {
+          for (auto & a : arms_) ok = setContacts(a, a.cfg.schunk_ids, false) && ok;
+          if (ok) schunk_contacts_allowed = false;
+        } else if (action == "allow_gun_contacts") {
+          gun_contacts_allowed = true;
+          for (auto & a : arms_) ok = setContacts(a, {a.cfg.gun_id}, true) && ok;
+        } else if (action == "attach_tying_gun") {
+          for (auto & a : arms_) ok = attachTyingGun(a) && ok;
+        } else if (action == "restore_gun_contacts") {
+          for (auto & a : arms_) ok = setContacts(a, {a.cfg.gun_id}, false) && ok;
+          if (ok) gun_contacts_allowed = false;
+        } else {
+          logE("Unknown gripper YAML action: " + action);
+          ok = false;
+        }
+        if (!ok) {
+          logE("Action '" + action + "' failed at YAML step " + step.id);
+          restore();
+          return false;
+        }
+      }
     }
-
-    for (auto & a : arms_) {
-      if (!setContacts(a, a.cfg.schunk_ids, true)) {return false;}
-    }
-    const bool retract_ok = movelBoth(schunk_approach1, schunk_approach2, "TF1 retract");
-    bool restore_ok = true;
-    for (auto & a : arms_) {                                   // always restore
-      restore_ok = setContacts(a, a.cfg.schunk_ids, false) && restore_ok;
-    }
-    if (!retract_ok || !restore_ok) {return false;}
-
-    for (auto & a : arms_) {
-      if (!setContacts(a, {a.cfg.gun_id}, true)) {return false;}
-    }
-    const bool ok =
-      movejBoth(gun_approach1, gun_approach2, "TF2 approach") &&
-      movelBoth(arms_[0].gun_dock, arms_[1].gun_dock, "TF2 dock") &&
-      attachTyingGun(arms_[0]) &&
-      attachTyingGun(arms_[1]) &&
-      movelBoth(gun_approach1, gun_approach2, "TF2 retract");
-    bool gun_restore_ok = true;
-    for (auto & a : arms_) {                                   // always restore
-      gun_restore_ok = setContacts(a, {a.cfg.gun_id}, false) && gun_restore_ok;
-    }
-    if (!ok || !gun_restore_ok) {return false;}
-
+    if (!restore()) return false;
     logI("combined gripper change sequence completed.");
     return true;
   }
@@ -727,6 +791,7 @@ int main(int argc, char ** argv)
     tf_buffer.setUsingDedicatedThread(true);
     tf2_ros::TransformListener tf_listener(tf_buffer, node, false);
 
+    loadGripperProgram(node);
     DualGripperChanger changer(node, tf_buffer);
     ok = changer.run();
 

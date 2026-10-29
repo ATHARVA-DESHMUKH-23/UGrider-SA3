@@ -58,6 +58,7 @@
 #include <tf2_ros/transform_listener.h>
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
+#include "sa3_motion/workcell_program.hpp"
 
 using namespace std::chrono_literals;
 using MoveItErr = moveit_msgs::msg::MoveItErrorCodes;
@@ -69,28 +70,18 @@ namespace
 {
 
 constexpr char kNodeName[] = "tying_rebars";
-constexpr char kCombinedGroup[] = "sa3_robots_1_2";
+std::string kCombinedGroup = "sa3_robots_1_2";
 constexpr char kWorld[] = "world";
-
-constexpr char kRobot1Group[] = "robot1_arm";
-constexpr char kRobot1Link[] = "robot1_tg_end_effactor";   // (sic) matches SRDF
-constexpr char kRobot2Group[] = "robot2_arm";
-constexpr char kRobot2Link[] = "robot2_tg_end_effactor";   // (sic) matches SRDF
-
-// Tie approach / retract offset from the tying pose (metres), "tp - 20z".
-constexpr std::array<double, 3> kApproachOffset = {-0.20, 0.0, 0.0};
-// true: offset along the tying pose's OWN axes. false: along WORLD axes.
-constexpr bool kOffsetInTyingFrame = true;
-
-constexpr double kPlanningTime = 15.0;
-constexpr int kOmplAttempts = 10;
-constexpr int kPlanRetries = 3;
-
-constexpr double kMoveJVelocity = 0.30;
-constexpr double kMoveJAcceleration = 0.20;
-constexpr double kMoveLAcceleration = 0.05;
-// One LIN attempt per entry (velocity scale). Add smaller values for retries.
-constexpr std::array<double, 1> kLinVelScales = {0.10};
+std::string kRobot1Group = "robot1_arm", kRobot1Link = "robot1_tg_end_effactor";
+std::string kRobot2Group = "robot2_arm", kRobot2Link = "robot2_tg_end_effactor";
+std::array<double, 3> kApproachOffset = {-0.20, 0.0, 0.0};
+bool kOffsetInTyingFrame = true;
+double kPlanningTime = 15.0;
+int kOmplAttempts = 10, kPlanRetries = 3;
+double kMoveJVelocity = 0.30, kMoveJAcceleration = 0.20, kMoveLAcceleration = 0.05;
+std::vector<double> kLinVelScales = {0.10};
+bool kRobot1Enabled = true, kRobot2Enabled = true, kStopOnFirstFailure = false;
+std::vector<sa3_yaml::Step> kTyingSteps;
 
 // ===========================================================================
 // types
@@ -101,17 +92,61 @@ struct Job
   int points;
 };
 
-const std::vector<Job> kDefaultJobs1 = {
-  {"5_placef_l", 3},
-  {"13_placef1_l", 2}, {"13_placef2_l", 2}, {"13_placef3_l", 2}, {"13_placef4_l", 2},
-  {"14_placef1_l", 2}, {"14_placef2_l", 2}, {"14_placef3_l", 2}, {"14_placef4_l", 2},
-};
+std::vector<Job> kDefaultJobs1, kDefaultJobs2;
 
-const std::vector<Job> kDefaultJobs2 = {
-  {"6_placef_r", 3},
-  {"13_placef1_r", 2}, {"13_placef2_r", 2}, {"13_placef3_r", 2},
-  {"14_placef1_r", 2}, {"14_placef2_r", 2}, {"14_placef3_r", 2}, {"14_placef4_r", 2},
-};
+void loadTyingProgram(const rclcpp::Node::SharedPtr & node) {
+  const auto w = sa3_yaml::loadWorkcell(node);
+  const auto c = sa3_yaml::require(w, "tying_rebars", "workcell");
+  if (c["world_frame"].as<std::string>("world") != "world") throw std::runtime_error("tying world_frame must be world");
+  kCombinedGroup = sa3_yaml::name(c["combined_group"], "tying combined_group");
+  const auto p = sa3_yaml::require(c, "planning", "tying_rebars");
+  kPlanningTime = sa3_yaml::finite(p["planning_time"], "tying planning_time");
+  kOmplAttempts = p["ompl_attempts"].as<int>();
+  kPlanRetries = p["plan_retries"].as<int>();
+  kMoveJVelocity = sa3_yaml::finite(p["movej_velocity"], "tying movej_velocity");
+  kMoveJAcceleration = sa3_yaml::finite(p["movej_acceleration"], "tying movej_acceleration");
+  kMoveLAcceleration = sa3_yaml::finite(p["movel_acceleration"], "tying movel_acceleration");
+  kLinVelScales = sa3_yaml::scales(p["lin_velocity_scales"], "tying LIN scales");
+  if (kPlanningTime <= 0 || kOmplAttempts < 1 || kPlanRetries < 1 ||
+      kMoveJVelocity <= 0 || kMoveJVelocity > 1 || kMoveJAcceleration <= 0 || kMoveJAcceleration > 1 ||
+      kMoveLAcceleration <= 0 || kMoveLAcceleration > 1) throw std::runtime_error("Invalid tying planning settings");
+  kStopOnFirstFailure = c["stop_on_first_failure"].as<bool>();
+  const auto approach = sa3_yaml::require(c, "approach", "tying_rebars");
+  kApproachOffset = sa3_yaml::xyz(approach["xyz"], "tying approach xyz");
+  const auto frame = approach["offset_frame"].as<std::string>();
+  if (frame != "local" && frame != "world") throw std::runtime_error("tying offset_frame must be world/local");
+  kOffsetInTyingFrame = frame == "local";
+  auto arm = [&](const char * key, std::string & group, std::string & link,
+                 bool & enabled, std::vector<Job> & jobs) {
+    const auto a = sa3_yaml::require(c, key, "tying_rebars");
+    group = sa3_yaml::name(a["group"], std::string(key) + ".group");
+    link = sa3_yaml::name(a["planning_link"], std::string(key) + ".planning_link");
+    enabled = a["enabled"].as<bool>();
+    const auto joblist = sa3_yaml::require(a, "jobs", key);
+    if (!joblist.IsSequence()) throw std::runtime_error("tying jobs must be a list");
+    jobs.clear();
+    for (const auto & item : joblist) {
+      const auto clamp = sa3_yaml::name(item["clamp"], "tying clamp");
+      const int count = item["tie_count"].as<int>();
+      if (count < 1) throw std::runtime_error("tying job count must be positive");
+      jobs.push_back({clamp, count});
+    }
+  };
+  arm("robot1", kRobot1Group, kRobot1Link, kRobot1Enabled, kDefaultJobs1);
+  arm("robot2", kRobot2Group, kRobot2Link, kRobot2Enabled, kDefaultJobs2);
+  const auto program = sa3_yaml::require(sa3_yaml::require(w, "planner_sequence", "workcell"), "tying_rebars", "planner_sequence");
+  kTyingSteps = sa3_yaml::steps(program["point"], "planner_sequence.tying_rebars.point");
+  if (kTyingSteps.size()!=3) throw std::runtime_error("tying requires exactly 3 steps per point");
+  sa3_yaml::expectedStep(kTyingSteps[0], "tie_approach", "moveJ");
+  sa3_yaml::expectedStep(kTyingSteps[1], "tie_frame", "moveL");
+  sa3_yaml::expectedStep(kTyingSteps[2], "tie_approach", "moveL", {"mark_point_complete"});
+  for (const auto & step : kTyingSteps) if (step.xyz != std::array<double,3>{0.,0.,0.} || step.offset_frame != "world")
+    throw std::runtime_error("tying point steps must use zero xyz; edit tying_rebars.approach instead");
+  const auto finish = sa3_yaml::steps(program["finish"], "tying finish");
+  if (finish.size() != 1) throw std::runtime_error("tying must have combined home");
+  sa3_yaml::expectedStep(finish[0], "home", "moveJ");
+  RCLCPP_INFO(node->get_logger(), "Tying program loaded from workcell YAML: %zu/%zu clamp jobs", kDefaultJobs1.size(), kDefaultJobs2.size());
+}
 
 enum class Stage {kApproach, kTie, kRetract, kDone};
 
@@ -426,25 +461,25 @@ bool planLin(
   return false;
 }
 
+// Execute the loaded and validated three-step YAML point program.
 bool planStage(
   const rclcpp::Logger & logger, Arm & a, const moveit_msgs::msg::RobotState & start,
   MGI::Plan & plan, std::string & method, int & code)
 {
-  switch (a.stage) {
-    case Stage::kApproach:
-      method = "OMPL";
-      return planOmpl(logger, a, start, a.tp_approach, plan, code);
-    case Stage::kTie:
-      method = "LIN";
-      return planLin(logger, a, start, a.tp, plan, code);
-    case Stage::kRetract:
-      method = "LIN";
-      return planLin(logger, a, start, a.tp_approach, plan, code);
-    default:
-      method = "-";
-      code = MoveItErr::FAILURE;
-      return false;
+  const auto & step = kTyingSteps.at(static_cast<std::size_t>(a.stage));
+  const auto & target = step.reference == "tie_frame" ? a.tp : a.tp_approach;
+  RCLCPP_INFO(logger, "%sYAML step %s: %s -> %s", tagOf(a).c_str(),
+              step.id.c_str(), step.motion.c_str(), step.reference.c_str());
+  if (step.motion == "moveJ") {
+    method = "OMPL";
+    return planOmpl(logger, a, start, target, plan, code);
   }
+  if (step.motion == "moveL") {
+    method = "LIN";
+    return planLin(logger, a, start, target, plan, code);
+  }
+  code = MoveItErr::FAILURE;
+  return false;
 }
 
 // ===========================================================================
@@ -672,7 +707,8 @@ void finishStage(const rclcpp::Logger & logger, Arm & a)
       a.stage = Stage::kTie;
       break;
     case Stage::kTie:
-      // >>> trigger the tying tool for this arm here <<<
+        // Mechanical tying-gun actuation remains a deliberate placeholder, as in the original.
+        // A separate tool driver must be integrated before physical tying can occur.
       a.stage = Stage::kRetract;
       break;
     case Stage::kRetract:
@@ -702,7 +738,7 @@ bool moveCombinedHome(const rclcpp::Logger & logger, MGI & combined)
   combined.setMaxAccelerationScalingFactor(kMoveJAcceleration);
 
   if (!combined.setNamedTarget("home")) {
-    RCLCPP_ERROR(logger, "Named state 'home' is not defined for '%s'.", kCombinedGroup);
+    RCLCPP_ERROR(logger, "Named state 'home' is not defined for '%s'.", kCombinedGroup.c_str());
     return false;
   }
   MGI::Plan plan;
@@ -889,6 +925,7 @@ int main(int argc, char ** argv)
   try {
     ok = [&]() -> bool
       {
+        loadTyingProgram(node);
         RCLCPP_INFO(node->get_logger(), "Waiting for MoveIt, joint states and TF.");
         rclcpp::sleep_for(2s);
 
@@ -917,10 +954,10 @@ int main(int argc, char ** argv)
         a2.link = kRobot2Link;
         a2.mg = &robot2;
 
-        const bool en1 = getOrDeclare<bool>(node, "robot1_enabled", true);
-        const bool en2 = getOrDeclare<bool>(node, "robot2_enabled", true);
+        const bool en1 = getOrDeclare<bool>(node, "robot1_enabled", kRobot1Enabled);
+        const bool en2 = getOrDeclare<bool>(node, "robot2_enabled", kRobot2Enabled);
         const bool stop_on_first_failure =
-          getOrDeclare<bool>(node, "stop_on_first_failure", false);
+          getOrDeclare<bool>(node, "stop_on_first_failure", kStopOnFirstFailure);
 
         std::vector<Job> jobs1, jobs2;
         if (!loadJobs(node, "robot1", kDefaultJobs1, jobs1) ||

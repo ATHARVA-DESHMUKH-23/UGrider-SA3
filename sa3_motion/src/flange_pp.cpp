@@ -10,11 +10,17 @@
 #include <utility>
 #include <stdexcept>
 #include <memory>
+#include <map>
+#include <set>
+#include <functional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include <geometry_msgs/msg/pose.hpp>
+#include <ament_index_cpp/get_package_share_directory.hpp>
+#include <yaml-cpp/yaml.h>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/robot_state/robot_state.h>
 #include <moveit/robot_state/conversions.h>
@@ -22,6 +28,7 @@
 #include <moveit_msgs/msg/move_it_error_codes.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Vector3.h>
 #include <tf2/exceptions.h>
 #include <tf2/time.h>
@@ -36,24 +43,21 @@ using MoveItErr = moveit_msgs::msg::MoveItErrorCodes;
 namespace
 {
 constexpr char kNodeName[] = "robot3_robot4_combined_pick_place";
-constexpr char kCombinedGroup[] = "robot3_robot4_arms";
-constexpr char kRobot3Group[] = "robot3_arm";
-constexpr char kRobot4Group[] = "robot4_arm";
-constexpr char kRobot3Link[] = "robot3_end_effactor_ff";
-constexpr char kRobot4Link[] = "robot4_end_effactor_ff";
 constexpr char kWorld[] = "world";
 
-constexpr double kPlanningTime = 15.0;
-constexpr int kPlanningAttempts = 10;
-constexpr int kRetries = 3;
-constexpr double kVelocity = 0.10;
-constexpr double kAcceleration = 0.10;
-constexpr double kIkTimeout = 1.0;
-
-// Retain the offsets from the supplied single-arm nodes.
-constexpr std::array<double, 3> kRobot3PickApproachOffset{-0.6, 0.0, 0.6};
-constexpr std::array<double, 3> kRobot4PickApproachOffset{ 0.6, 0.0, 0.6};
-constexpr std::array<double, 3> kPlaceApproachOffset{0.0, -0.25, 0.0};
+// These defaults preserve the original motion settings. The workcell YAML
+// supplies their actual values at runtime.
+struct MotionTuning
+{
+  double planning_time{15.0};
+  int planning_attempts{10};
+  int retries{3};
+  double movej_velocity{0.10};
+  double movej_acceleration{0.10};
+  double movel_velocity{0.10};
+  double movel_acceleration{0.10};
+  double ik_timeout{1.0};
+};
 
 struct ArmConfig
 {
@@ -216,6 +220,8 @@ trajectory_msgs::msg::JointTrajectoryPoint sampleTrajectory(
 // combined group. No per-point trajectory debug logging is emitted.
 bool movel_combined(
   const rclcpp::Logger & logger,
+  const MotionTuning & tuning,
+  const ArmConfig & a3, const ArmConfig & a4,
   moveit::planning_interface::MoveGroupInterface & robot1,
   moveit::planning_interface::MoveGroupInterface & robot2,
   moveit::planning_interface::MoveGroupInterface & combinedgroup,
@@ -236,10 +242,10 @@ bool movel_combined(
     group.setStartState(start_state_msg);
     group.setPlanningPipelineId("pilz_industrial_motion_planner");
     group.setPlannerId("LIN");
-    group.setPlanningTime(kPlanningTime);
+    group.setPlanningTime(tuning.planning_time);
     group.setNumPlanningAttempts(1);
-    group.setMaxVelocityScalingFactor(0.1);
-    group.setMaxAccelerationScalingFactor(0.1);
+    group.setMaxVelocityScalingFactor(tuning.movel_velocity);
+    group.setMaxAccelerationScalingFactor(tuning.movel_acceleration);
     group.clearPoseTargets();
     group.clearPathConstraints();
   };
@@ -247,8 +253,8 @@ bool movel_combined(
   configureLin(robot1);
   configureLin(robot2);
 
-  if (!robot1.setPoseTarget(goal1, kRobot3Link) ||
-      !robot2.setPoseTarget(goal2, kRobot4Link)) {
+  if (!robot1.setPoseTarget(goal1, a3.link) ||
+      !robot2.setPoseTarget(goal2, a4.link)) {
     RCLCPP_ERROR(logger, "[%s] One of the individual LIN pose targets was rejected.", stage.c_str());
     robot1.clearPoseTargets();
     robot2.clearPoseTargets();
@@ -367,39 +373,41 @@ bool movel_combined(
 // 12-joint goal. This avoids overwriting one arm's pose target with the other.
 bool planAndExecuteBoth(
   const rclcpp::Logger & logger,
+  const MotionTuning & tuning,
+  const ArmConfig & a3, const ArmConfig & a4,
   moveit::planning_interface::MoveGroupInterface & combined,
   const geometry_msgs::msg::Pose & target3,
   const geometry_msgs::msg::Pose & target4,
   const std::string & stage)
 {
-  for (int attempt = 1; attempt <= kRetries; ++attempt) {
+  for (int attempt = 1; attempt <= tuning.retries; ++attempt) {
     auto state = combined.getCurrentState(10.0);
     if (!state) {
       RCLCPP_ERROR(logger, "[%s] Current combined robot state unavailable.", stage.c_str());
       return false;
     }
-    const auto * group3 = state->getJointModelGroup(kRobot3Group);
-    const auto * group4 = state->getJointModelGroup(kRobot4Group);
+    const auto * group3 = state->getJointModelGroup(a3.group);
+    const auto * group4 = state->getJointModelGroup(a4.group);
     if (!group3 || !group4) {
       RCLCPP_ERROR(logger, "SRDF joint model groups '%s'/'%s' unavailable.",
-        kRobot3Group, kRobot4Group);
+        a3.group.c_str(), a4.group.c_str());
       return false;
     }
-    const bool ik3 = state->setFromIK(group3, target3, kRobot3Link, kIkTimeout);
-    const bool ik4 = ik3 && state->setFromIK(group4, target4, kRobot4Link, kIkTimeout);
+    const bool ik3 = state->setFromIK(group3, target3, a3.link, tuning.ik_timeout);
+    const bool ik4 = ik3 && state->setFromIK(group4, target4, a4.link, tuning.ik_timeout);
     if (!ik3 || !ik4) {
       RCLCPP_WARN(logger, "[%s] IK attempt %d/%d failed (Robot3=%s, Robot4=%s).",
-        stage.c_str(), attempt, kRetries, ik3 ? "OK" : "FAIL", ik4 ? "OK" : "FAIL");
+        stage.c_str(), attempt, tuning.retries, ik3 ? "OK" : "FAIL", ik4 ? "OK" : "FAIL");
       continue;
     }
 
     combined.setStartStateToCurrentState();
     combined.setPlanningPipelineId("ompl");
     combined.setPlannerId("RRTConnectkConfigDefault");
-    combined.setPlanningTime(kPlanningTime);
-    combined.setNumPlanningAttempts(kPlanningAttempts);
-    combined.setMaxVelocityScalingFactor(kVelocity);
-    combined.setMaxAccelerationScalingFactor(kAcceleration);
+    combined.setPlanningTime(tuning.planning_time);
+    combined.setNumPlanningAttempts(tuning.planning_attempts);
+    combined.setMaxVelocityScalingFactor(tuning.movej_velocity);
+    combined.setMaxAccelerationScalingFactor(tuning.movej_acceleration);
     combined.clearPoseTargets();
     combined.clearPathConstraints();
 
@@ -412,7 +420,7 @@ bool planAndExecuteBoth(
     const auto planned = combined.plan(plan);
     if (planned != moveit::core::MoveItErrorCode::SUCCESS) {
       RCLCPP_WARN(logger, "[%s] combined OMPL plan attempt %d/%d failed (code %d).",
-        stage.c_str(), attempt, kRetries, planned.val);
+        stage.c_str(), attempt, tuning.retries, planned.val);
       continue;
     }
 
@@ -429,32 +437,25 @@ bool planAndExecuteBoth(
   return false;
 }
 
-bool moveBoth(
-  const rclcpp::Logger & logger,
-  moveit::planning_interface::MoveGroupInterface & group,
-  const geometry_msgs::msg::Pose & p3, const geometry_msgs::msg::Pose & p4,
-  const std::string & stage)
-{
-  return planAndExecuteBoth(logger, group, p3, p4, stage);
-}
-
 // Plan and execute one collision-checked 12-joint MoveJ to the SRDF named home state.
 bool moveCombinedHome(
   const rclcpp::Logger & logger,
+  const MotionTuning & tuning,
+  const std::string & combined_group,
   moveit::planning_interface::MoveGroupInterface & combined)
 {
   combined.setStartStateToCurrentState();
   combined.setPlanningPipelineId("ompl");
   combined.setPlannerId("RRTConnectkConfigDefault");
-  combined.setPlanningTime(kPlanningTime);
-  combined.setNumPlanningAttempts(kPlanningAttempts);
-  combined.setMaxVelocityScalingFactor(kVelocity);
-  combined.setMaxAccelerationScalingFactor(kAcceleration);
+  combined.setPlanningTime(tuning.planning_time);
+  combined.setNumPlanningAttempts(tuning.planning_attempts);
+  combined.setMaxVelocityScalingFactor(tuning.movej_velocity);
+  combined.setMaxAccelerationScalingFactor(tuning.movej_acceleration);
   combined.clearPoseTargets();
   combined.clearPathConstraints();
 
   if (!combined.setNamedTarget("home")) {
-    RCLCPP_ERROR(logger, "Named state 'home' is not defined for '%s'.", kCombinedGroup);
+    RCLCPP_ERROR(logger, "Named state 'home' is not defined for '%s'.", combined_group.c_str());
     return false;
   }
 
@@ -475,268 +476,566 @@ bool moveCombinedHome(
   return true;
 }
 
-bool runSequence(
+// ---------------------------------------------------------------------------
+// YAML-driven paired-motion program: same load/validate/resolve/execute design
+// as rebar_pick_place.cpp, with one pose entry per arm for synchronized moves.
+// ---------------------------------------------------------------------------
+enum class OffsetFrame { kWorld, kLocal };
+enum class MotionType { kMoveJ, kMoveL };
+
+struct ArmTargetSpec
+{
+  std::string reference;
+  OffsetFrame xyz_frame{OffsetFrame::kWorld};
+  OffsetFrame rpy_frame{OffsetFrame::kLocal};
+  std::array<double, 3> xyz{0.0, 0.0, 0.0};
+  std::array<double, 3> rpy{0.0, 0.0, 0.0};
+};
+
+struct ConfiguredPlannerStep
+{
+  std::string id;
+  std::string description;
+  MotionType motion{MotionType::kMoveJ};
+  bool home{false};
+  bool repeat_arc{false};
+  ArmTargetSpec robot3;
+  ArmTargetSpec robot4;
+  std::vector<std::string> before_actions;
+  std::vector<std::string> after_actions;
+};
+
+struct FlangeProgram
+{
+  std::string combined_group{"robot3_robot4_arms"};
+  std::string world_frame{"world"};
+  std::string jig_object_id{"jig_clamp"};
+  ArmConfig robot3;
+  ArmConfig robot4;
+  int arc_points{8};
+  MotionTuning tuning;
+  std::vector<ConfiguredPlannerStep> steps;
+};
+
+std::array<double, 3> requiredVector3(
+  const YAML::Node & entry, const std::string & field, const std::string & context)
+{
+  const auto value = entry[field];
+  if (!value || !value.IsSequence() || value.size() != 3) {
+    throw std::runtime_error(context + "." + field + " must be [x, y, z]");
+  }
+  std::array<double, 3> result{};
+  for (std::size_t i = 0; i < 3; ++i) {
+    result[i] = value[i].as<double>();
+    if (!std::isfinite(result[i])) {
+      throw std::runtime_error(context + "." + field + " contains a non-finite value");
+    }
+  }
+  return result;
+}
+
+OffsetFrame readOffsetFrame(
+  const std::string & value, const std::string & context)
+{
+  if (value == "world") return OffsetFrame::kWorld;
+  if (value == "local") return OffsetFrame::kLocal;
+  throw std::runtime_error(context + " must be 'world' or 'local'");
+}
+
+std::vector<std::string> readActions(
+  const YAML::Node & yaml_step,
+  const std::string & plural, const std::string & singular,
+  const std::string & context)
+{
+  if (yaml_step[plural] && yaml_step[singular]) {
+    throw std::runtime_error(context + " cannot contain both " + plural + " and " + singular);
+  }
+  const auto actions = yaml_step[plural];
+  if (!actions) {
+    const auto single = yaml_step[singular];
+    if (!single) return {};
+    const auto action = single.as<std::string>();
+    return action.empty() ? std::vector<std::string>{} : std::vector<std::string>{action};
+  }
+  if (!actions.IsSequence()) {
+    throw std::runtime_error(context + "." + plural + " must be a list");
+  }
+  std::vector<std::string> result;
+  for (const auto & value : actions) {
+    const auto action = value.as<std::string>();
+    if (action.empty()) throw std::runtime_error(context + " contains an empty action");
+    result.push_back(action);
+  }
+  return result;
+}
+
+ArmTargetSpec readArmTarget(const YAML::Node & entry, const std::string & context)
+{
+  if (!entry || !entry.IsMap()) {
+    throw std::runtime_error(context + " must be a target dictionary");
+  }
+  ArmTargetSpec target;
+  target.reference = entry["reference"].as<std::string>();
+  if (target.reference != "pick_frame" && target.reference != "place_frame" &&
+      target.reference != "arc_waypoint" && target.reference != "current_tcp") {
+    throw std::runtime_error(context + " has unknown reference: " + target.reference);
+  }
+  target.xyz_frame = readOffsetFrame(
+    entry["offset_frame"].as<std::string>(), context + ".offset_frame");
+  target.rpy_frame = readOffsetFrame(
+    entry["rpy_frame"].as<std::string>("local"), context + ".rpy_frame");
+  target.xyz = requiredVector3(entry, "xyz", context);
+  target.rpy = requiredVector3(entry, "rpy", context);
+  return target;
+}
+
+std::vector<ConfiguredPlannerStep> readPlannerSteps(const YAML::Node & workcell)
+{
+  const auto program = workcell["planner_sequence"]["flange_pp"];
+  if (!program || !program.IsMap()) {
+    throw std::runtime_error("workcell.planner_sequence.flange_pp is missing");
+  }
+  std::vector<ConfiguredPlannerStep> steps;
+  std::set<std::string> ids;
+  const std::set<std::string> permitted_actions{
+    "prepare_pick", "attach_objects", "allow_inventory_contact",
+    "restore_inventory_contact", "allow_place_contact",
+    "detach_objects", "restore_gripper_contact"};
+  for (const auto & stage_name : {"pick", "transfer", "place", "finish"}) {
+    const auto stage = program[stage_name];
+    if (!stage || !stage.IsSequence() || stage.size() == 0) {
+      throw std::runtime_error(std::string("flange_pp.") + stage_name + " must be a nonempty list");
+    }
+    for (const auto & entry : stage) {
+      ConfiguredPlannerStep step;
+      step.id = entry["id"].as<std::string>();
+      if (step.id.empty() || !ids.insert(step.id).second) {
+        throw std::runtime_error("Empty/duplicate flange planner step id: " + step.id);
+      }
+      step.description = entry["description"].as<std::string>(step.id);
+      const auto motion = entry["motion"].as<std::string>();
+      if (motion == "moveJ") step.motion = MotionType::kMoveJ;
+      else if (motion == "moveL") step.motion = MotionType::kMoveL;
+      else throw std::runtime_error(step.id + ": motion must be moveJ or moveL");
+      step.before_actions = readActions(
+        entry, "before_actions", "before_action", step.id);
+      step.after_actions = readActions(
+        entry, "after_actions", "after_action", step.id);
+      for (const auto & action : step.before_actions) {
+        if (!permitted_actions.count(action)) {
+          throw std::runtime_error(step.id + ": unknown before_action '" + action + "'");
+        }
+      }
+      for (const auto & action : step.after_actions) {
+        if (!permitted_actions.count(action)) {
+          throw std::runtime_error(step.id + ": unknown after_action '" + action + "'");
+        }
+      }
+      step.home = entry["reference"].as<std::string>("") == "home";
+      step.repeat_arc = entry["repeat"].as<std::string>("") == "arc_waypoints";
+      if (entry["repeat"] && !step.repeat_arc) {
+        throw std::runtime_error(step.id + ": unknown repeat type");
+      }
+      if (step.home) {
+        if (step.repeat_arc || step.motion != MotionType::kMoveJ) {
+          throw std::runtime_error(step.id + ": home must be a nonrepeated moveJ");
+        }
+      } else {
+        if (entry["reference"]) {
+          throw std::runtime_error(step.id + ": only 'home' supports a step-level reference");
+        }
+        step.robot3 = readArmTarget(entry["robot3"], step.id + ".robot3");
+        step.robot4 = readArmTarget(entry["robot4"], step.id + ".robot4");
+        const bool uses_arc = step.robot3.reference == "arc_waypoint" ||
+          step.robot4.reference == "arc_waypoint";
+        if (uses_arc != step.repeat_arc ||
+            (step.repeat_arc && (step.motion != MotionType::kMoveL ||
+              step.robot3.reference != "arc_waypoint" ||
+              step.robot4.reference != "arc_waypoint"))) {
+          throw std::runtime_error(step.id + ": arc requires paired repeat: arc_waypoints and moveL");
+        }
+      }
+      steps.push_back(std::move(step));
+    }
+  }
+  return steps;
+}
+
+ArmConfig readArmConfig(const YAML::Node & entry, const std::string & name)
+{
+  if (!entry || !entry.IsMap()) {
+    throw std::runtime_error("workcell.flange_pp." + name + " must be a dictionary");
+  }
+  ArmConfig arm;
+  arm.name = name;
+  arm.group = entry["group"].as<std::string>();
+  arm.link = entry["link"].as<std::string>();
+  arm.pick_frame = entry["pick_frame"].as<std::string>();
+  arm.place_frame = entry["place_frame"].as<std::string>();
+  arm.object_id = entry["object_id"].as<std::string>();
+  arm.inventory_id = entry["inventory_id"].as<std::string>();
+  arm.touch_links = entry["touch_links"].as<std::vector<std::string>>();
+  arm.pick_offset = requiredVector3(entry, "pick_offset", name);
+  arm.place_offset = requiredVector3(entry, "place_offset", name);
+  const auto arc_frames = entry["arc_frames"].as<std::vector<std::string>>();
+  if (arc_frames.size() != 3 || arm.touch_links.empty()) {
+    throw std::runtime_error(name + ": expected 3 arc frames and nonempty touch_links");
+  }
+  std::copy(arc_frames.begin(), arc_frames.end(), arm.arc_frames.begin());
+  for (const auto & value : {arm.group, arm.link, arm.pick_frame,
+    arm.place_frame, arm.object_id, arm.inventory_id}) {
+    if (value.empty()) throw std::runtime_error(name + ": empty required name");
+  }
+  return arm;
+}
+
+MotionTuning readMotionTuning(const YAML::Node & config)
+{
+  if (!config || !config.IsMap()) {
+    throw std::runtime_error("workcell.flange_pp.planning is missing");
+  }
+  MotionTuning t;
+  t.planning_time = config["planning_time"].as<double>();
+  t.planning_attempts = config["planning_attempts"].as<int>();
+  t.retries = config["retries"].as<int>();
+  t.ik_timeout = config["ik_timeout"].as<double>();
+  t.movej_velocity = config["movej_velocity"].as<double>();
+  t.movej_acceleration = config["movej_acceleration"].as<double>();
+  t.movel_velocity = config["movel_velocity"].as<double>();
+  t.movel_acceleration = config["movel_acceleration"].as<double>();
+  if (!std::isfinite(t.planning_time) || t.planning_time <= 0.0 ||
+      t.planning_attempts < 1 || t.retries < 1 ||
+      !std::isfinite(t.ik_timeout) || t.ik_timeout <= 0.0) {
+    throw std::runtime_error("Invalid flange planning time/attempts/retries/IK timeout");
+  }
+  for (double value : {t.movej_velocity, t.movej_acceleration,
+                       t.movel_velocity, t.movel_acceleration}) {
+    if (!std::isfinite(value) || value <= 0.0 || value > 1.0) {
+      throw std::runtime_error("All flange scaling factors must be in (0, 1]");
+    }
+  }
+  return t;
+}
+
+FlangeProgram loadFlangeProgram(const std::string & yaml_path)
+{
+  const auto doc = YAML::LoadFile(yaml_path);
+  const auto workcell = doc["workcell"];
+  if (!workcell || !workcell.IsMap()) {
+    throw std::runtime_error("Config file lacks a 'workcell' dictionary: " + yaml_path);
+  }
+  const auto config = workcell["flange_pp"];
+  if (!config || !config.IsMap()) {
+    throw std::runtime_error("Config lacks workcell.flange_pp: " + yaml_path);
+  }
+  FlangeProgram result;
+  result.world_frame = workcell["world_frame"].as<std::string>("world");
+  result.combined_group = config["combined_group"].as<std::string>("robot3_robot4_arms");
+  result.jig_object_id = config["jig_object_id"].as<std::string>();
+  result.robot3 = readArmConfig(config["robot3"], "robot3");
+  result.robot4 = readArmConfig(config["robot4"], "robot4");
+  result.arc_points = config["arc_points"].as<int>();
+  result.tuning = readMotionTuning(config["planning"]);
+  result.steps = readPlannerSteps(workcell);
+  if (result.world_frame != "world") {
+    // The original combined MoveIt planning frame and collision scene use world.
+    throw std::runtime_error("flange_pp currently requires workcell.world_frame == world");
+  }
+  if (result.combined_group.empty() || result.jig_object_id.empty() ||
+      result.arc_points < 2 || result.arc_points > 1000) {
+    throw std::runtime_error("Invalid combined_group, jig_object_id or arc_points");
+  }
+  if (result.robot3.object_id == result.robot4.object_id) {
+    throw std::runtime_error("Robot3 and Robot4 must not share a collision object ID");
+  }
+  return result;
+}
+
+// Preserve the pre-existing ROS parameter interface: launch overrides take
+// precedence over YAML values for individual robot/task-frame parameters.
+void applyRosOverrides(const rclcpp::Node::SharedPtr & node, FlangeProgram & program)
+{
+  auto override_arm = [&](ArmConfig & arm) {
+    const auto prefix = arm.name + "_";
+    arm.pick_frame = node->declare_parameter<std::string>(prefix + "pick_frame", arm.pick_frame);
+    arm.place_frame = node->declare_parameter<std::string>(prefix + "place_frame", arm.place_frame);
+    arm.object_id = node->declare_parameter<std::string>(prefix + "object_id", arm.object_id);
+    arm.inventory_id = node->declare_parameter<std::string>(prefix + "inventory_id", arm.inventory_id);
+    const auto frames = node->declare_parameter<std::vector<std::string>>(
+      prefix + "arc_frames",
+      std::vector<std::string>(arm.arc_frames.begin(), arm.arc_frames.end()));
+    if (frames.size() != 3) throw std::runtime_error(prefix + "arc_frames must contain 3 frames");
+    std::copy(frames.begin(), frames.end(), arm.arc_frames.begin());
+    const auto pick = node->declare_parameter<std::vector<double>>(
+      prefix + "pick_offset",
+      std::vector<double>(arm.pick_offset.begin(), arm.pick_offset.end()));
+    const auto place = node->declare_parameter<std::vector<double>>(
+      prefix + "place_offset",
+      std::vector<double>(arm.place_offset.begin(), arm.place_offset.end()));
+    if (pick.size() != 3 || place.size() != 3) {
+      throw std::runtime_error(prefix + "pick/place_offset must contain 3 values");
+    }
+    std::copy(pick.begin(), pick.end(), arm.pick_offset.begin());
+    std::copy(place.begin(), place.end(), arm.place_offset.begin());
+  };
+  override_arm(program.robot3);
+  override_arm(program.robot4);
+  program.arc_points = node->declare_parameter<int>("arc_points", program.arc_points);
+  if (program.arc_points < 2 || program.arc_points > 1000) {
+    throw std::runtime_error("arc_points must be in [2, 1000]");
+  }
+}
+
+geometry_msgs::msg::Pose applyTargetOffset(
+  const geometry_msgs::msg::Pose & reference, const ArmTargetSpec & spec)
+{
+  geometry_msgs::msg::Pose target = reference;
+  tf2::Quaternion q_ref(reference.orientation.x, reference.orientation.y,
+    reference.orientation.z, reference.orientation.w);
+  q_ref.normalize();
+  const tf2::Vector3 delta(spec.xyz[0], spec.xyz[1], spec.xyz[2]);
+  const auto translated = spec.xyz_frame == OffsetFrame::kLocal ?
+    tf2::quatRotate(q_ref, delta) : delta;
+  target.position.x += translated.x();
+  target.position.y += translated.y();
+  target.position.z += translated.z();
+  tf2::Quaternion q_offset;
+  q_offset.setRPY(spec.rpy[0], spec.rpy[1], spec.rpy[2]);
+  const auto q_target = spec.rpy_frame == OffsetFrame::kLocal ?
+    (q_ref * q_offset) : (q_offset * q_ref);
+  tf2::Quaternion normalized = q_target;
+  normalized.normalize();
+  target.orientation.x = normalized.x();
+  target.orientation.y = normalized.y();
+  target.orientation.z = normalized.z();
+  target.orientation.w = normalized.w();
+  return target;
+}
+
+geometry_msgs::msg::Pose resolveTarget(
+  const ArmTargetSpec & spec,
+  moveit::planning_interface::MoveGroupInterface & move_group,
+  const std::string & tip_link,
+  const std::map<std::string, geometry_msgs::msg::Pose> & references,
+  const std::string & context)
+{
+  if (spec.reference == "current_tcp") {
+    if (!move_group.getCurrentState(10.0)) {
+      throw std::runtime_error(context + ": current TCP unavailable");
+    }
+    return applyTargetOffset(move_group.getCurrentPose(tip_link).pose, spec);
+  }
+  const auto it = references.find(spec.reference);
+  if (it == references.end()) {
+    throw std::runtime_error(context + ": unknown/unavailable pose '" + spec.reference + "'");
+  }
+  return applyTargetOffset(it->second, spec);
+}
+
+using ConfiguredActionHandler = std::function<bool(const std::string &)>;
+
+bool executeConfiguredPlannerSteps(
+  const rclcpp::Node::SharedPtr & node,
+  moveit::planning_interface::MoveGroupInterface & combined,
+  moveit::planning_interface::MoveGroupInterface & robot3,
+  moveit::planning_interface::MoveGroupInterface & robot4,
+  const FlangeProgram & program,
+  const std::map<std::string, geometry_msgs::msg::Pose> & references3,
+  const std::map<std::string, geometry_msgs::msg::Pose> & references4,
+  const std::vector<geometry_msgs::msg::Pose> & arc3,
+  const std::vector<geometry_msgs::msg::Pose> & arc4,
+  const ConfiguredActionHandler & action_handler)
+{
+  const auto logger = node->get_logger();
+  auto run_actions = [&](const std::vector<std::string> & actions,
+                         const std::string & label) {
+    for (const auto & action : actions) {
+      if (!action_handler(action)) {
+        RCLCPP_ERROR(logger, "[%s] collision/action '%s' failed",
+          label.c_str(), action.c_str());
+        return false;
+      }
+    }
+    return true;
+  };
+
+  for (const auto & step : program.steps) {
+    const std::string label = step.id + " " + step.description;
+    if (!run_actions(step.before_actions, label)) return false;
+
+    if (step.home) {
+      if (!moveCombinedHome(logger, program.tuning, program.combined_group, combined)) return false;
+    } else {
+      const std::size_t count = step.repeat_arc ? arc3.size() : 1;
+      for (std::size_t i = 0; i < count; ++i) {
+        auto refs3 = references3;
+        auto refs4 = references4;
+        if (step.repeat_arc) {
+          refs3["arc_waypoint"] = arc3[i];
+          refs4["arc_waypoint"] = arc4[i];
+        }
+        const auto goal3 = resolveTarget(
+          step.robot3, robot3, program.robot3.link, refs3, label + ".robot3");
+        const auto goal4 = resolveTarget(
+          step.robot4, robot4, program.robot4.link, refs4, label + ".robot4");
+        const auto waypoint_label = step.repeat_arc ?
+          "arc waypoint " + std::to_string(i + 1) + "/" + std::to_string(count) : label;
+        RCLCPP_INFO(logger, "[%s] YAML motion=%s", waypoint_label.c_str(),
+          step.motion == MotionType::kMoveJ ? "moveJ (combined OMPL)" : "moveL (paired Pilz LIN)");
+        const bool succeeded = step.motion == MotionType::kMoveJ ?
+          planAndExecuteBoth(logger, program.tuning, program.robot3, program.robot4,
+            combined, goal3, goal4, waypoint_label) :
+          movel_combined(logger, program.tuning, program.robot3, program.robot4,
+            robot3, robot4, combined, goal3, goal4, waypoint_label);
+        if (!succeeded) {
+          RCLCPP_ERROR(logger, "[%s] Motion failed, aborting YAML program", waypoint_label.c_str());
+          return false;
+        }
+      }
+    }
+    if (!run_actions(step.after_actions, label)) return false;
+  }
+  return true;
+}
+
+bool runConfiguredProgram(
   const rclcpp::Node::SharedPtr & node,
   moveit::planning_interface::MoveGroupInterface & combined,
   moveit::planning_interface::MoveGroupInterface & robot3,
   moveit::planning_interface::MoveGroupInterface & robot4,
   tf2_ros::Buffer & tf,
   PlanningSceneObjects & scene,
-  ArmConfig & a3, ArmConfig & a4,
-  int arc_points)
+  const FlangeProgram & program)
 {
   const auto logger = node->get_logger();
-  geometry_msgs::msg::Pose pickFrame3, placeFrame3, pickFrame4, placeFrame4;
+  const auto & a3 = program.robot3;
+  const auto & a4 = program.robot4;
+  geometry_msgs::msg::Pose pick3, place3, pick4, place4;
   geometry_msgs::msg::Pose a3p0, a3p1, a3p2, a4p0, a4p1, a4p2;
-  if (!lookupPose(logger, tf, a3.pick_frame, pickFrame3) ||
-      !lookupPose(logger, tf, a3.place_frame, placeFrame3) ||
-      !lookupPose(logger, tf, a4.pick_frame, pickFrame4) ||
-      !lookupPose(logger, tf, a4.place_frame, placeFrame4) ||
+  if (!lookupPose(logger, tf, a3.pick_frame, pick3) ||
+      !lookupPose(logger, tf, a3.place_frame, place3) ||
+      !lookupPose(logger, tf, a4.pick_frame, pick4) ||
+      !lookupPose(logger, tf, a4.place_frame, place4) ||
       !lookupPose(logger, tf, a3.arc_frames[0], a3p0) ||
       !lookupPose(logger, tf, a3.arc_frames[1], a3p1) ||
       !lookupPose(logger, tf, a3.arc_frames[2], a3p2) ||
       !lookupPose(logger, tf, a4.arc_frames[0], a4p0) ||
       !lookupPose(logger, tf, a4.arc_frames[1], a4p1) ||
-      !lookupPose(logger, tf, a4.arc_frames[2], a4p2)) return false;
-
-  const auto pick3 = offsetPose(pickFrame3, a3.pick_offset);
-  const auto place3 = offsetPose(placeFrame3, a3.place_offset);
-  const auto pick4 = offsetPose(pickFrame4, a4.pick_offset);
-  const auto place4 = offsetPose(placeFrame4, a4.place_offset);
-  const auto pickApproach3 = offsetPose(pick3, kRobot3PickApproachOffset);
-  const auto pickApproach4 = offsetPose(pick4, kRobot4PickApproachOffset);
-  const auto placeApproach3 = offsetPose(place3, kPlaceApproachOffset);
-  const auto placeApproach4 = offsetPose(place4, kPlaceApproachOffset);
-  const auto arc3 = arcThrough3(a3p0, a3p1, a3p2, arc_points);
-  const auto arc4 = arcThrough3(a4p0, a4p1, a4p2, arc_points);
-  if (arc3.empty() || arc4.empty() || arc3.size() != arc4.size()) {
-    RCLCPP_ERROR(logger, "Could not build both arcs, or arc point counts differ.");
+      !lookupPose(logger, tf, a4.arc_frames[2], a4p2)) {
     return false;
   }
 
+  std::map<std::string, geometry_msgs::msg::Pose> refs3{
+    {"pick_frame", offsetPose(pick3, a3.pick_offset)},
+    {"place_frame", offsetPose(place3, a3.place_offset)}};
+  std::map<std::string, geometry_msgs::msg::Pose> refs4{
+    {"pick_frame", offsetPose(pick4, a4.pick_offset)},
+    {"place_frame", offsetPose(place4, a4.place_offset)}};
+  const auto arc3 = arcThrough3(a3p0, a3p1, a3p2, program.arc_points);
+  const auto arc4 = arcThrough3(a4p0, a4p1, a4p2, program.arc_points);
+  if (arc3.empty() || arc4.empty() || arc3.size() != arc4.size()) {
+    RCLCPP_ERROR(logger, "Could not build both arcs, or arc point counts differ");
+    return false;
+  }
   if (!scene.verifyObjectState(a3.object_id, true, false) ||
       !scene.verifyObjectState(a4.object_id, true, false)) {
-    RCLCPP_ERROR(logger, "Both rebars must be world collision objects before starting.");
+    RCLCPP_ERROR(logger, "Both flange objects must be world collision objects before starting");
     return false;
   }
 
-  // 1) Keep the initial pick-approach movement as one combined OMPL plan.
-  if (!moveBoth(logger, combined, pickApproach3, pickApproach4, "pick approach")) {
-    return false;
-  }
-
-  // 2) Allow only each rebar's gripper-touch links during the pick.
-  if (!scene.setObjectCollisionsAllowed(a3.object_id, a3.touch_links, true) ||
-      !scene.setObjectCollisionsAllowed(a4.object_id, a4.touch_links, true)) {
-    RCLCPP_ERROR(logger, "Failed to configure rebar/gripper contact allowances.");
-    return false;
-  }
-
-  // 3) Plan both pick LIN trajectories independently, merge, and execute together.
-  if (!movel_combined(logger, robot3, robot4, combined, pick3, pick4,
-      "pick approach -> pick")) {
-    RCLCPP_ERROR(logger, "Stopping sequence: combined pick LIN failed.");
-    return false;
-  }
-
-  // 4) Attach both objects, preserving their world poses.
-  if (!scene.attachWorldObjectPreservingPose(combined, a3.object_id, a3.link, a3.touch_links)) {
-    RCLCPP_ERROR(logger, "Failed to attach %s to %s.",
-      a3.object_id.c_str(), a3.link.c_str());
-    return false;
-  }
-  if (!scene.attachWorldObjectPreservingPose(combined, a4.object_id, a4.link, a4.touch_links)) {
-    RCLCPP_ERROR(logger,
-      "Failed to attach %s to %s. Robot 3 object remains attached for recovery.",
-      a4.object_id.c_str(), a4.link.c_str());
-    return false;
-  }
-
-  // 5) Allow carried rebars to contact their respective source inventory during retract.
-  if (!scene.setObjectCollisionsAllowed(a3.object_id, {a3.inventory_id}, true) ||
-      !scene.setObjectCollisionsAllowed(a4.object_id, {a4.inventory_id}, true)) {
-    RCLCPP_ERROR(logger, "Failed to enable rebar/inventory contact during retract.");
-    return false;
-  }
-
-  // 6) Retract both arms from pick using the combined LIN function.
-  if (!movel_combined(logger, robot3, robot4, combined,
-      pickApproach3, pickApproach4, "pick -> pick retract")) {
-    RCLCPP_ERROR(logger, "Combined pick retract LIN failed; objects remain attached.");
-    return false;
-  }
-
-  if (!scene.setObjectCollisionsAllowed(a3.object_id, {a3.inventory_id}, false) ||
-      !scene.setObjectCollisionsAllowed(a4.object_id, {a4.inventory_id}, false)) {
-    RCLCPP_ERROR(logger, "Failed to restore inventory collision checking.");
-    return false;
-  }
-
-  // 7) Carry both rebars along their arcs. Each paired waypoint uses combined LIN.
-  for (std::size_t i = 0; i < arc3.size(); ++i) {
-    if (!movel_combined(logger, robot3, robot4, combined, arc3[i], arc4[i],
-        "arc waypoint " + std::to_string(i + 1) + "/" + std::to_string(arc3.size()))) {
-      RCLCPP_ERROR(logger, "Arc failed; attached rebars remain attached for recovery.");
-      return false;
+  // Only these reviewed actions may change MoveIt's scene/attachment state.
+  // Do not auto-detach on a failed motion: the actual carried pose is unknown.
+  const ConfiguredActionHandler action = [&](const std::string & name) -> bool {
+    if (name.empty()) return true;
+    if (name == "prepare_pick") {
+      return scene.setObjectCollisionsAllowed(a3.object_id, a3.touch_links, true) &&
+        scene.setObjectCollisionsAllowed(a4.object_id, a4.touch_links, true);
     }
-  }
+    if (name == "attach_objects") {
+      return scene.attachWorldObjectPreservingPose(combined, a3.object_id, a3.link, a3.touch_links) &&
+        scene.attachWorldObjectPreservingPose(combined, a4.object_id, a4.link, a4.touch_links);
+    }
+    if (name == "allow_inventory_contact") {
+      return scene.setObjectCollisionsAllowed(a3.object_id, {a3.inventory_id}, true) &&
+        scene.setObjectCollisionsAllowed(a4.object_id, {a4.inventory_id}, true);
+    }
+    if (name == "restore_inventory_contact") {
+      return scene.setObjectCollisionsAllowed(a3.object_id, {a3.inventory_id}, false) &&
+        scene.setObjectCollisionsAllowed(a4.object_id, {a4.inventory_id}, false);
+    }
+    if (name == "allow_place_contact") {
+      return scene.setObjectCollisionsAllowed(a3.object_id, {program.jig_object_id}, true) &&
+        scene.setObjectCollisionsAllowed(a4.object_id, {program.jig_object_id}, true);
+    }
+    if (name == "detach_objects") {
+      return scene.detachObjectToWorldPreservingPose(combined, a3.object_id) &&
+        scene.detachObjectToWorldPreservingPose(combined, a4.object_id);
+    }
+    if (name == "restore_gripper_contact") {
+      return scene.setObjectCollisionsAllowed(a3.object_id, a3.touch_links, false) &&
+        scene.setObjectCollisionsAllowed(a4.object_id, a4.touch_links, false);
+    }
+    RCLCPP_ERROR(logger, "Unknown YAML planner safety action '%s'", name.c_str());
+    return false;
+  };
 
-  // 8) Permit rebar-to-jig contact for placement; robot-to-jig checks remain enabled.
-  if (!scene.setObjectCollisionsAllowed(a3.object_id, {"jig_clamp"}, true) ||
-      !scene.setObjectCollisionsAllowed(a4.object_id, {"jig_clamp"}, true)) {
-    RCLCPP_ERROR(logger, "Failed to allow rebar/jig contact.");
+  if (!executeConfiguredPlannerSteps(node, combined, robot3, robot4, program,
+      refs3, refs4, arc3, arc4, action)) {
     return false;
   }
-
-  // 9) Place approach and place both use the combined LIN function.
-  if (!movel_combined(logger, robot3, robot4, combined,
-      placeApproach3, placeApproach4, "place approach")) {
-    return false;
-  }
-  if (!movel_combined(logger, robot3, robot4, combined,
-      place3, place4, "place")) {
-    return false;
-  }
-
-  // 10) Detach each rebar into the world at its actual release pose.
-  if (!scene.detachObjectToWorldPreservingPose(combined, a3.object_id)) {
-    RCLCPP_ERROR(logger, "Failed to detach %s.", a3.object_id.c_str());
-    return false;
-  }
-  if (!scene.detachObjectToWorldPreservingPose(combined, a4.object_id)) {
-    RCLCPP_ERROR(logger, "Failed to detach %s.", a4.object_id.c_str());
-    return false;
-  }
-
-  // 11) Retract both arms using combined LIN, then restore gripper collision checks.
-  if (!movel_combined(logger, robot3, robot4, combined,
-      placeApproach3, placeApproach4, "place retract")) {
-    return false;
-  }
-  if (!scene.setObjectCollisionsAllowed(a3.object_id, a3.touch_links, false) ||
-      !scene.setObjectCollisionsAllowed(a4.object_id, a4.touch_links, false)) {
-    RCLCPP_ERROR(logger,
-      "Objects placed, but failed to restore gripper collision checking.");
-    return false;
-  }
-
-  // 12) Once place retract is complete, return both arms home together.
-  if (!moveCombinedHome(logger, combined)) {
-    RCLCPP_ERROR(logger, "Combined HOME motion failed after place retract.");
-    return false;
-  }
-
-  RCLCPP_INFO(logger, "Combined Robot 3 + Robot 4 pick/place and HOME completed.");
+  RCLCPP_INFO(logger, "Robot3 + Robot4 YAML flange pick/place and combined home completed");
   return true;
 }
 
-std::array<double, 3> readOffset(
-  const rclcpp::Node::SharedPtr & node, const std::string & name)
-{
-  // The offset parameters are declared in main(). Only declare here if this
-  // helper is reused with a parameter that has not already been declared.
-  if (!node->has_parameter(name)) {
-    node->declare_parameter<std::vector<double>>(
-      name, std::vector<double>{0.0, 0.0, 0.0});
-  }
-
-  const auto v = node->get_parameter(name).as_double_array();
-  if (v.size() != 3) {
-    throw std::runtime_error(name + " must contain [x,y,z]");
-  }
-  return {v[0], v[1], v[2]};
-}
 }  // namespace
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  // Declare parameters explicitly below; ROS parameter overrides are applied
-  // when each parameter is declared.
   auto node = rclcpp::Node::make_shared(kNodeName);
-
-  // Frame and object parameters can be overridden from the launch file.
-  node->declare_parameter<std::string>("robot3_pick_frame", "inventory_3a_4a_frame");
-  node->declare_parameter<std::string>("robot3_place_frame", "place_frame_10_l");
-  node->declare_parameter<std::string>("robot3_object_id", "rebar_3c");
-  node->declare_parameter<std::string>("robot3_inventory_id", "inventory_3a_4a");
-  node->declare_parameter<std::string>("robot4_pick_frame", "inventory_3a_4a_frame_2");
-  node->declare_parameter<std::string>("robot4_place_frame", "place_frame_10");
-  node->declare_parameter<std::string>("robot4_object_id", "rebar_4c");
-  node->declare_parameter<std::string>("robot4_inventory_id", "inventory_3a_4a_2");
-  node->declare_parameter<std::vector<std::string>>(
-    "robot3_arc_frames", {"r3_arc_start", "r3_arc_mid", "r3_arc_end"});
-  node->declare_parameter<std::vector<std::string>>(
-    "robot4_arc_frames", {"r4_arc_start", "r4_arc_mid", "r4_arc_end"});
-  node->declare_parameter<int>("arc_points", 8);
-  node->declare_parameter<std::vector<double>>("robot3_pick_offset", {0.0, 0.0, 0.0});
-  node->declare_parameter<std::vector<double>>("robot3_place_offset", {0.0, 0.0, 0.0});
-  node->declare_parameter<std::vector<double>>("robot4_pick_offset", {0.0, 0.0, 0.0});
-  node->declare_parameter<std::vector<double>>("robot4_place_offset", {0.0, 0.0, 0.0});
-
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  std::thread spin_thread([&executor]() { executor.spin(); });
   bool success = false;
   try {
-    ArmConfig a3, a4;
-    a3.name = "robot3"; a3.group = kRobot3Group; a3.link = kRobot3Link;
-    a3.pick_frame = node->get_parameter("robot3_pick_frame").as_string();
-    a3.place_frame = node->get_parameter("robot3_place_frame").as_string();
-    a3.object_id = node->get_parameter("robot3_object_id").as_string();
-    a3.inventory_id = node->get_parameter("robot3_inventory_id").as_string();
-    a3.touch_links = {kRobot3Link, "robot3_J6_link", "robot3_sa3_grpr01_r"};
-    a3.pick_offset = readOffset(node, "robot3_pick_offset");
-    a3.place_offset = readOffset(node, "robot3_place_offset");
-    auto f3 = node->get_parameter("robot3_arc_frames").as_string_array();
-    if (f3.size() != 3) throw std::runtime_error("robot3_arc_frames must have 3 frame names");
-    std::copy(f3.begin(), f3.end(), a3.arc_frames.begin());
-
-    a4.name = "robot4"; a4.group = kRobot4Group; a4.link = kRobot4Link;
-    a4.pick_frame = node->get_parameter("robot4_pick_frame").as_string();
-    a4.place_frame = node->get_parameter("robot4_place_frame").as_string();
-    a4.object_id = node->get_parameter("robot4_object_id").as_string();
-    a4.inventory_id = node->get_parameter("robot4_inventory_id").as_string();
-    a4.touch_links = {kRobot4Link, "robot4_J6_link", "robot4_sa3_grpr01_r"};
-    a4.pick_offset = readOffset(node, "robot4_pick_offset");
-    a4.place_offset = readOffset(node, "robot4_place_offset");
-    auto f4 = node->get_parameter("robot4_arc_frames").as_string_array();
-    if (f4.size() != 3) throw std::runtime_error("robot4_arc_frames must have 3 frame names");
-    std::copy(f4.begin(), f4.end(), a4.arc_frames.begin());
-
-    rclcpp::executors::SingleThreadedExecutor executor;
-    executor.add_node(node);
-    std::thread spin_thread([&executor]() { executor.spin(); });
-
+    const auto config_package = node->declare_parameter<std::string>(
+      "workcell_config_package", "sa2_description");
+    const auto config_file = node->declare_parameter<std::string>(
+      "workcell_config_file", "config/workcell.yaml");
+    const auto config_path_override = node->declare_parameter<std::string>(
+      "workcell_config_path", "");
+    const auto config_path = config_path_override.empty() ?
+      ament_index_cpp::get_package_share_directory(config_package) + "/" + config_file :
+      config_path_override;
+    RCLCPP_INFO(node->get_logger(), "Loading flange workcell YAML: %s", config_path.c_str());
+    auto program = loadFlangeProgram(config_path);
+    applyRosOverrides(node, program);
     tf2_ros::Buffer tf_buffer(node->get_clock());
     tf_buffer.setUsingDedicatedThread(true);
     tf2_ros::TransformListener tf_listener(tf_buffer, node, false);
-
-    RCLCPP_INFO(node->get_logger(), "Initializing combined group '%s'.", kCombinedGroup);
-    moveit::planning_interface::MoveGroupInterface combined(node, kCombinedGroup);
-    moveit::planning_interface::MoveGroupInterface robot3(node, kRobot3Group);
-    moveit::planning_interface::MoveGroupInterface robot4(node, kRobot4Group);
-    combined.setPoseReferenceFrame(kWorld);
-    robot3.setPoseReferenceFrame(kWorld);
-    robot4.setPoseReferenceFrame(kWorld);
-    combined.setPlanningTime(kPlanningTime);
-    robot3.setPlanningTime(kPlanningTime);
-    robot4.setPlanningTime(kPlanningTime);
-
-    if (!combined.getCurrentState(10.0) ||
-        !robot3.getCurrentState(10.0) ||
+    moveit::planning_interface::MoveGroupInterface combined(node, program.combined_group);
+    moveit::planning_interface::MoveGroupInterface robot3(node, program.robot3.group);
+    moveit::planning_interface::MoveGroupInterface robot4(node, program.robot4.group);
+    combined.setPoseReferenceFrame(program.world_frame);
+    robot3.setPoseReferenceFrame(program.world_frame);
+    robot4.setPoseReferenceFrame(program.world_frame);
+    combined.setPlanningTime(program.tuning.planning_time);
+    robot3.setPlanningTime(program.tuning.planning_time);
+    robot4.setPlanningTime(program.tuning.planning_time);
+    if (!combined.getCurrentState(10.0) || !robot3.getCurrentState(10.0) ||
         !robot4.getCurrentState(10.0)) {
-      RCLCPP_ERROR(node->get_logger(), "Combined group's current state unavailable.");
+      RCLCPP_ERROR(node->get_logger(), "Combined/individual groups' current state unavailable");
     } else {
       PlanningSceneObjects scene(node);
-      success = runSequence(
-        node, combined, robot3, robot4, tf_buffer, scene, a3, a4,
-        std::max<int64_t>(2, node->get_parameter("arc_points").as_int()));
+      success = runConfiguredProgram(
+        node, combined, robot3, robot4, tf_buffer, scene, program);
     }
-
     (void)tf_listener;
-    executor.cancel();
-    if (spin_thread.joinable()) spin_thread.join();
   } catch (const std::exception & e) {
-    RCLCPP_FATAL(node->get_logger(), "Combined motion node failed: %s", e.what());
+    RCLCPP_FATAL(node->get_logger(), "Flange motion node failed: %s", e.what());
   }
+  executor.cancel();
+  if (spin_thread.joinable()) spin_thread.join();
   rclcpp::shutdown();
   return success ? 0 : 1;
 }
