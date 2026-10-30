@@ -59,6 +59,7 @@
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
 #include "sa3_motion/workcell_program.hpp"
+#include "sa3_motion/motion_task.hpp"
 
 using namespace std::chrono_literals;
 using MoveItErr = moveit_msgs::msg::MoveItErrorCodes;
@@ -96,9 +97,11 @@ std::vector<Job> kDefaultJobs1, kDefaultJobs2;
 
 void loadTyingProgram(const rclcpp::Node::SharedPtr & node) {
   const auto w = sa3_yaml::loadWorkcell(node);
-  const auto c = sa3_yaml::require(w, "tying_rebars", "workcell");
-  if (c["world_frame"].as<std::string>("world") != "world") throw std::runtime_error("tying world_frame must be world");
-  kCombinedGroup = sa3_yaml::name(c["combined_group"], "tying combined_group");
+  const auto task = sa3_recipe::loadTask(node, "tying_rebars");
+  const auto c = sa3_yaml::require(task, "config", "tying task");
+  const auto robots = sa3_yaml::require(w, "robots", "workcell");
+  if (w["world_frame"].as<std::string>("world") != "world") throw std::runtime_error("tying world_frame must be world");
+  kCombinedGroup = sa3_yaml::name(robots["combined_groups"]["shear_and_tying_pair"], "tying combined_group");
   const auto p = sa3_yaml::require(c, "planning", "tying_rebars");
   kPlanningTime = sa3_yaml::finite(p["planning_time"], "tying planning_time");
   kOmplAttempts = p["ompl_attempts"].as<int>();
@@ -119,8 +122,9 @@ void loadTyingProgram(const rclcpp::Node::SharedPtr & node) {
   auto arm = [&](const char * key, std::string & group, std::string & link,
                  bool & enabled, std::vector<Job> & jobs) {
     const auto a = sa3_yaml::require(c, key, "tying_rebars");
-    group = sa3_yaml::name(a["group"], std::string(key) + ".group");
-    link = sa3_yaml::name(a["planning_link"], std::string(key) + ".planning_link");
+    const auto physical = sa3_yaml::require(robots, key, "workcell.robots");
+    group = sa3_yaml::name(physical["group"], std::string(key) + ".group");
+    link = sa3_yaml::name(physical["tying_link"], std::string(key) + ".tying_link");
     enabled = a["enabled"].as<bool>();
     const auto joblist = sa3_yaml::require(a, "jobs", key);
     if (!joblist.IsSequence()) throw std::runtime_error("tying jobs must be a list");
@@ -134,15 +138,14 @@ void loadTyingProgram(const rclcpp::Node::SharedPtr & node) {
   };
   arm("robot1", kRobot1Group, kRobot1Link, kRobot1Enabled, kDefaultJobs1);
   arm("robot2", kRobot2Group, kRobot2Link, kRobot2Enabled, kDefaultJobs2);
-  const auto program = sa3_yaml::require(sa3_yaml::require(w, "planner_sequence", "workcell"), "tying_rebars", "planner_sequence");
-  kTyingSteps = sa3_yaml::steps(program["point"], "planner_sequence.tying_rebars.point");
+  kTyingSteps = sa3_yaml::steps(task["point_steps"], "motion task.tying_rebars.point_steps");
   if (kTyingSteps.size()!=3) throw std::runtime_error("tying requires exactly 3 steps per point");
   sa3_yaml::expectedStep(kTyingSteps[0], "tie_approach", "moveJ");
   sa3_yaml::expectedStep(kTyingSteps[1], "tie_frame", "moveL");
   sa3_yaml::expectedStep(kTyingSteps[2], "tie_approach", "moveL", {"mark_point_complete"});
   for (const auto & step : kTyingSteps) if (step.xyz != std::array<double,3>{0.,0.,0.} || step.offset_frame != "world")
     throw std::runtime_error("tying point steps must use zero xyz; edit tying_rebars.approach instead");
-  const auto finish = sa3_yaml::steps(program["finish"], "tying finish");
+  const auto finish = sa3_yaml::steps(task["finish"], "tying finish");
   if (finish.size() != 1) throw std::runtime_error("tying must have combined home");
   sa3_yaml::expectedStep(finish[0], "home", "moveJ");
   RCLCPP_INFO(node->get_logger(), "Tying program loaded from workcell YAML: %zu/%zu clamp jobs", kDefaultJobs1.size(), kDefaultJobs2.size());

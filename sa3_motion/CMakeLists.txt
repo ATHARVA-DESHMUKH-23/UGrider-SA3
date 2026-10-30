@@ -20,6 +20,8 @@ find_package(tf2_ros REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(rclcpp_action REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 find_package(moveit_core REQUIRED)
 find_package(ament_index_cpp REQUIRED)
@@ -448,10 +450,12 @@ ament_target_dependencies(gantry_move
   sensor_msgs
   tf2
   tf2_ros
+  ament_index_cpp
 )
 
 target_link_libraries(gantry_move
   planning_scene_objects
+  yaml-cpp
 )
 
 # ======================================================
@@ -478,6 +482,11 @@ ament_target_dependencies(flange_pp
   sensor_msgs
   tf2
   tf2_ros
+  ament_index_cpp
+)
+
+target_link_libraries(flange_pp
+  yaml-cpp
 )
 
 # ============================================================

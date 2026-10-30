@@ -1,23 +1,9 @@
-// dual_gripper_change.cpp  (sa3_motion)
-//
-// ONE node, both robots change gripper in lockstep through the COMBINED group
-// (sa3_robots_1_2). Same sequence for both robots:
-//
-//   1  movej  Schunk dock approach           (combined OMPL, 12-joint goal)
-//   2  movel  Schunk dock                    (separate LIN per arm, merged)
-//      DETACH Schunk parts
-//   3  Schunk collisions OFF -> movel retract -> collisions ON
-//   4  Tying-gun collisions OFF -> movej approach -> movel dock
-//      -> ATTACH tying gun -> movel retract -> collisions ON
-//
-// MOVEJ  : simple combined planning. Both target poses are solved by IK on one
-//          RobotState and the combined group plans one 12-joint OMPL goal.
-// MOVEL  : each arm plans its own Pilz LIN (robot1_arm / robot2_arm) from the same
-//          start state; the two joint trajectories are time-aligned, merged into one
-//          12-joint trajectory and executed through the combined group.
-//
-// Every motion is executed with combined.execute(); executeDirect is no longer used.
-// Verify frames, object IDs and controller execution in RViz/mock first.
+// robot1_gripper_change.cpp -- coordinated dual-arm tool change executor.
+// source_tool and target_tool are selected by the chosen ms_*.yaml recipe.
+// Supports schunk -> tying_gun AND tying_gun -> schunk.
+// Motion trajectories and planning-scene attach/detach are synchronized for
+// Robot 1 and Robot 2. Physical tool locking/IO is NOT implemented here.
+// Test with mock/RViz before hardware.
 
 #include <algorithm>
 #include <array>
@@ -54,6 +40,7 @@
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
 #include "sa3_motion/workcell_program.hpp"
+#include "sa3_motion/motion_task.hpp"
 
 using namespace std::chrono_literals;
 using MGI = moveit::planning_interface::MoveGroupInterface;
@@ -70,6 +57,7 @@ double kIkTimeout = 1.0;
 double kMoveJVelocity = 0.30, kMoveJAcceleration = 0.20;
 double kMoveLVelocity = 0.20, kMoveLAcceleration = 0.10;
 std::vector<sa3_yaml::Step> kGripperSteps;
+std::string kSourceTool, kTargetTool;
 
 // ---------------------------------------------------------------------------
 // Per-robot configuration
@@ -96,60 +84,79 @@ RobotConfig makeConfig(const std::string & name) {
 
 void loadGripperProgram(const rclcpp::Node::SharedPtr & node) {
   const auto w = sa3_yaml::loadWorkcell(node);
-  const auto c = sa3_yaml::require(w, "robot1_gripper_change", "workcell");
-  if (c["world_frame"].as<std::string>("world") != "world")
-    throw std::runtime_error("gripper change world_frame must be world");
-  kCombinedGroup = sa3_yaml::name(c["combined_group"], "gripper combined_group");
-  const auto p = sa3_yaml::require(c, "planning", "gripper change");
-  kPlanningTime = sa3_yaml::finite(p["planning_time"], "gripper planning_time");
-  kMoveJPlanRetries = p["movej_plan_retries"].as<int>();
-  kOmplAttempts = p["ompl_attempts"].as<int>();
-  kIkTimeout = sa3_yaml::finite(p["ik_timeout"], "gripper ik_timeout");
-  kMoveJVelocity = sa3_yaml::finite(p["movej_velocity"], "gripper movej_velocity");
-  kMoveJAcceleration = sa3_yaml::finite(p["movej_acceleration"], "gripper movej_acceleration");
-  kMoveLVelocity = sa3_yaml::finite(p["movel_velocity"], "gripper movel_velocity");
-  kMoveLAcceleration = sa3_yaml::finite(p["movel_acceleration"], "gripper movel_acceleration");
+  const auto task = sa3_recipe::loadTask(node, "robot1_gripper_change");
+  const auto config = sa3_yaml::require(task, "config", "gripper task");
+  const auto robots = sa3_yaml::require(w, "robots", "workcell");
+  if (w["world_frame"].as<std::string>("world") != "world")
+    throw std::runtime_error("gripper change requires workcell.world_frame=world");
+  kCombinedGroup = sa3_yaml::name(robots["combined_groups"]["shear_and_tying_pair"], "combined_group");
+  kSourceTool = sa3_yaml::name(task["source_tool"], "source_tool");
+  kTargetTool = sa3_yaml::name(task["target_tool"], "target_tool");
+  const bool source_valid = kSourceTool == "schunk" || kSourceTool == "tying_gun";
+  const bool target_valid = kTargetTool == "schunk" || kTargetTool == "tying_gun";
+  if (!source_valid || !target_valid || kSourceTool == kTargetTool)
+    throw std::runtime_error("Gripper change requires two different tools: schunk and tying_gun");
+  const auto planning = sa3_yaml::require(config, "planning", "gripper task.config");
+  kPlanningTime = sa3_yaml::finite(planning["planning_time"], "gripper planning_time");
+  kMoveJPlanRetries = planning["movej_plan_retries"].as<int>();
+  kOmplAttempts = planning["ompl_attempts"].as<int>();
+  kIkTimeout = sa3_yaml::finite(planning["ik_timeout"], "gripper ik_timeout");
+  kMoveJVelocity = sa3_yaml::finite(planning["movej_velocity"], "gripper movej_velocity");
+  kMoveJAcceleration = sa3_yaml::finite(planning["movej_acceleration"], "gripper movej_acceleration");
+  kMoveLVelocity = sa3_yaml::finite(planning["movel_velocity"], "gripper movel_velocity");
+  kMoveLAcceleration = sa3_yaml::finite(planning["movel_acceleration"], "gripper movel_acceleration");
   if (kPlanningTime <= 0 || kMoveJPlanRetries < 1 || kOmplAttempts < 1 || kIkTimeout <= 0 ||
       kMoveJVelocity <= 0 || kMoveJVelocity > 1 || kMoveJAcceleration <= 0 || kMoveJAcceleration > 1 ||
       kMoveLVelocity <= 0 || kMoveLVelocity > 1 || kMoveLAcceleration <= 0 || kMoveLAcceleration > 1)
     throw std::runtime_error("Invalid gripper planning settings");
+  const auto dock_frames = sa3_yaml::require(w, "tool_dock_frames", "workcell");
+  const auto available_tools = sa3_yaml::require(w, "extra_grippers", "workcell");
   auto arm = [&](const char * name, RobotConfig & r) {
-    const auto a = sa3_yaml::require(c, name, "robot1_gripper_change");
+    const auto physical = sa3_yaml::require(robots, name, "workcell.robots");
     r.name = name;
-    r.group = sa3_yaml::name(a["group"], "gripper group");
-    r.planning_link = sa3_yaml::name(a["planning_link"], "gripper planning_link");
-    r.schunk_dock_frame = sa3_yaml::name(a["schunk_dock_frame"], "schunk_dock_frame");
-    r.gun_dock_frame = sa3_yaml::name(a["gun_dock_frame"], "gun_dock_frame");
-    r.schunk_ids = sa3_yaml::strings(a["schunk_object_ids"], "schunk_object_ids");
-    if (r.schunk_ids.size()!=3) throw std::runtime_error("Schunk must have three scene parts");
-    r.gun_id = sa3_yaml::name(a["gun_object_id"], "gun_object_id");
-    r.arm_links = sa3_yaml::strings(a["arm_touch_links"], "arm_touch_links");
-    if (r.arm_links.empty()) throw std::runtime_error("arm_touch_links must not be empty");
+    r.group = sa3_yaml::name(physical["group"], std::string(name) + ".group");
+    r.planning_link = sa3_yaml::name(physical["tool_mount_link"], "tool_mount_link");
+    const std::string prefix(name);
+    r.schunk_dock_frame = sa3_yaml::name(
+      dock_frames[prefix + "_shuck_dock"]["child"], "schunk_dock_frame");
+    r.gun_dock_frame = sa3_yaml::name(
+      dock_frames[prefix + "_tyinggun_dock"]["child"], "tyinggun_dock_frame");
+    r.schunk_ids = {prefix + "_schunk_base", prefix + "_schunk_link7", prefix + "_schunk_link8"};
+    for (const auto & id : r.schunk_ids)
+      if (!available_tools[id]) throw std::runtime_error("Missing workcell gripper object: " + id);
+    r.gun_id = prefix + "_tying_gun";
+    if (!available_tools[r.gun_id])
+      throw std::runtime_error("Missing workcell tying gun: " + r.gun_id);
+    r.arm_links = sa3_yaml::strings(physical["gripper_change_arm_touch_links"],
+      "workcell.gripper_change_arm_touch_links");
+    if (r.arm_links.empty()) throw std::runtime_error("gripper-change arm contact links empty");
   };
   arm("robot1", gRobot1Config);
   arm("robot2", gRobot2Config);
-  const auto program = sa3_yaml::require(
-    sa3_yaml::require(w, "planner_sequence", "workcell"),
-    "robot1_gripper_change", "planner_sequence");
-  kGripperSteps = sa3_yaml::steps(program["steps"], "planner_sequence.robot1_gripper_change.steps");
-  if (kGripperSteps.size() != 6) throw std::runtime_error("gripper change requires six ordered steps");
-  const std::vector<std::string> ref = {"schunk_dock", "schunk_dock", "schunk_dock", "gun_dock", "gun_dock", "gun_dock"};
+  kGripperSteps = sa3_yaml::steps(task["steps"], "motion task.gripper.steps");
+  // Mandatory and audited scene-action ordering is independent of the direction.
+  // Operators can change target tools and approach distances but not silently
+  // skip collision restoration or attach/detach ownership transitions.
+  if (kGripperSteps.size() != 6)
+    throw std::runtime_error("gripper change requires six ordered steps");
+  const std::vector<std::string> ref = {
+    "source_dock", "source_dock", "source_dock", "target_dock", "target_dock", "target_dock"};
   const std::vector<std::string> motion = {"moveJ", "moveL", "moveL", "moveJ", "moveL", "moveL"};
   const std::vector<std::vector<std::string>> actions = {
-    {}, {"detach_schunk", "allow_schunk_contacts"},
-    {"restore_schunk_contacts", "allow_gun_contacts"}, {},
-    {"attach_tying_gun"}, {"restore_gun_contacts"}};
-  for (std::size_t i=0; i<kGripperSteps.size(); ++i) {
+    {}, {"detach_source", "allow_source_contacts"},
+    {"restore_source_contacts", "allow_target_contacts"}, {},
+    {"attach_target"}, {"restore_target_contacts"}};
+  for (std::size_t i = 0; i < kGripperSteps.size(); ++i) {
     const auto & step = kGripperSteps[i];
     sa3_yaml::expectedStep(step, ref[i], motion[i], actions[i]);
     if (step.offset_frame != "world" || step.xyz[0] != 0.0 || step.xyz[1] != 0.0)
-      throw std::runtime_error("Gripper steps must use WORLD Z dock approaches for this implementation");
-    const bool dock = i==1 || i==4;
+      throw std::runtime_error("Gripper dock steps must use vertical WORLD Z approach");
+    const bool dock = (i == 1 || i == 4);
     if ((dock && step.xyz[2] != 0.0) || (!dock && (step.xyz[2] <= 0.0 || step.xyz[2] > 1.0)))
-      throw std::runtime_error("Gripper dock positions must be exact; approach Z must be >0 and <=1m");
+      throw std::runtime_error("Dock steps must be exact; approach/retract WORLD Z in (0,1] m");
   }
-  // A missing or reordered critical attach/detach action is rejected at startup.
-  RCLCPP_INFO(node->get_logger(), "Loaded %zu gripper-change steps from workcell YAML", kGripperSteps.size());
+  RCLCPP_INFO(node->get_logger(), "Loaded gripper task %s -> %s (%zu steps)",
+    kSourceTool.c_str(), kTargetTool.c_str(), kGripperSteps.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -385,74 +392,81 @@ public:
 
   bool run()
   {
+    const auto toolIds = [](const Arm & a, const std::string & tool) {
+      return tool == "schunk" ? a.cfg.schunk_ids : std::vector<std::string>{a.cfg.gun_id};
+    };
     for (auto & a : arms_) {
-      if (!lookupPose(a, a.cfg.schunk_dock_frame, a.schunk_dock)) return false;
-      if (!lookupPose(a, a.cfg.gun_dock_frame, a.gun_dock)) return false;
-      if (psi_.getAttachedObjects(a.cfg.schunk_ids).size() != a.cfg.schunk_ids.size()) {
-        logE(a, "Schunk parts are not all attached; run attach_tool first.");
+      if (!lookupPose(a, a.cfg.schunk_dock_frame, a.schunk_dock) ||
+          !lookupPose(a, a.cfg.gun_dock_frame, a.gun_dock)) return false;
+      const auto source_ids = toolIds(a, kSourceTool);
+      const auto target_ids = toolIds(a, kTargetTool);
+      if (psi_.getAttachedObjects(source_ids).size() != source_ids.size()) {
+        logE(a, "Source tool '" + kSourceTool + "' is not fully attached. Refusing change.");
+        return false;
+      }
+      if (psi_.getObjects(target_ids).size() != target_ids.size()) {
+        logE(a, "Target tool '" + kTargetTool + "' is not fully in the world planning scene.");
         return false;
       }
     }
-    bool schunk_contacts_allowed = false;
-    bool gun_contacts_allowed = false;
-    // Restore temporary ACM changes on *every* failure path, including a
-    // failed plan or attachment. This does not imply hardware recovery.
+    bool source_contacts_allowed = false;
+    bool target_contacts_allowed = false;
     const auto restore = [&]() {
       bool ok = true;
-      if (schunk_contacts_allowed) {
-        for (auto & a : arms_) ok = setContacts(a, a.cfg.schunk_ids, false) && ok;
-        schunk_contacts_allowed = false;
+      if (source_contacts_allowed) {
+        for (auto & a : arms_)
+          ok = setContacts(a, toolIds(a, kSourceTool), false) && ok;
+        source_contacts_allowed = false;
       }
-      if (gun_contacts_allowed) {
-        for (auto & a : arms_) ok = setContacts(a, {a.cfg.gun_id}, false) && ok;
-        gun_contacts_allowed = false;
+      if (target_contacts_allowed) {
+        for (auto & a : arms_)
+          ok = setContacts(a, toolIds(a, kTargetTool), false) && ok;
+        target_contacts_allowed = false;
       }
       return ok;
     };
     for (const auto & step : kGripperSteps) {
       std::array<geometry_msgs::msg::Pose, 2> targets;
-      for (std::size_t i=0; i<arms_.size(); ++i) {
-        const auto & ref = step.reference == "schunk_dock" ?
-          arms_[i].schunk_dock : arms_[i].gun_dock;
-        targets[i] = sa3_yaml::offset(ref, step.xyz, step.offset_frame);
+      const std::string selected_tool = step.reference == "source_dock" ? kSourceTool : kTargetTool;
+      for (std::size_t i = 0; i < arms_.size(); ++i) {
+        const auto & dock = selected_tool == "schunk" ? arms_[i].schunk_dock : arms_[i].gun_dock;
+        targets[i] = sa3_yaml::offset(dock, step.xyz, step.offset_frame);
       }
       const auto label = step.id + " " + step.description;
       logI("YAML step " + label + " [" + step.motion + "]");
       const bool moved = step.motion == "moveJ" ?
-        movejBoth(targets[0], targets[1], label) :
-        movelBoth(targets[0], targets[1], label);
+        movejBoth(targets[0], targets[1], label) : movelBoth(targets[0], targets[1], label);
       if (!moved) {restore(); return false;}
       for (const auto & action : step.after_actions) {
         bool ok = true;
-        if (action == "detach_schunk") {
-          for (auto & a : arms_) ok = detachSchunk(a) && ok;
-        } else if (action == "allow_schunk_contacts") {
-          schunk_contacts_allowed = true;
-          for (auto & a : arms_) ok = setContacts(a, a.cfg.schunk_ids, true) && ok;
-        } else if (action == "restore_schunk_contacts") {
-          for (auto & a : arms_) ok = setContacts(a, a.cfg.schunk_ids, false) && ok;
-          if (ok) schunk_contacts_allowed = false;
-        } else if (action == "allow_gun_contacts") {
-          gun_contacts_allowed = true;
-          for (auto & a : arms_) ok = setContacts(a, {a.cfg.gun_id}, true) && ok;
-        } else if (action == "attach_tying_gun") {
-          for (auto & a : arms_) ok = attachTyingGun(a) && ok;
-        } else if (action == "restore_gun_contacts") {
-          for (auto & a : arms_) ok = setContacts(a, {a.cfg.gun_id}, false) && ok;
-          if (ok) gun_contacts_allowed = false;
+        if (action == "detach_source") {
+          for (auto & a : arms_) ok = detachTool(a, toolIds(a, kSourceTool)) && ok;
+        } else if (action == "allow_source_contacts") {
+          source_contacts_allowed = true;
+          for (auto & a : arms_) ok = setContacts(a, toolIds(a, kSourceTool), true) && ok;
+        } else if (action == "restore_source_contacts") {
+          for (auto & a : arms_) ok = setContacts(a, toolIds(a, kSourceTool), false) && ok;
+          if (ok) source_contacts_allowed = false;
+        } else if (action == "allow_target_contacts") {
+          target_contacts_allowed = true;
+          for (auto & a : arms_) ok = setContacts(a, toolIds(a, kTargetTool), true) && ok;
+        } else if (action == "attach_target") {
+          for (auto & a : arms_) ok = attachTool(a, toolIds(a, kTargetTool)) && ok;
+        } else if (action == "restore_target_contacts") {
+          for (auto & a : arms_) ok = setContacts(a, toolIds(a, kTargetTool), false) && ok;
+          if (ok) target_contacts_allowed = false;
         } else {
-          logE("Unknown gripper YAML action: " + action);
-          ok = false;
+          logE("Unexpected gripper YAML action " + action); ok = false;
         }
         if (!ok) {
-          logE("Action '" + action + "' failed at YAML step " + step.id);
+          logE("Action '" + action + "' failed at " + step.id);
           restore();
           return false;
         }
       }
     }
     if (!restore()) return false;
-    logI("combined gripper change sequence completed.");
+    logI("combined gripper change completed: " + kSourceTool + " -> " + kTargetTool);
     return true;
   }
 
@@ -471,67 +485,70 @@ private:
   }
 
   // ---- scene: detach / attach ---------------------------------------------
-  bool detachSchunk(Arm & a)
+  bool detachTool(Arm & a, const std::vector<std::string> & ids)
   {
-    std::vector<moveit_msgs::msg::AttachedCollisionObject> removals;
-    for (const auto & id : a.cfg.schunk_ids) {
-      moveit_msgs::msg::AttachedCollisionObject r;
-      r.link_name = a.cfg.planning_link;
-      r.object.id = id;
-      r.object.operation = moveit_msgs::msg::CollisionObject::REMOVE;
-      removals.push_back(r);
+    // Verify ownership first: a missing part must not be ignored.
+    if (psi_.getAttachedObjects(ids).size() != ids.size()) {
+      logE(a, "Cannot detach tool: not all parts attached"); return false;
     }
-    // REMOVE on an attached object detaches it and leaves it in the world
-    // at the pose it currently has.
-    psi_.applyAttachedCollisionObjects(removals);
-
+    std::vector<moveit_msgs::msg::AttachedCollisionObject> removals;
+    for (const auto & id : ids) {
+      moveit_msgs::msg::AttachedCollisionObject removal;
+      removal.link_name = a.cfg.planning_link;
+      removal.object.id = id;
+      removal.object.operation = moveit_msgs::msg::CollisionObject::REMOVE;
+      removals.push_back(removal);
+    }
+    if (!psi_.applyAttachedCollisionObjects(removals)) {
+      logE(a, "Failed to request tool detach"); return false;
+    }
     for (int i = 0; i < 50; ++i) {
-      if (psi_.getAttachedObjects(a.cfg.schunk_ids).empty() &&
-        psi_.getObjects(a.cfg.schunk_ids).size() == a.cfg.schunk_ids.size())
-      {
-        logI(a, "detached Schunk gripper at " + a.cfg.schunk_dock_frame + ".");
+      if (psi_.getAttachedObjects(ids).empty() &&
+          psi_.getObjects(ids).size() == ids.size()) {
+        logI(a, "detached " + std::to_string(ids.size()) + " tool object(s).");
         return true;
       }
       rclcpp::sleep_for(100ms);
     }
-    logE(a, "Schunk parts did not detach into the world.");
+    logE(a, "Tool parts did not detach into world scene.");
     return false;
   }
 
-  bool attachTyingGun(Arm & a)
+  bool attachTool(Arm & a, const std::vector<std::string> & ids)
   {
-    const auto world = psi_.getObjects({a.cfg.gun_id});
-    if (world.find(a.cfg.gun_id) == world.end()) {
-      logE(a, "'" + a.cfg.gun_id + "' is not in the planning scene.");
-      return false;
+    // Preserve all part poses while transferring ownership from world to mount.
+    const auto world = psi_.getObjects(ids);
+    if (world.size() != ids.size()) {
+      logE(a, "Cannot attach tool: one or more world objects missing"); return false;
     }
-
-    // Keep the gun exactly where it is: express its pose in the tool-mount frame.
     const auto mount_pose = combined_->getCurrentPose(a.cfg.planning_link).pose;
-    const tf2::Transform mount_inverse = poseToTf(mount_pose).inverse();
-
-    moveit_msgs::msg::CollisionObject object = world.at(a.cfg.gun_id);
-    object.pose = tfToPose(mount_inverse * poseToTf(object.pose));
-    object.header.frame_id = a.cfg.planning_link;
-    object.operation = moveit_msgs::msg::CollisionObject::ADD;
-
-    moveit_msgs::msg::AttachedCollisionObject att;
-    att.link_name = a.cfg.planning_link;
-    att.object = object;
-    att.touch_links = a.cfg.arm_links;
-
-    psi_.removeCollisionObjects({a.cfg.gun_id});   // drop the world copy
-    psi_.applyAttachedCollisionObjects({att});
-
+    const tf2::Transform inverse = poseToTf(mount_pose).inverse();
+    std::vector<moveit_msgs::msg::AttachedCollisionObject> attachments;
+    for (const auto & id : ids) {
+      const auto it = world.find(id);
+      if (it == world.end()) return false;
+      auto object = it->second;
+      object.pose = tfToPose(inverse * poseToTf(object.pose));
+      object.header.frame_id = a.cfg.planning_link;
+      object.operation = moveit_msgs::msg::CollisionObject::ADD;
+      moveit_msgs::msg::AttachedCollisionObject attached;
+      attached.link_name = a.cfg.planning_link;
+      attached.object = object;
+      attached.touch_links = a.cfg.arm_links;
+      attachments.push_back(attached);
+    }
+    psi_.removeCollisionObjects(ids);
+    if (!psi_.applyAttachedCollisionObjects(attachments)) {
+      logE(a, "Failed to request tool attach"); return false;
+    }
     for (int i = 0; i < 50; ++i) {
-      if (psi_.getAttachedObjects({a.cfg.gun_id}).size() == 1) {
-        logI(a, "attached tying gun to " + a.cfg.planning_link + ".");
+      if (psi_.getAttachedObjects(ids).size() == ids.size()) {
+        logI(a, "attached " + std::to_string(ids.size()) + " tool object(s).");
         return true;
       }
       rclcpp::sleep_for(100ms);
     }
-    logE(a, "tying gun did not attach.");
-    return false;
+    logE(a, "Tool parts did not attach."); return false;
   }
 
   // ---- ACM ----------------------------------------------------------------

@@ -45,8 +45,8 @@ namespace
 constexpr char kNodeName[] = "robot3_robot4_combined_pick_place";
 constexpr char kWorld[] = "world";
 
-// These defaults preserve the original motion settings. The workcell YAML
-// supplies their actual values at runtime.
+// Motion scales are provided by the selected cross-section recipe at runtime.
+// Robot identities and tool links are read from the fixed workcell YAML.
 struct MotionTuning
 {
   double planning_time{15.0};
@@ -72,15 +72,24 @@ struct ArmConfig
   std::vector<std::string> touch_links;
   std::array<double, 3> pick_offset{0.0, 0.0, 0.0};
   std::array<double, 3> place_offset{0.0, 0.0, 0.0};
+  bool pick_offset_local{false};
+  bool place_offset_local{false};
 };
 
 geometry_msgs::msg::Pose offsetPose(
-  const geometry_msgs::msg::Pose & p, const std::array<double, 3> & d)
+  const geometry_msgs::msg::Pose & p, const std::array<double, 3> & d,
+  bool local)
 {
   auto out = p;
-  out.position.x += d[0];
-  out.position.y += d[1];
-  out.position.z += d[2];
+  tf2::Vector3 offset(d[0],d[1],d[2]);
+  if (local) {
+    tf2::Quaternion q(p.orientation.x,p.orientation.y,p.orientation.z,p.orientation.w);
+    q.normalize();
+    offset = tf2::quatRotate(q,offset);
+  }
+  out.position.x += offset.x();
+  out.position.y += offset.y();
+  out.position.z += offset.z();
   return out;
 }
 
@@ -477,8 +486,8 @@ bool moveCombinedHome(
 }
 
 // ---------------------------------------------------------------------------
-// YAML-driven paired-motion program: same load/validate/resolve/execute design
-// as rebar_pick_place.cpp, with one pose entry per arm for synchronized moves.
+// YAML-driven paired-motion program: fixed workcell + selectable motion task.
+// Each step provides one target per arm for synchronized moves.
 // ---------------------------------------------------------------------------
 enum class OffsetFrame { kWorld, kLocal };
 enum class MotionType { kMoveJ, kMoveL };
@@ -576,9 +585,8 @@ ArmTargetSpec readArmTarget(const YAML::Node & entry, const std::string & contex
   }
   ArmTargetSpec target;
   target.reference = entry["reference"].as<std::string>();
-  if (target.reference != "pick_frame" && target.reference != "place_frame" &&
-      target.reference != "arc_waypoint" && target.reference != "current_tcp") {
-    throw std::runtime_error(context + " has unknown reference: " + target.reference);
+  if (target.reference.empty()) {
+    throw std::runtime_error(context + " requires a reference frame");
   }
   target.xyz_frame = readOffsetFrame(
     entry["offset_frame"].as<std::string>(), context + ".offset_frame");
@@ -589,11 +597,11 @@ ArmTargetSpec readArmTarget(const YAML::Node & entry, const std::string & contex
   return target;
 }
 
-std::vector<ConfiguredPlannerStep> readPlannerSteps(const YAML::Node & workcell)
+std::vector<ConfiguredPlannerStep> readPlannerSteps(const YAML::Node & task)
 {
-  const auto program = workcell["planner_sequence"]["flange_pp"];
-  if (!program || !program.IsMap()) {
-    throw std::runtime_error("workcell.planner_sequence.flange_pp is missing");
+  const auto entries = task["steps"];
+  if (!entries || !entries.IsSequence() || entries.size() == 0) {
+    throw std::runtime_error("motion_sequence.tasks.<id>.steps must be a nonempty list");
   }
   std::vector<ConfiguredPlannerStep> steps;
   std::set<std::string> ids;
@@ -601,90 +609,113 @@ std::vector<ConfiguredPlannerStep> readPlannerSteps(const YAML::Node & workcell)
     "prepare_pick", "attach_objects", "allow_inventory_contact",
     "restore_inventory_contact", "allow_place_contact",
     "detach_objects", "restore_gripper_contact"};
-  for (const auto & stage_name : {"pick", "transfer", "place", "finish"}) {
-    const auto stage = program[stage_name];
-    if (!stage || !stage.IsSequence() || stage.size() == 0) {
-      throw std::runtime_error(std::string("flange_pp.") + stage_name + " must be a nonempty list");
+  int attach_count = 0, detach_count = 0;
+  for (const auto & entry : entries) {
+    ConfiguredPlannerStep step;
+    step.id = entry["id"].as<std::string>();
+    if (step.id.empty() || !ids.insert(step.id).second) {
+      throw std::runtime_error("Empty/duplicate flange step id: " + step.id);
     }
-    for (const auto & entry : stage) {
-      ConfiguredPlannerStep step;
-      step.id = entry["id"].as<std::string>();
-      if (step.id.empty() || !ids.insert(step.id).second) {
-        throw std::runtime_error("Empty/duplicate flange planner step id: " + step.id);
-      }
-      step.description = entry["description"].as<std::string>(step.id);
-      const auto motion = entry["motion"].as<std::string>();
-      if (motion == "moveJ") step.motion = MotionType::kMoveJ;
-      else if (motion == "moveL") step.motion = MotionType::kMoveL;
-      else throw std::runtime_error(step.id + ": motion must be moveJ or moveL");
-      step.before_actions = readActions(
-        entry, "before_actions", "before_action", step.id);
-      step.after_actions = readActions(
-        entry, "after_actions", "after_action", step.id);
-      for (const auto & action : step.before_actions) {
-        if (!permitted_actions.count(action)) {
-          throw std::runtime_error(step.id + ": unknown before_action '" + action + "'");
-        }
-      }
-      for (const auto & action : step.after_actions) {
-        if (!permitted_actions.count(action)) {
-          throw std::runtime_error(step.id + ": unknown after_action '" + action + "'");
-        }
-      }
-      step.home = entry["reference"].as<std::string>("") == "home";
-      step.repeat_arc = entry["repeat"].as<std::string>("") == "arc_waypoints";
-      if (entry["repeat"] && !step.repeat_arc) {
-        throw std::runtime_error(step.id + ": unknown repeat type");
-      }
-      if (step.home) {
-        if (step.repeat_arc || step.motion != MotionType::kMoveJ) {
-          throw std::runtime_error(step.id + ": home must be a nonrepeated moveJ");
-        }
-      } else {
-        if (entry["reference"]) {
-          throw std::runtime_error(step.id + ": only 'home' supports a step-level reference");
-        }
-        step.robot3 = readArmTarget(entry["robot3"], step.id + ".robot3");
-        step.robot4 = readArmTarget(entry["robot4"], step.id + ".robot4");
-        const bool uses_arc = step.robot3.reference == "arc_waypoint" ||
-          step.robot4.reference == "arc_waypoint";
-        if (uses_arc != step.repeat_arc ||
-            (step.repeat_arc && (step.motion != MotionType::kMoveL ||
-              step.robot3.reference != "arc_waypoint" ||
-              step.robot4.reference != "arc_waypoint"))) {
-          throw std::runtime_error(step.id + ": arc requires paired repeat: arc_waypoints and moveL");
-        }
-      }
-      steps.push_back(std::move(step));
+    step.description = entry["description"].as<std::string>(step.id);
+    const auto motion = entry["motion"].as<std::string>();
+    if (motion == "moveJ") step.motion = MotionType::kMoveJ;
+    else if (motion == "moveL") step.motion = MotionType::kMoveL;
+    else throw std::runtime_error(step.id + ": motion must be moveJ or moveL");
+    step.before_actions = readActions(entry,"before_actions","before_action",step.id);
+    step.after_actions = readActions(entry,"after_actions","after_action",step.id);
+    for (const auto & action : step.before_actions) {
+      if (!permitted_actions.count(action))
+        throw std::runtime_error(step.id + ": invalid before_action: " + action);
     }
+    for (const auto & action : step.after_actions) {
+      if (!permitted_actions.count(action))
+        throw std::runtime_error(step.id + ": invalid after_action: " + action);
+    }
+    // A failed robot motion must not produce a scene mutation. Maintain one
+    // attach/detach pair for both arms, ordered after completed motions.
+    for (const auto & action : step.before_actions) {
+      if (action == "attach_objects" || action == "detach_objects")
+        throw std::runtime_error(step.id + ": attach/detach must be after_actions");
+    }
+    for (const auto & action : step.after_actions) {
+      if (action == "attach_objects") {
+        if (++attach_count != 1 || detach_count > 0)
+          throw std::runtime_error(step.id + ": cannot attach more than once");
+      }
+      if (action == "detach_objects") {
+        if (attach_count != 1 || ++detach_count != 1)
+          throw std::runtime_error(step.id + ": cannot detach before attaching");
+      }
+    }
+    step.home = entry["reference"].as<std::string>("") == "home";
+    step.repeat_arc = entry["repeat"].as<std::string>("") == "arc_waypoints";
+    if (entry["repeat"] && !step.repeat_arc)
+      throw std::runtime_error(step.id + ": unsupported repeat mode");
+    if (step.home) {
+      if (step.repeat_arc || step.motion != MotionType::kMoveJ ||
+          attach_count != 1 || detach_count != 1) {
+        throw std::runtime_error(step.id + ": home must be moveJ after detach");
+      }
+    } else {
+      if (entry["reference"])
+        throw std::runtime_error(step.id + ": step-level reference only supports home");
+      step.robot3 = readArmTarget(entry["robot3"],step.id + ".robot3");
+      step.robot4 = readArmTarget(entry["robot4"],step.id + ".robot4");
+      if (step.repeat_arc &&
+          (step.motion != MotionType::kMoveL ||
+           step.robot3.reference != "arc_waypoint" ||
+           step.robot4.reference != "arc_waypoint")) {
+        throw std::runtime_error(step.id + ": arc repeat requires two moveL arc_waypoint targets");
+      }
+      if (!step.repeat_arc && (step.robot3.reference == "arc_waypoint" ||
+          step.robot4.reference == "arc_waypoint")) {
+        throw std::runtime_error(step.id + ": arc_waypoint requires repeat: arc_waypoints");
+      }
+    }
+    steps.push_back(std::move(step));
   }
+  if (attach_count != 1 || detach_count != 1)
+    throw std::runtime_error("Flange program requires exactly one attach_objects and detach_objects");
   return steps;
 }
 
-ArmConfig readArmConfig(const YAML::Node & entry, const std::string & name)
+ArmConfig readArmConfig(const YAML::Node & static_arm,
+                            const YAML::Node & task_arm,
+                            const std::string & name)
 {
-  if (!entry || !entry.IsMap()) {
-    throw std::runtime_error("workcell.flange_pp." + name + " must be a dictionary");
+  if (!static_arm || !static_arm.IsMap() || !task_arm || !task_arm.IsMap()) {
+    throw std::runtime_error("Missing fixed workcell.robots or task " + name);
   }
   ArmConfig arm;
   arm.name = name;
-  arm.group = entry["group"].as<std::string>();
-  arm.link = entry["link"].as<std::string>();
-  arm.pick_frame = entry["pick_frame"].as<std::string>();
-  arm.place_frame = entry["place_frame"].as<std::string>();
-  arm.object_id = entry["object_id"].as<std::string>();
-  arm.inventory_id = entry["inventory_id"].as<std::string>();
-  arm.touch_links = entry["touch_links"].as<std::vector<std::string>>();
-  arm.pick_offset = requiredVector3(entry, "pick_offset", name);
-  arm.place_offset = requiredVector3(entry, "place_offset", name);
-  const auto arc_frames = entry["arc_frames"].as<std::vector<std::string>>();
-  if (arc_frames.size() != 3 || arm.touch_links.empty()) {
-    throw std::runtime_error(name + ": expected 3 arc frames and nonempty touch_links");
+  arm.group = static_arm["group"].as<std::string>();
+  arm.link = static_arm["link"].as<std::string>();
+  arm.touch_links = static_arm["touch_links"].as<std::vector<std::string>>();
+  arm.pick_frame = task_arm["pick_frame"].as<std::string>();
+  arm.place_frame = task_arm["place_frame"].as<std::string>();
+  arm.object_id = task_arm["object_id"].as<std::string>();
+  arm.inventory_id = task_arm["inventory_id"].as<std::string>();
+  const auto pick = task_arm["pick_offset"];
+  const auto place = task_arm["place_offset"];
+  if (pick) arm.pick_offset = requiredVector3(task_arm,"pick_offset",name);
+  if (place) arm.place_offset = requiredVector3(task_arm,"place_offset",name);
+  const auto pick_axis = task_arm["pick_offset_frame"].as<std::string>("world");
+  const auto place_axis = task_arm["place_offset_frame"].as<std::string>("world");
+  if ((pick_axis != "world" && pick_axis != "local") ||
+      (place_axis != "world" && place_axis != "local"))
+    throw std::runtime_error(name + ": offset frame must be world or local");
+  arm.pick_offset_local = pick_axis == "local";
+  arm.place_offset_local = place_axis == "local";
+  if (task_arm["arc_frames"]) {
+    const auto frames = task_arm["arc_frames"].as<std::vector<std::string>>();
+    if (frames.size() != 3)
+      throw std::runtime_error(name + ": arc_frames must contain exactly 3 frames");
+    std::copy(frames.begin(), frames.end(), arm.arc_frames.begin());
   }
-  std::copy(arc_frames.begin(), arc_frames.end(), arm.arc_frames.begin());
-  for (const auto & value : {arm.group, arm.link, arm.pick_frame,
-    arm.place_frame, arm.object_id, arm.inventory_id}) {
-    if (value.empty()) throw std::runtime_error(name + ": empty required name");
+  if (arm.group.empty() || arm.link.empty() || arm.pick_frame.empty() ||
+      arm.place_frame.empty() || arm.object_id.empty() || arm.inventory_id.empty() ||
+      arm.touch_links.empty()) {
+    throw std::runtime_error(name + ": missing required fixed/task robot configuration");
   }
   return arm;
 }
@@ -692,7 +723,7 @@ ArmConfig readArmConfig(const YAML::Node & entry, const std::string & name)
 MotionTuning readMotionTuning(const YAML::Node & config)
 {
   if (!config || !config.IsMap()) {
-    throw std::runtime_error("workcell.flange_pp.planning is missing");
+    throw std::runtime_error("flange task planning map is missing");
   }
   MotionTuning t;
   t.planning_time = config["planning_time"].as<double>();
@@ -717,37 +748,40 @@ MotionTuning readMotionTuning(const YAML::Node & config)
   return t;
 }
 
-FlangeProgram loadFlangeProgram(const std::string & yaml_path)
+FlangeProgram loadFlangeProgram(const std::string & workcell_path,
+                                const std::string & motion_path,
+                                const std::string & task_id)
 {
-  const auto doc = YAML::LoadFile(yaml_path);
-  const auto workcell = doc["workcell"];
-  if (!workcell || !workcell.IsMap()) {
-    throw std::runtime_error("Config file lacks a 'workcell' dictionary: " + yaml_path);
-  }
-  const auto config = workcell["flange_pp"];
-  if (!config || !config.IsMap()) {
-    throw std::runtime_error("Config lacks workcell.flange_pp: " + yaml_path);
-  }
+  const auto wdoc = YAML::LoadFile(workcell_path);
+  const auto workcell = wdoc["workcell"];
+  if (!workcell || !workcell.IsMap())
+    throw std::runtime_error("File lacks workcell map: " + workcell_path);
+  const auto mdoc = YAML::LoadFile(motion_path);
+  const auto tasks = mdoc["motion_sequence"]["tasks"];
+  if (!tasks || !tasks.IsMap())
+    throw std::runtime_error("File lacks motion_sequence.tasks: " + motion_path);
+  const auto task = tasks[task_id];
+  if (!task || !task.IsMap() || task["type"].as<std::string>("") != "flange_pp")
+    throw std::runtime_error("No flange task named '" + task_id + "' in " + motion_path);
+  const auto robots = workcell["robots"];
+  if (!robots || !robots.IsMap())
+    throw std::runtime_error("Fixed workcell.robots is missing");
   FlangeProgram result;
   result.world_frame = workcell["world_frame"].as<std::string>("world");
-  result.combined_group = config["combined_group"].as<std::string>("robot3_robot4_arms");
-  result.jig_object_id = config["jig_object_id"].as<std::string>();
-  result.robot3 = readArmConfig(config["robot3"], "robot3");
-  result.robot4 = readArmConfig(config["robot4"], "robot4");
-  result.arc_points = config["arc_points"].as<int>();
-  result.tuning = readMotionTuning(config["planning"]);
-  result.steps = readPlannerSteps(workcell);
-  if (result.world_frame != "world") {
-    // The original combined MoveIt planning frame and collision scene use world.
-    throw std::runtime_error("flange_pp currently requires workcell.world_frame == world");
-  }
+  result.combined_group = robots["combined_groups"]["flange_pair"].as<std::string>();
+  result.jig_object_id = task["jig_object_id"].as<std::string>("jig_clamp");
+  result.robot3 = readArmConfig(robots["robot3"], task["robot3"], "robot3");
+  result.robot4 = readArmConfig(robots["robot4"], task["robot4"], "robot4");
+  result.arc_points = task["arc_points"].as<int>(8);
+  result.tuning = readMotionTuning(task["planning"]);
+  result.steps = readPlannerSteps(task);
+  if (result.world_frame != "world")
+    throw std::runtime_error("flange_pp currently requires world_frame=world");
   if (result.combined_group.empty() || result.jig_object_id.empty() ||
-      result.arc_points < 2 || result.arc_points > 1000) {
-    throw std::runtime_error("Invalid combined_group, jig_object_id or arc_points");
-  }
-  if (result.robot3.object_id == result.robot4.object_id) {
-    throw std::runtime_error("Robot3 and Robot4 must not share a collision object ID");
-  }
+      result.arc_points < 2 || result.arc_points > 1000)
+    throw std::runtime_error("Invalid combined_group, jig id or arc_points");
+  if (result.robot3.object_id == result.robot4.object_id)
+    throw std::runtime_error("Robot3 and Robot4 must have different object IDs");
   return result;
 }
 
@@ -764,8 +798,10 @@ void applyRosOverrides(const rclcpp::Node::SharedPtr & node, FlangeProgram & pro
     const auto frames = node->declare_parameter<std::vector<std::string>>(
       prefix + "arc_frames",
       std::vector<std::string>(arm.arc_frames.begin(), arm.arc_frames.end()));
-    if (frames.size() != 3) throw std::runtime_error(prefix + "arc_frames must contain 3 frames");
-    std::copy(frames.begin(), frames.end(), arm.arc_frames.begin());
+    if (!frames.empty() && frames.size() != 3)
+      throw std::runtime_error(prefix + "arc_frames must be empty or contain 3 frames");
+    if (!frames.empty())
+      std::copy(frames.begin(), frames.end(), arm.arc_frames.begin());
     const auto pick = node->declare_parameter<std::vector<double>>(
       prefix + "pick_offset",
       std::vector<double>(arm.pick_offset.begin(), arm.pick_offset.end()));
@@ -911,32 +947,54 @@ bool runConfiguredProgram(
   const auto & a3 = program.robot3;
   const auto & a4 = program.robot4;
   geometry_msgs::msg::Pose pick3, place3, pick4, place4;
-  geometry_msgs::msg::Pose a3p0, a3p1, a3p2, a4p0, a4p1, a4p2;
   if (!lookupPose(logger, tf, a3.pick_frame, pick3) ||
       !lookupPose(logger, tf, a3.place_frame, place3) ||
       !lookupPose(logger, tf, a4.pick_frame, pick4) ||
-      !lookupPose(logger, tf, a4.place_frame, place4) ||
-      !lookupPose(logger, tf, a3.arc_frames[0], a3p0) ||
-      !lookupPose(logger, tf, a3.arc_frames[1], a3p1) ||
-      !lookupPose(logger, tf, a3.arc_frames[2], a3p2) ||
-      !lookupPose(logger, tf, a4.arc_frames[0], a4p0) ||
-      !lookupPose(logger, tf, a4.arc_frames[1], a4p1) ||
-      !lookupPose(logger, tf, a4.arc_frames[2], a4p2)) {
+      !lookupPose(logger, tf, a4.place_frame, place4)) {
     return false;
+  }
+  std::map<std::string, geometry_msgs::msg::Pose> refs3{
+    {"pick_frame", offsetPose(pick3, a3.pick_offset, a3.pick_offset_local)},
+    {"place_frame", offsetPose(place3, a3.place_offset, a3.place_offset_local)}};
+  std::map<std::string, geometry_msgs::msg::Pose> refs4{
+    {"pick_frame", offsetPose(pick4, a4.pick_offset, a4.pick_offset_local)},
+    {"place_frame", offsetPose(place4, a4.place_offset, a4.place_offset_local)}};
+  std::vector<geometry_msgs::msg::Pose> arc3, arc4;
+  bool needs_arc = false;
+  for (const auto & step : program.steps) {
+    if (step.repeat_arc) needs_arc = true;
+    if (step.home) continue;
+    for (const auto & requested : {std::make_pair(&step.robot3, &refs3),
+                                   std::make_pair(&step.robot4, &refs4)}) {
+      const auto & name = requested.first->reference;
+      if (name == "current_tcp" || name == "arc_waypoint" ||
+          requested.second->count(name)) continue;
+      geometry_msgs::msg::Pose pose;
+      if (!lookupPose(logger, tf, name, pose)) return false;
+      (*requested.second)[name] = pose;
+    }
+  }
+  if (needs_arc) {
+    if (a3.arc_frames[0].empty() || a4.arc_frames[0].empty()) {
+      RCLCPP_ERROR(logger, "Arc transfer requires 3 arc_frames in both task arms");
+      return false;
+    }
+    geometry_msgs::msg::Pose a3p0,a3p1,a3p2,a4p0,a4p1,a4p2;
+    if (!lookupPose(logger,tf,a3.arc_frames[0],a3p0) ||
+        !lookupPose(logger,tf,a3.arc_frames[1],a3p1) ||
+        !lookupPose(logger,tf,a3.arc_frames[2],a3p2) ||
+        !lookupPose(logger,tf,a4.arc_frames[0],a4p0) ||
+        !lookupPose(logger,tf,a4.arc_frames[1],a4p1) ||
+        !lookupPose(logger,tf,a4.arc_frames[2],a4p2)) return false;
+    arc3 = arcThrough3(a3p0,a3p1,a3p2,program.arc_points);
+    arc4 = arcThrough3(a4p0,a4p1,a4p2,program.arc_points);
+    if (arc3.empty() || arc4.empty() || arc3.size() != arc4.size()) {
+      RCLCPP_ERROR(logger, "Failed to create matching 3-point arcs");
+      return false;
+    }
   }
 
-  std::map<std::string, geometry_msgs::msg::Pose> refs3{
-    {"pick_frame", offsetPose(pick3, a3.pick_offset)},
-    {"place_frame", offsetPose(place3, a3.place_offset)}};
-  std::map<std::string, geometry_msgs::msg::Pose> refs4{
-    {"pick_frame", offsetPose(pick4, a4.pick_offset)},
-    {"place_frame", offsetPose(place4, a4.place_offset)}};
-  const auto arc3 = arcThrough3(a3p0, a3p1, a3p2, program.arc_points);
-  const auto arc4 = arcThrough3(a4p0, a4p1, a4p2, program.arc_points);
-  if (arc3.empty() || arc4.empty() || arc3.size() != arc4.size()) {
-    RCLCPP_ERROR(logger, "Could not build both arcs, or arc point counts differ");
-    return false;
-  }
+
   if (!scene.verifyObjectState(a3.object_id, true, false) ||
       !scene.verifyObjectState(a4.object_id, true, false)) {
     RCLCPP_ERROR(logger, "Both flange objects must be world collision objects before starting");
@@ -1007,8 +1065,20 @@ int main(int argc, char ** argv)
     const auto config_path = config_path_override.empty() ?
       ament_index_cpp::get_package_share_directory(config_package) + "/" + config_file :
       config_path_override;
-    RCLCPP_INFO(node->get_logger(), "Loading flange workcell YAML: %s", config_path.c_str());
-    auto program = loadFlangeProgram(config_path);
+    const auto motion_package = node->declare_parameter<std::string>(
+      "motion_config_package", "sa3_motion");
+    const auto motion_file = node->declare_parameter<std::string>(
+      "motion_config_file", "config/ms_2_re.yaml");
+    const auto motion_path_override = node->declare_parameter<std::string>(
+      "motion_config_path", "");
+    const auto task_id = node->declare_parameter<std::string>(
+      "motion_task", "flange_3c_4c");
+    const auto motion_path = motion_path_override.empty() ?
+      ament_index_cpp::get_package_share_directory(motion_package) + "/" + motion_file :
+      motion_path_override;
+    RCLCPP_INFO(node->get_logger(), "Fixed workcell: %s; motion recipe: %s; task: %s",
+      config_path.c_str(), motion_path.c_str(), task_id.c_str());
+    auto program = loadFlangeProgram(config_path, motion_path, task_id);
     applyRosOverrides(node, program);
     tf2_ros::Buffer tf_buffer(node->get_clock());
     tf_buffer.setUsingDedicatedThread(true);

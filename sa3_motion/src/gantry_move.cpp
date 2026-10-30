@@ -43,9 +43,10 @@
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 #include "sa3_motion/planning_scene_objects.hpp"
+#include "sa3_motion/motion_task.hpp"
 
 // The SA1-style declarative planner record. The schema is validated before
-// any motion starts; pose offsets and collision actions come from workcell.yaml.
+// any motion starts; pose offsets and collision actions come from the selected motion recipe.
 struct ConfiguredGantryOffset
 {
   std::string frame{"world"};
@@ -107,7 +108,7 @@ static std::vector<ConfiguredGantryStep> readConfiguredGantrySteps(
   const YAML::Node & sequence, bool robot_steps)
 {
   if (!sequence || !sequence.IsSequence() || sequence.size() == 0) {
-    throw std::runtime_error("workcell.planner_sequence.gantry_move requires nonempty gantry/robot3 lists.");
+    throw std::runtime_error("motion task.gantry_move requires nonempty gantry/robot3 lists.");
   }
   std::vector<ConfiguredGantryStep> result;
   std::set<std::string> ids;
@@ -142,8 +143,9 @@ static std::vector<ConfiguredGantryStep> readConfiguredGantrySteps(
       if (step.reference != "pick_frame" && step.reference != "place_frame" && step.reference != "home") {
         throw std::runtime_error(step.id + ": unknown Robot 3 reference.");
       }
-      if (step.motion == "moveL" && step.planner != "pilz" && step.planner != "cartesian") {
-        throw std::runtime_error(step.id + ": moveL planner must be pilz or cartesian.");
+      if (step.motion == "moveL" && step.planner != "pilz" &&
+          step.planner != "cartesian") {
+        throw std::runtime_error(step.id + ": MoveL planner must be pilz or cartesian.");
       }
       if (step.reference == "home" && step.motion != "moveJ") {
         throw std::runtime_error(step.id + ": home must be a moveJ.");
@@ -153,6 +155,10 @@ static std::vector<ConfiguredGantryStep> readConfiguredGantrySteps(
         step.rpy = configuredVector3(item, "rpy", step.id);
       }
       step.ik_check = item["ik_check"].as<bool>(false);
+      // No route anchors are supported: R4 is a direct OMPL MoveJ goal.
+      if (item["waypoints"] || item["min_samples"] || item["max_samples"]) {
+        throw std::runtime_error(step.id + ": intermediate waypoints and sample counts are not supported.");
+      }
       const auto candidates = item["candidates"];
       if (candidates) {
         if (!candidates.IsSequence() || candidates.size() == 0 ||
@@ -204,14 +210,43 @@ static std::vector<ConfiguredGantryStep> readConfiguredGantrySteps(
         throw std::runtime_error("gantry_move: unsafe gantry joint order at " + result[i].id);
       }
     }
-  } else if (result[0].candidates.empty() || result[0].reference != "pick_frame" ||
+  } else if (result[0].reference != "pick_frame" || result[0].motion != "moveJ" ||
+             !result[0].candidates.empty() ||
              result[1].motion != "moveL" || result[1].planner != "pilz" || result[1].reference != "pick_frame" ||
              result[2].motion != "moveL" || result[2].planner != "cartesian" || result[2].reference != "pick_frame" ||
-             result[3].motion != "moveL" || result[3].planner != "cartesian" || result[3].reference != "place_frame" ||
+             result[3].motion != "moveJ" || result[3].planner != "ompl" || result[3].reference != "place_frame" ||
+             !result[3].candidates.empty() || !result[3].ik_check ||
              result[4].motion != "moveL" || result[4].planner != "cartesian" || result[4].reference != "place_frame" ||
              result[5].motion != "moveL" || result[5].planner != "cartesian" || result[5].reference != "place_frame" ||
              result[6].reference != "home" || result[6].motion != "moveJ") {
     throw std::runtime_error("gantry_move: Robot 3 safety-gated pick/place planner shape is invalid.");
+  }
+  // R1 is the sole pick approach: strictly in front of the pick frame,
+  // along its local negative-X axis. R3 retracts along the same line.
+  if (robot_steps) {
+    const auto & approach = result[0];
+    const auto & retract = result[2];
+    constexpr double epsilon = 1e-8;
+    if (approach.offset_frame != "local" ||
+        approach.xyz[0] >= -epsilon ||
+        std::abs(approach.xyz[1]) > epsilon || std::abs(approach.xyz[2]) > epsilon ||
+        retract.offset_frame != "local" ||
+        std::abs(retract.xyz[0] - approach.xyz[0]) > epsilon ||
+        std::abs(retract.xyz[1]) > epsilon || std::abs(retract.xyz[2]) > epsilon) {
+      throw std::runtime_error("gantry_move: R1/R3 must use same local -X front-of-pick offset, with no sideways displacement.");
+    }
+    const auto & place_approach = result[3];
+    const auto & place_retract = result[5];
+    if (place_approach.offset_frame != "local" ||
+        place_approach.xyz[0] >= -epsilon ||
+        std::abs(place_approach.xyz[1]) > epsilon ||
+        std::abs(place_approach.xyz[2]) > epsilon ||
+        place_retract.offset_frame != "local" ||
+        std::abs(place_retract.xyz[0] - place_approach.xyz[0]) > epsilon ||
+        std::abs(place_retract.xyz[1]) > epsilon ||
+        std::abs(place_retract.xyz[2]) > epsilon) {
+      throw std::runtime_error("gantry_move: R4/R6 must use the same local -X place approach/retract offset, with no sideways displacement.");
+    }
   }
   return result;
 }
@@ -272,8 +307,8 @@ public:
     approach_height_ = configuredParameterOrDeclare<double>("approach_height_m", 0.60);
     // Robot 3 stops this far in front of the place frame before the final MoveL.
     place_approach_distance_ = configuredParameterOrDeclare<double>("place_approach_distance_m", 0.10);
-    // Pick approach defaults to a vertical lift in the world frame.
-    // The selected pick approach pose is also used as the post-pick retract pose.
+    // Legacy scalar approach parameters kept for CLI/launch compatibility.
+    // Recipe robot3_steps.R1/R3 control the actual approach and retract.
     pick_approach_dx_ = configuredParameterOrDeclare<double>("pick_approach_dx_m", 0.0);
     pick_approach_dz_ = configuredParameterOrDeclare<double>("pick_approach_dz_m", 0.60);
 
@@ -501,7 +536,7 @@ private:
   double pilz_velocity_{0.20}, pilz_acceleration_{0.10};
 
   // Load before declaring regular parameters: explicit --ros-args/-p/launch
-  // overrides win over the defaults stored in workcell.gantry_move.
+  // overrides win over the defaults stored in motion task.gantry_move.
   void loadWorkcellProgram()
   {
     const auto pkg = parameterOrDeclare<std::string>(
@@ -514,21 +549,26 @@ private:
       ament_index_cpp::get_package_share_directory(pkg) + "/" + file :
       override_path;
     const auto root = YAML::LoadFile(path);
-    const auto workcell = root["workcell"];
-    const auto config = workcell["gantry_move"];
-    const auto sequence = workcell["planner_sequence"]["gantry_move"];
-    if (!config || !config.IsMap() || !sequence || !sequence.IsMap()) {
-      throw std::runtime_error("Missing workcell.gantry_move or planner_sequence.gantry_move in " + path);
+    const auto workcell = sa3_yaml::require(root, "workcell", "root");
+    const auto task = sa3_recipe::loadTask(*this, "gantry_move");
+    const auto config = sa3_yaml::require(task, "config", "gantry task");
+    const auto hardware = sa3_yaml::require(workcell, "gantry_robot", "workcell");
+    yaml_parameters_ = YAML::Clone(config["ros_parameters"]);
+    if (!yaml_parameters_ || !yaml_parameters_.IsMap())
+      throw std::runtime_error("gantry task.config.ros_parameters must be a mapping");
+    // Fixed physical hardware values are owned by workcell.yaml, not the recipe.
+    for (const auto & key : {"controller_action", "horizontal_joint", "vertical_joint", "attach_link",
+                              "move_group_name", "robot3_group", "robot3_planning_link"}) {
+      yaml_parameters_[key] = hardware[key];
     }
-    yaml_parameters_ = config["ros_parameters"];
     if (!yaml_parameters_ || !yaml_parameters_.IsMap()) {
-      throw std::runtime_error("workcell.gantry_move.ros_parameters must be a mapping.");
+      throw std::runtime_error("motion task.gantry_move.ros_parameters must be a mapping.");
     }
-    gantry_planner_steps_ = readConfiguredGantrySteps(sequence["gantry"], false);
-    robot3_planner_steps_ = readConfiguredGantrySteps(sequence["robot3"], true);
-    const auto links = config["robot3_touch_links"];
+    gantry_planner_steps_ = readConfiguredGantrySteps(task["gantry_steps"], false);
+    robot3_planner_steps_ = readConfiguredGantrySteps(task["robot3_steps"], true);
+    const auto links = workcell["robots"]["robot3"]["gantry_touch_links"];
     if (!links || !links.IsSequence() || links.size() == 0) {
-      throw std::runtime_error("workcell.gantry_move.robot3_touch_links required.");
+      throw std::runtime_error("workcell.robots.robot3.gantry_touch_links required.");
     }
     for (const auto & link : links) {
       robot3_touch_links_.push_back(link.as<std::string>());
@@ -1439,7 +1479,7 @@ private:
         RCLCPP_WARN(get_logger(), "%s: Cartesian MoveL candidate %zu failed; trying next.",
           label.c_str(), i + 1);
       }
-      RCLCPP_ERROR(get_logger(), "%s: no collision-free side approach succeeded.", label.c_str());
+      RCLCPP_ERROR(get_logger(), "%s: no collision-free candidate approach succeeded.", label.c_str());
       return false;
     }
     if (step.ik_check) {
@@ -1461,8 +1501,8 @@ private:
     return planAndExecuteCartesianMoveL(*robot3_group_, base_target, label);
   }
 
-  // Executes the original safety-gated sequence, but all per-step joint
-  // references, offsets, candidates and actions are read from workcell.yaml.
+  // Executes the safety-gated sequence with per-step offsets and actions
+  // read from the selected motion-task YAML.
   bool performSequence()
   {
     if (!move_group_ || !robot3_group_ || !scene_objects_ || !tf_buffer_) {
@@ -1574,7 +1614,7 @@ private:
           RCLCPP_ERROR(get_logger(), "Cannot lift gantry: Robot 3 has not attached the rebar.");
           return false;
         }
-        // This action occurs ONLY after R3's 10 cm retract MoveL succeeded.
+        // This action occurs ONLY after R3's 5 cm retract MoveL succeeded.
         if (!moveJointTo(vertical_joint_, vertical_home_)) return false;
         horizontal_return_started = true;
         horizontal_return_thread = std::thread([&]() {

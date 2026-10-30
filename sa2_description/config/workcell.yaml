@@ -1,977 +1,1470 @@
+# SA3 fixed physical workcell: environment, robots, tools, rebars and TF ONLY.
 workcell:
-
   name: sa3_workcell
   world_frame: world
-
-  # =========================================================
-  # TFs relative to WEB RING
-  # =========================================================
   web_ring_frames:
-
     5pf:
       parent: web_ring
       child: 5pf
-      xyz: [0.4, 0.39, 2.455]
-      rpy: [0.0, 0.0, 3.14]
-
+      xyz:
+      - 0.4
+      - 0.39
+      - 2.455
+      rpy:
+      - 0.0
+      - 0.0
+      - 3.14
     13pf:
       parent: web_ring
       child: 13pf
-      xyz: [0.4, 0.28, 2.03]
-      rpy: [0.0, 0.0, 3.14]
-
+      xyz:
+      - 0.4
+      - 0.28
+      - 2.03
+      rpy:
+      - 0.0
+      - 0.0
+      - 3.14
     14pf:
       parent: web_ring
       child: 14pf
-      xyz: [0.4, 0.13, 1.72]
-      rpy: [0.0, 0.0, 3.14]
-
-
+      xyz:
+      - 0.4
+      - 0.13
+      - 1.72
+      rpy:
+      - 0.0
+      - 0.0
+      - 3.14
   web_ring2_frames:
-
     6pf:
       parent: web_ring_2
       child: 6pf
-      xyz: [0.36, 0.47, 2.38]
-      rpy: [0.0, 0.0, 3.14]
-
+      xyz:
+      - 0.36
+      - 0.47
+      - 2.38
+      rpy:
+      - 0.0
+      - 0.0
+      - 3.14
     13_1pf:
       parent: web_ring_2
       child: 13_1pf
-      xyz: [0.36, 0.05, 2.4]
-      rpy: [0.0, 0.0, 3.14]
-
+      xyz:
+      - 0.36
+      - 0.05
+      - 2.4
+      rpy:
+      - 0.0
+      - 0.0
+      - 3.14
     13_2pf:
       parent: web_ring_2
       child: 13_2pf
-      xyz: [0.36, 0.05, 2.22]
-      rpy: [0.0, 0.0, 3.14]
-
-
+      xyz:
+      - 0.36
+      - 0.05
+      - 2.22
+      rpy:
+      - 0.0
+      - 0.0
+      - 3.14
     14pf:
       parent: web_ring_2
       child: 14_4pf
-      xyz: [0.36, 0.04, 1.99]
-      rpy: [0.0, 0.0, 3.14]
-
-  # =========================================================
-  # INVENTORY 3A / 4A
-  # =========================================================
+      xyz:
+      - 0.36
+      - 0.04
+      - 1.99
+      rpy:
+      - 0.0
+      - 0.0
+      - 3.14
   inventory_frames:
-
     3pickframe_l:
       parent: inventory_3a_4a
       child: inventory_3a_4a_frame
-      xyz: [0.448, -0.032, 2.119]
-      rpy: [-0.316, 0.0, 1.572]
-
+      xyz:
+      - 0.448
+      - -0.032
+      - 2.119
+      rpy:
+      - -0.316
+      - 0.0
+      - 1.572
     3pickframe_r:
       parent: inventory_3a_4a_2
       child: inventory_3a_4a_frame_2
-      xyz: [0.446, 0.979, 2.133]
-      rpy: [0.307, 0.00, -1.572]
-
+      xyz:
+      - 0.446
+      - 0.979
+      - 2.133
+      rpy:
+      - 0.307
+      - 0.0
+      - -1.572
     bm_pkL:
       parent: inventory_3a_4a
       child: bm_pkL
-      xyz: [2.184, -2.561, 4.116]
-      rpy: [-0.571, -0.007, -1.567]
-      
+      xyz:
+      - 1.837
+      - -2.429
+      - 4.306
+      rpy:
+      - -0.562
+      - -0.007
+      - -1.571
     bm_pkr:
       parent: inventory_3a_4a_2
       child: bm_pkr
-      xyz: [2.097, 2.612, 1.772]
-      rpy: [0.640, -0.029, 1.582]
-
-
-  # =========================================================
-  # PLACE FRAMES
-  # =========================================================
+      xyz:
+      - 2.097
+      - 2.612
+      - 1.772
+      rpy:
+      - 0.64
+      - -0.029
+      - 1.582
   place_frames:
-    # left SIDE FRAMES
     5_placef_l:
       parent: jig_clamp
       child: 5_placef_l
-      xyz: [0.21, 0.45, 3.57]
-      rpy: [0.0, 0.34121187, 3.14]
-
+      xyz:
+      - 0.21
+      - 0.45
+      - 3.57
+      rpy:
+      - 0.0
+      - 0.34121187
+      - 3.14
     13_placef1_l:
       parent: jig_clamp
       child: 13_placef1_l
-      xyz: [0.33, 0.36, 3.29]
-      rpy: [-1.57, 0.34121187, 3.14]
-
+      xyz:
+      - 0.33
+      - 0.36
+      - 3.29
+      rpy:
+      - -1.57
+      - 0.34121187
+      - 3.14
     13_placef2_l:
       parent: jig_clamp
       child: 13_placef2_l
-      xyz: [0.39, 0.38, 3.1]
-      rpy: [-1.57, 0.34121187, 3.14]
-
+      xyz:
+      - 0.39
+      - 0.38
+      - 3.1
+      rpy:
+      - -1.57
+      - 0.34121187
+      - 3.14
     13_placef3_l:
       parent: jig_clamp
       child: 13_placef3_l
-      xyz: [0.46, 0.41, 2.92]
-      rpy: [-1.57, 0.34121187, 3.14]
-
+      xyz:
+      - 0.46
+      - 0.41
+      - 2.92
+      rpy:
+      - -1.57
+      - 0.34121187
+      - 3.14
     13_placef4_l:
       parent: jig_clamp
       child: 13_placef4_l
-      xyz: [0.54, 0.43, 2.72]
-      rpy: [-1.57, 0.34121187, 3.14]
-
+      xyz:
+      - 0.54
+      - 0.43
+      - 2.72
+      rpy:
+      - -1.57
+      - 0.34121187
+      - 3.14
     14_placef1_l:
       parent: jig_clamp
       child: 14_placef1_l
-      xyz: [0.59, 0.54, 2.54]
-      rpy: [-2.27, 0.341211870, 3.14]
-
+      xyz:
+      - 0.59
+      - 0.54
+      - 2.54
+      rpy:
+      - -2.27
+      - 0.34121187
+      - 3.14
     14_placef2_l:
       parent: jig_clamp
       child: 14_placef2_l
-      xyz: [0.65, 0.65, 2.4]
-      rpy: [-2.27, 0.341211870, 3.14]
-
+      xyz:
+      - 0.65
+      - 0.65
+      - 2.4
+      rpy:
+      - -2.27
+      - 0.34121187
+      - 3.14
     14_placef3_l:
       parent: jig_clamp
       child: 14_placef3_l
-      xyz: [0.69, 0.76, 2.27]
-      rpy: [-2.27, 0.341211870, 3.14]
-
+      xyz:
+      - 0.69
+      - 0.76
+      - 2.27
+      rpy:
+      - -2.27
+      - 0.34121187
+      - 3.14
     14_placef4_l:
       parent: jig_clamp
       child: 14_placef4_l
-      xyz: [0.73, 0.87, 2.16]
-      rpy: [-2.27, 0.341211870, 3.14]
-
-    # RIGHT SIDE FRAMES
+      xyz:
+      - 0.73
+      - 0.87
+      - 2.16
+      rpy:
+      - -2.27
+      - 0.34121187
+      - 3.14
     6_placef_r:
       parent: jig_clamp
       child: 6_placef_r
-      xyz: [0.209, 5.187, 3.522]
-      rpy: [0.0, 0.34121187, 3.14]
-
+      xyz:
+      - 0.209
+      - 5.187
+      - 3.522
+      rpy:
+      - 0.0
+      - 0.34121187
+      - 3.14
     13_placef1_r:
       parent: jig_clamp
       child: 13_placef1_r
-      xyz: [0.370, 5.107, 3.112]
-      rpy: [-1.57, 0.34121187, 3.14]
-
+      xyz:
+      - 0.37
+      - 5.107
+      - 3.112
+      rpy:
+      - -1.57
+      - 0.34121187
+      - 3.14
     13_placef2_r:
       parent: jig_clamp
       child: 13_placef2_r
-      xyz: [0.40, 5.08, 2.96]
-      rpy: [-1.57, 0.34121187, 3.14]
-
+      xyz:
+      - 0.4
+      - 5.08
+      - 2.96
+      rpy:
+      - -1.57
+      - 0.34121187
+      - 3.14
     13_placef3_r:
       parent: jig_clamp
       child: 13_placef3_r
-      xyz: [0.49, 5.05, 2.76]
-      rpy: [-1.57, 0.34121187, 3.14]
-
+      xyz:
+      - 0.49
+      - 5.05
+      - 2.76
+      rpy:
+      - -1.57
+      - 0.34121187
+      - 3.14
     14_placef1_r:
       parent: jig_clamp
       child: 14_placef1_r
-      xyz: [0.56, 4.96, 2.59]
-      rpy: [-0.87, 0.34121187, 3.14]
-
+      xyz:
+      - 0.56
+      - 4.96
+      - 2.59
+      rpy:
+      - -0.87
+      - 0.34121187
+      - 3.14
     14_placef2_r:
       parent: jig_clamp
       child: 14_placef2_r
-      xyz: [0.62, 4.84, 2.42]
-      rpy: [-0.87, 0.34121187, 3.14]
-
+      xyz:
+      - 0.62
+      - 4.84
+      - 2.42
+      rpy:
+      - -0.87
+      - 0.34121187
+      - 3.14
     14_placef3_r:
       parent: jig_clamp
       child: 14_placef3_r
-      xyz: [0.66, 4.73, 2.31]
-      rpy: [-0.87, 0.34121187, 3.14]
-
+      xyz:
+      - 0.66
+      - 4.73
+      - 2.31
+      rpy:
+      - -0.87
+      - 0.34121187
+      - 3.14
     14_placef4_r:
       parent: jig_clamp
       child: 14_placef4_r
-      xyz: [0.71, 4.62, 2.19]
-      rpy: [-0.87, 0.34121187, 3.14]
-
-    # SA2 Place frames for rebars
+      xyz:
+      - 0.71
+      - 4.62
+      - 2.19
+      rpy:
+      - -0.87
+      - 0.34121187
+      - 3.14
     3_placef_r:
       parent: jig_clamp
       child: place_frame_10
-      xyz: [0.490, 5.031, 2.789]
-      rpy: [0.276, 0.353, 3.141]
-
+      xyz:
+      - 0.49
+      - 5.031
+      - 2.789
+      rpy:
+      - 0.276
+      - 0.353
+      - 3.141
     3_placef_l:
       parent: jig_clamp
       child: place_frame_10_l
-      xyz: [0.534, 0.474, 2.749]
-      rpy: [-0.322, 0.346, 3.138]
-
+      xyz:
+      - 0.534
+      - 0.474
+      - 2.749
+      rpy:
+      - -0.322
+      - 0.346
+      - 3.138
     bm_pfl:
       parent: jig_clamp
       child: bm_pfl
-      xyz: [0.824, 0.396, 2.135]
-      rpy: [-0.577, 0.317, -3.141]
-
+      xyz:
+      - -0.564
+      - 0.317
+      - -3.141
+      rpy:
+      - -0.577
+      - 0.317
+      - -3.141
     bm_pfr:
       parent: jig_clamp
       child: bm_pfr
-      xyz: [2.188, 4.997, 1.772]
-      rpy: [0.640, -0.029, -3.130]
-
-    # =========================================================
-  # TYING FRAMES  (parent = clamp frame, offsets in clamp frame)
-  # type 5  -> 4 points, type 13/14 -> 2 points
-  # naming: <clamp_frame>_t<n>
-  # =========================================================
+      xyz:
+      - 2.188
+      - 4.997
+      - 1.772
+      rpy:
+      - 0.64
+      - -0.029
+      - -3.13
   tying_frames:
-
-    # # ---------- type 5 (3 points) ----------
-    # ---------- type 5: tying frames  ----------
     5_placef_l_t1:
       parent: 5_placef_l
       child: 5_placef_l_t1
-      xyz: [-0.03, 0.06903398036956787, 0.0006616413593292236]
-      rpy: [0.5854007482281, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - 0.06903398036956787
+      - 0.0006616413593292236
+      rpy:
+      - 0.5854007482281
+      - 0.0
+      - 0.0
     5_placef_l_t2:
       parent: 5_placef_l
       child: 5_placef_l_t2
-      xyz: [-0.03, 0.03714217245578766, -0.12903551757335663]
-      rpy: [-0.5854007482281, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - 0.03714217245578766
+      - -0.12903551757335663
+      rpy:
+      - -0.5854007482281
+      - 0.0
+      - 0.0
     5_placef_l_t3:
       parent: 5_placef_l
       child: 5_placef_l_t3
-      xyz: [-0.03, 0.15548759698867798, -0.11478203535079956]
-      rpy: [1.57, 0.0, 0.0]
-
-    
-
-    # ---------- type 13 (2 points each) ----------
+      xyz:
+      - -0.03
+      - 0.15548759698867798
+      - -0.11478203535079956
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
     13_placef1_l_t1:
       parent: 13_placef1_l
       child: 13_placef1_l_t1
-      xyz: [-0.03, -0.020, -0.075]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - -0.02
+      - -0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     13_placef1_l_t2:
       parent: 13_placef1_l
       child: 13_placef1_l_t2
-      xyz: [-0.03, -0.020, 0.0750]
-      rpy: [3.14, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     13_placef2_l_t1:
       parent: 13_placef2_l
       child: 13_placef2_l_t1
-      xyz: [-0.03,  -0.020, -0.075]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - -0.02
+      - -0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     13_placef2_l_t2:
       parent: 13_placef2_l
       child: 13_placef2_l_t2
-      xyz: [-0.03, -0.020, 0.075]
-      rpy: [3.14, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     13_placef3_l_t1:
       parent: 13_placef3_l
       child: 13_placef3_l_t1
-      xyz: [ -0.03, -0.020, -0.075]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - -0.02
+      - -0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     13_placef3_l_t2:
       parent: 13_placef3_l
       child: 13_placef3_l_t2
-      xyz: [ -0.03,0.020, 0.075]
-      rpy: [3.14, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - 0.02
+      - 0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     13_placef4_l_t1:
       parent: 13_placef4_l
       child: 13_placef4_l_t1
-      xyz: [ -0.03, -0.020, -0.075]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - -0.02
+      - -0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     13_placef4_l_t2:
       parent: 13_placef4_l
       child: 13_placef4_l_t2
-      xyz: [ -0.03,-0.020, 0.075]
-      rpy: [3.14, 0.0, 0.0]
-
-    # ---------- type 14 (2 points each) ----------
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef1_l_t1:
       parent: 14_placef1_l
       child: 14_placef1_l_t1
-      xyz: [-0.03,0.020,-0.080]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - 0.02
+      - -0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef1_l_t2:
       parent: 14_placef1_l
       child: 14_placef1_l_t2
-      xyz: [-0.03,-0.020,0.080]
-      rpy: [3.14, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef2_l_t1:
       parent: 14_placef2_l
       child: 14_placef2_l_t1
-      xyz: [-0.03,0.020,-0.080]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - 0.02
+      - -0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef2_l_t2:
       parent: 14_placef2_l
       child: 14_placef2_l_t2
-      xyz: [-0.03,-0.020,0.080]
-      rpy: [3.14, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef3_l_t1:
       parent: 14_placef3_l
       child: 14_placef3_l_t1
-      xyz: [-0.03,-0.020,-0.080]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - -0.02
+      - -0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef3_l_t2:
       parent: 14_placef3_l
       child: 14_placef3_l_t2
-      xyz: [-0.03,-0.020,0.080]
-      rpy: [3.14, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef4_l_t1:
       parent: 14_placef4_l
       child: 14_placef4_l_t1
-      xyz: [-0.03,-0.020,-0.080]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - -0.02
+      - -0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef4_l_t2:
       parent: 14_placef4_l
       child: 14_placef4_l_t2
-      xyz: [-0.03, -0.020,0.080]
-      rpy: [3.14, 0.0, 0.0]
-
-
-    # -----------RIGHT SIDE FRAMES -----------
-    # ---------- type 6: tying frames (clicked points) ----------
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     6_placef_r_t1:
       parent: 6_placef_r
       child: 6_placef_r_t1
-      xyz: [-0.03, -0.026151299476623535, 0.028699636459350586]
-      rpy: [0.5854007482281, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - -0.026151299476623535
+      - 0.028699636459350586
+      rpy:
+      - 0.5854007482281
+      - 0.0
+      - 0.0
     6_placef_r_t2:
       parent: 6_placef_r
       child: 6_placef_r_t2
-      xyz: [-0.03, -0.0038506537675857544, -0.3535647392272949]
-      rpy: [-0.5854007482281, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - -0.0038506537675857544
+      - -0.3535647392272949
+      rpy:
+      - -0.5854007482281
+      - 0.0
+      - 0.0
     6_placef_r_t3:
       parent: 6_placef_r
       child: 6_placef_r_t3
-      xyz: [-0.03, 0.12687206268310547, -0.31388020515441895]
-      rpy: [0.5854007482281, 0.0, 0.0]
-
-    # ---------- type 13 (2 points each) ----------
-
+      xyz:
+      - -0.03
+      - 0.12687206268310547
+      - -0.31388020515441895
+      rpy:
+      - 0.5854007482281
+      - 0.0
+      - 0.0
     13_placef1_r_t1:
       parent: 13_placef1_r
       child: 13_placef1_r_t1
-      xyz: [-0.03, -0.020, -0.075]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - -0.02
+      - -0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     13_placef1_r_t2:
       parent: 13_placef1_r
       child: 13_placef1_r_t2
-      xyz: [-0.03, -0.020, 0.0750]
-      rpy: [3.14, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     13_placef2_r_t1:
       parent: 13_placef2_r
       child: 13_placef2_r_t1
-      xyz: [-0.03,  -0.020, -0.075]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - -0.02
+      - -0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     13_placef2_r_t2:
       parent: 13_placef2_r
       child: 13_placef2_r_t2
-      xyz: [-0.03, -0.020, 0.075]
-      rpy: [3.14, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     13_placef3_r_t1:
       parent: 13_placef3_r
       child: 13_placef3_r_t1
-      xyz: [ -0.03, -0.020, -0.075]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - -0.02
+      - -0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     13_placef3_r_t2:
       parent: 13_placef3_r
       child: 13_placef3_r_t2
-      xyz: [ -0.03,0.020, 0.075]
-      rpy: [3.14, 0.0, 0.0]
-
-    # ---------- type 14 (2 points each) ----------
+      xyz:
+      - -0.03
+      - 0.02
+      - 0.075
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef1_r_t1:
       parent: 14_placef1_r
       child: 14_placef1_r_t1
-      xyz: [-0.03,0.020,-0.080]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - 0.02
+      - -0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef1_r_t2:
       parent: 14_placef1_r
       child: 14_placef1_r_t2
-      xyz: [-0.03,-0.020,0.080]
-      rpy: [3.14, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef2_r_t1:
       parent: 14_placef2_r
       child: 14_placef2_r_t1
-      xyz: [-0.03,0.020,-0.080]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - 0.02
+      - -0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef2_r_t2:
       parent: 14_placef2_r
       child: 14_placef2_r_t2
-      xyz: [-0.03,-0.020,0.080]
-      rpy: [3.14, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef3_r_t1:
       parent: 14_placef3_r
       child: 14_placef3_r_t1
-      xyz: [-0.03,-0.020,-0.080]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - -0.02
+      - -0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef3_r_t2:
       parent: 14_placef3_r
       child: 14_placef3_r_t2
-      xyz: [-0.03,-0.020,0.080]
-      rpy: [3.14, 0.0, 0.0]
-
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef4_r_t1:
       parent: 14_placef4_r
       child: 14_placef4_r_t1
-      xyz: [-0.03,-0.020,-0.080]
-      rpy: [3.14, 0.0, 0.0]
+      xyz:
+      - -0.03
+      - -0.02
+      - -0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     14_placef4_r_t2:
       parent: 14_placef4_r
       child: 14_placef4_r_t2
-      xyz: [-0.03, -0.020,0.080]
-      rpy: [3.14, 0.0, 0.0]
-
-
-   # ---------- Type 1A: tying frames from clicked points ----------
+      xyz:
+      - -0.03
+      - -0.02
+      - 0.08
+      rpy:
+      - 3.14
+      - 0.0
+      - 0.0
     1A_l_t1:
       parent: jig_clamp
       child: 1A_l_t1
-      xyz: [0.9092253447, 1.1295262575, 1.9607803822]
-      rpy: [0.0, 0.34121187, 3.14]
-
+      xyz:
+      - 0.9092253447
+      - 1.1295262575
+      - 1.9607803822
+      rpy:
+      - 0.0
+      - 0.34121187
+      - 3.14
     1A_l_t2:
       parent: jig_clamp
       child: 1A_l_t2
-      xyz: [0.8338797092, 0.7199481726, 2.2074778080]
-      rpy: [1.0, 0.34121187, 3.14]
-
+      xyz:
+      - 0.8338797092
+      - 0.7199481726
+      - 2.207477808
+      rpy:
+      - 1.0
+      - 0.34121187
+      - 3.14
     1A_l_t3:
       parent: jig_clamp
       child: 1A_l_t3
-      xyz: [0.7511942387, 0.5583372116, 2.4476511478]
-      rpy: [1.0, 0.34121187, 3.14]
-
+      xyz:
+      - 0.7511942387
+      - 0.5583372116
+      - 2.4476511478
+      rpy:
+      - 1.0
+      - 0.34121187
+      - 3.14
     1A_r_t1:
       parent: jig_clamp
       child: 1A_r_t1
-      xyz: [0.8797428608, 4.4736709595, 1.9693874121]
-      rpy: [0.0, 0.34121187, 3.14]
-
+      xyz:
+      - 0.8797428608
+      - 4.4736709595
+      - 1.9693874121
+      rpy:
+      - 0.0
+      - 0.34121187
+      - 3.14
     1A_r_t2:
       parent: jig_clamp
       child: 1A_r_t2
-      xyz: [0.7867295742, 4.8036103249, 2.2259831429]
-      rpy: [-1.0, 0.34121187, 3.14]
-
+      xyz:
+      - 0.7867295742
+      - 4.8036103249
+      - 2.2259831429
+      rpy:
+      - -1.0
+      - 0.34121187
+      - 3.14
     1A_r_t3:
       parent: jig_clamp
       child: 1A_r_t3
-      xyz: [0.7052541971, 4.9698433876, 2.4777035713]
-      rpy: [-1.0, 0.34121187, 3.14]
-        # MANUAL SA3 PICK / PLACE FRAMES
+      xyz:
+      - 0.7052541971
+      - 4.9698433876
+      - 2.4777035713
+      rpy:
+      - -1.0
+      - 0.34121187
+      - 3.14
     sa3_place:
       parent: world
       child: sa3_place
-      xyz: [0.076, 1.816, 1.281]
-      rpy: [-0.206, 0.107, 1.558]
-
+      xyz:
+      - 0.076
+      - 1.816
+      - 1.281
+      rpy:
+      - -0.206
+      - 0.107
+      - 1.558
     sa3_pick_point:
       parent: jig_clamp
       child: sa3_pick_point
-      xyz: [0.332, 0.009, 3.044]
-      rpy: [-0.207, 0.370, 3.130]
- 
+      xyz:
+      - 0.332
+      - 0.009
+      - 3.044
+      rpy:
+      - -0.207
+      - 0.37
+      - 3.13
   arc_frames:
-
     r3_arc_start:
       parent: robot3_base_link
       child: r3_arc_start
-      xyz: [1.60001, -0.349999, 1.113]
-      rpy: [0.0, 0.0, -1.573200]
-
+      xyz:
+      - 1.60001
+      - -0.349999
+      - 1.113
+      rpy:
+      - 0.0
+      - 0.0
+      - -1.5732
     r3_arc_mid:
       parent: robot3_base_link
       child: r3_arc_mid
-      xyz: [2.2, 0.786501, 1.113]
-      rpy: [0.0, 0.0, -0.073200]
-
+      xyz:
+      - 2.2
+      - 0.786501
+      - 1.113
+      rpy:
+      - 0.0
+      - 0.0
+      - -0.0732
     r3_arc_end:
       parent: robot3_base_link
       child: r3_arc_end
-      xyz: [1.674201, 2.015401, 1.113]
-      rpy: [0.0, 0.0, 1.566799]
-
+      xyz:
+      - 1.674201
+      - 2.015401
+      - 1.113
+      rpy:
+      - 0.0
+      - 0.0
+      - 1.566799
     r4_arc_start:
       parent: robot4_base_link
       child: r4_arc_start
-      xyz: [1.4900001, 0.349999, 1.113]
-      rpy: [0.0, 0.0, 1.573200]
-
+      xyz:
+      - 1.4900001
+      - 0.349999
+      - 1.113
+      rpy:
+      - 0.0
+      - 0.0
+      - 1.5732
     r4_arc_mid:
       parent: robot4_base_link
       child: r4_arc_mid
-      xyz: [2.069901, -0.786501, 1.113]
-      rpy: [0.0, 0.0, 0.073200]
-
+      xyz:
+      - 2.069901
+      - -0.786501
+      - 1.113
+      rpy:
+      - 0.0
+      - 0.0
+      - 0.0732
     r4_arc_end:
       parent: robot4_base_link
       child: r4_arc_end
-      xyz: [1.674201, -2.015401, 1.113]
-      rpy: [0.0, 0.0, -1.566799]
-
-  # =========================================================
-  # TOOL DOCKING FRAMES — ROBOT 1
-  # =========================================================
+      xyz:
+      - 1.674201
+      - -2.015401
+      - 1.113
+      rpy:
+      - 0.0
+      - 0.0
+      - -1.566799
   tool_dock_frames:
-
     robot1_tyinggun_dock:
       parent: world
       child: robot1_tyinggun_dock
-      xyz: [-1.18, 2.6, 1.3]
-      rpy: [0.0, 1.57, 1.57]
-
+      xyz:
+      - -1.18
+      - 2.6
+      - 1.3
+      rpy:
+      - 0.0
+      - 1.57
+      - 1.57
     robot1_shuck_dock:
       parent: world
       child: robot1_shuck_dock
-      xyz: [-1.0, 2.6, 1.3]
-      rpy: [0.0, 1.57, 0.0]
-
-    robot2_tyinggun_dock: #5.9, 3.3
+      xyz:
+      - -1.0
+      - 2.6
+      - 1.3
+      rpy:
+      - 0.0
+      - 1.57
+      - 0.0
+    robot2_tyinggun_dock:
       parent: world
       child: robot2_tyinggun_dock
-      xyz: [5.9, 2.6, 1.3]
-      rpy: [0.0, 1.57, 1.57]
-
+      xyz:
+      - 5.9
+      - 2.6
+      - 1.3
+      rpy:
+      - 0.0
+      - 1.57
+      - 1.57
     robot2_shuck_dock:
       parent: world
       child: robot2_shuck_dock
-      xyz: [6.08, 2.6, 1.3]
-      rpy: [0.0, 1.57, 0.0]
-
+      xyz:
+      - 6.08
+      - 2.6
+      - 1.3
+      rpy:
+      - 0.0
+      - 1.57
+      - 0.0
   extra_rebars:
-
     rebar_3c:
       parent: inventory_3a_4a_frame
-      child: "3c"
-      xyz: [0.05,0.0,0.0]
-      rpy: [-1.57, 0.316, -1.57]
-      mesh: package://sa2_description/meshes/rebars/3C_2.stl 
+      child: 3c
+      xyz:
+      - 0.05
+      - 0.0
+      - 0.0
+      rpy:
+      - -1.57
+      - 0.316
+      - -1.57
+      mesh: package://sa2_description/meshes/rebars/3C_2.stl
       scale: 0.1
-
     rebar_3d:
       parent: inventory_3a_4a_frame
-      child: "3d"
-      xyz: [0.15,0.0,0.0]
-      rpy: [-1.57, 0.316, -1.57]
+      child: 3d
+      xyz:
+      - 0.15
+      - 0.0
+      - 0.0
+      rpy:
+      - -1.57
+      - 0.316
+      - -1.57
       mesh: package://sa2_description/meshes/rebars/3D_2.stl
       scale: 0.1
-
     rebar_4c:
       parent: inventory_3a_4a_frame_2
-      child: "4c"
-      xyz: [0.05,0.0,0.0]
-      rpy: [-1.57, -0.316, -1.57]
+      child: 4c
+      xyz:
+      - 0.05
+      - 0.0
+      - 0.0
+      rpy:
+      - -1.57
+      - -0.316
+      - -1.57
       mesh: package://sa2_description/meshes/rebars/4C_2.stl
       scale: 0.1
-
     rebar_4d:
       parent: inventory_3a_4a_frame_2
-      child: "4d"
-      xyz: [0.15,0.0,0.0]
-      rpy: [-1.57, -0.316, -1.57]
+      child: 4d
+      xyz:
+      - 0.15
+      - 0.0
+      - 0.0
+      rpy:
+      - -1.57
+      - -0.316
+      - -1.57
       mesh: package://sa2_description/meshes/rebars/4D_2.stl
       scale: 0.1
-
-
-    # --------------------------------------------------
-    # web rack rebars
-    # --------------------------------------------------
-    rebar_5a:
-      parent: web_ring
-      child: "5a"
-      xyz: [0.39, 0.206, 2.293]
-      rpy: [0.0, 0.0, 0.0]
-      mesh: package://sa2_description/meshes/rebars/5A.STL
-      scale: 0.001
-
     rebar_13_1:
       parent: 13pf
-      child: "13_1"
-      xyz: [0.0, 0.0, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: '13_1'
+      xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/13A_1.stl
       scale: 0.001
-
     rebar_13_2:
       parent: 13pf
-      child: "13_2"
-      xyz: [0.0, -0.10, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: '13_2'
+      xyz:
+      - 0.0
+      - -0.1
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/13A_1.stl
       scale: 0.001
-
     rebar_13_3:
       parent: 13pf
-      child: "13_3"
-      xyz: [0.0, -0.2, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: '13_3'
+      xyz:
+      - 0.0
+      - -0.2
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/13A_1.stl
       scale: 0.001
-
     rebar_13_4:
       parent: 13pf
-      child: "13_4"
-      xyz: [0.0, -0.3, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: '13_4'
+      xyz:
+      - 0.0
+      - -0.3
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/13A_1.stl
       scale: 0.001
-
     rebar_14_1:
       parent: 14pf
-      child: "14_1"
-      xyz: [0.0, -0.0, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: '14_1'
+      xyz:
+      - 0.0
+      - -0.0
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/14A1_1.stl
       scale: 0.001
-
     rebar_14_2:
       parent: 14pf
-      child: "14_2"
-      xyz: [0.0, -0.2, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: '14_2'
+      xyz:
+      - 0.0
+      - -0.2
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/14A2_1.stl
       scale: 0.001
-
     rebar_14_3:
       parent: 14pf
-      child: "14_3"
-      xyz: [0.0, -0.4, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: '14_3'
+      xyz:
+      - 0.0
+      - -0.4
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/14A3_1.stl
       scale: 0.001
-
     rebar_14_4:
       parent: 14pf
-      child: "14_4"
-      xyz: [0.0, -0.6, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: '14_4'
+      xyz:
+      - 0.0
+      - -0.6
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/14A4_1.stl
       scale: 0.001
-
-    # --------------------------------------------------
-    # web rack rebars
-    # --------------------------------------------------
     rebar_5a:
       parent: web_ring
-      child: "5a"
-      xyz: [0.40, 0.206, 2.293]
-      rpy: [0.0, 0.0, 0.0]
+      child: 5a
+      xyz:
+      - 0.4
+      - 0.206
+      - 2.293
+      rpy:
+      - 0.0
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/5A.STL
       scale: 0.001
-
-    #  ------------------------------------------------
-    #  right web rack rebars
-    # ---------------------------------------------------
     rebar_13_1_R:
       parent: 13_1pf
-      child: "13_1_R"
-      xyz: [0.0, 0.0, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: 13_1_R
+      xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/13A_1.stl
       scale: 0.001
-
     rebar_13_2_R:
       parent: 13_1pf
-      child: "13_2_R"
-      xyz: [0.0, -0.118, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: 13_2_R
+      xyz:
+      - 0.0
+      - -0.118
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/13A_1.stl
       scale: 0.001
-
     rebar_13_3_R:
       parent: 13_2pf
-      child: "13_3_R"
-      xyz: [0.0, 0.0, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: 13_3_R
+      xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/13A_1.stl
-      scale: 0.001 
-
+      scale: 0.001
     rebar_14_1_R:
       parent: 14_4pf
-      child: "14_4_R"
-      xyz: [0.0, 0.0, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: 14_4_R
+      xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/14A4_1.stl
       scale: 0.001
-
     rebar_14_2_R:
       parent: 14_4pf
-      child: "14_3_R"
-      xyz: [0.0, -0.11, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: 14_3_R
+      xyz:
+      - 0.0
+      - -0.11
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/14A3_1.stl
       scale: 0.001
-
     rebar_14_3_R:
       parent: 14_4pf
-      child: "14_2_R"
-      xyz: [0.0, -0.22, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: 14_2_R
+      xyz:
+      - 0.0
+      - -0.22
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/14A2_1.stl
       scale: 0.001
-
     rebar_14_4_R:
       parent: 14_4pf
-      child: "14_1_R"
-      xyz: [0.0, -0.33, 0.0]
-      rpy: [1.57, 0.0, 0.0]
+      child: 14_1_R
+      xyz:
+      - 0.0
+      - -0.33
+      - 0.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/rebars/14A1_1.stl
       scale: 0.001
-     
     rebar_6:
       parent: web_ring_2
-      child: "6a"
-      xyz: [0.36, 0.298, 2.06]
-      rpy: [1.57, 0.0, 1.57]
+      child: 6a
+      xyz:
+      - 0.36
+      - 0.298
+      - 2.06
+      rpy:
+      - 1.57
+      - 0.0
+      - 1.57
       mesh: package://sa2_description/meshes/rebars/6A(8).STL
       scale: 0.001
-
-    # -----------------------------------------------
-    #  bottom mat 
-    # -----------------------------------------------
     rebar_1A:
       parent: jig_clamp
-      child: "1A"
-      xyz: [1.25, 6.5, 1.0]
-      rpy: [1.57, 0.0, 1.580796]
+      child: 1A
+      xyz:
+      - 1.25
+      - 6.5
+      - 1.0
+      rpy:
+      - 1.57
+      - 0.0
+      - 1.580796
       mesh: package://sa2_description/meshes/rebars/1A.STL
       scale: 0.001
-
-  # movable_rebars:
-  #    # -----------------------------------------------
-  #   #  bottom mat 
-  #   # -----------------------------------------------
-  #   rebar_1A:
-  #     parent: jig_clamp
-  #     child: "1A"
-  #     xyz: [0.75, 0.46, 1.89]
-  #     rpy: [1.2288, 0.0, 1.580796]
-  #     mesh: package://sa2_description/meshes/rebars/1A.STL
-  #     scale: 0.001
-  #     color: [0.5, 0.5, 0.5, 1.0]
-
   extra_grippers:
     robot1_tying_gun:
       parent: robot1_tyinggun_dock
       child: robot1_tying_gun_visual
-      xyz: [0.15, 0.005, -0.015] # set to tying_gun macro xyz
-      rpy: [1.5708, -0.3005, 3.1415] # set to tying_gun macro rpy
+      xyz:
+      - 0.15
+      - 0.005
+      - -0.015
+      rpy:
+      - 1.5708
+      - -0.3005
+      - 3.1415
       mesh: package://sa2_description/meshes/ee/TYING_GUN_v2.stl
-      mesh_xyz: [-0.612, -0.914, -1.319]
-      mesh_rpy: [0.0, 0.0, 0.0]
+      mesh_xyz:
+      - -0.612
+      - -0.914
+      - -1.319
+      mesh_rpy:
+      - 0.0
+      - 0.0
+      - 0.0
       scale: 0.001
-      color: [0.12, 0.12, 0.12, 1.0]
-
+      color:
+      - 0.12
+      - 0.12
+      - 0.12
+      - 1.0
     robot2_tying_gun:
       parent: robot2_tyinggun_dock
       child: robot2_tying_gun_visual
-      xyz: [0.15, 0.005, -0.015] # set to tying_gun macro xyz
-      rpy: [1.5708, -0.3005, 3.1415] # set to tying_gun macro rpy
+      xyz:
+      - 0.15
+      - 0.005
+      - -0.015
+      rpy:
+      - 1.5708
+      - -0.3005
+      - 3.1415
       mesh: package://sa2_description/meshes/ee/TYING_GUN_v2.stl
-      mesh_xyz: [-0.612, -0.914, -1.319]
-      mesh_rpy: [0.0, 0.0, 0.0]
+      mesh_xyz:
+      - -0.612
+      - -0.914
+      - -1.319
+      mesh_rpy:
+      - 0.0
+      - 0.0
+      - 0.0
       scale: 0.001
-      color: [0.12, 0.12, 0.12, 1.0]
-
+      color:
+      - 0.12
+      - 0.12
+      - 0.12
+      - 1.0
     robot1_schunk_base:
       parent: robot1_shuck_dock
       child: robot1_schunk_gripper_base_visual
-      xyz: [0.0, 0.0, 0.0] # set to schunk_gripper macro xyz
-      rpy: [0.0 ,1.57, 0.0] # set to schunk_gripper macro rpy
+      xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      rpy:
+      - 0.0
+      - 1.57
+      - 0.0
       mesh: package://sa2_description/meshes/ee/schunk_gripper_binary.stl
-      mesh_xyz: [0.0, 0.0, 0.0]
-      mesh_rpy: [1.5708, 0.0, 1.5708]
+      mesh_xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      mesh_rpy:
+      - 1.5708
+      - 0.0
+      - 1.5708
       scale: 0.001
-      color: [0.7922, 0.8196, 0.9333, 1.0]
-
+      color:
+      - 0.7922
+      - 0.8196
+      - 0.9333
+      - 1.0
     robot1_schunk_link7:
       parent: robot1_schunk_gripper_base_visual
       child: robot1_schunk_link7_visual
-      xyz: [0.0, 0.0, 0.1858]
-      rpy: [1.5708, 0.0, 0.0]
+      xyz:
+      - 0.0
+      - 0.0
+      - 0.1858
+      rpy:
+      - 1.5708
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/ee/link7.STL
-      mesh_xyz: [0.0, 0.0, 0.0]
-      mesh_rpy: [0.0, 0.0, 0.0]
+      mesh_xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      mesh_rpy:
+      - 0.0
+      - 0.0
+      - 0.0
       scale: 1.0
-      color: [0.7922, 0.8196, 0.9333, 1.0]
-
+      color:
+      - 0.7922
+      - 0.8196
+      - 0.9333
+      - 1.0
     robot1_schunk_link8:
       parent: robot1_schunk_gripper_base_visual
       child: robot1_schunk_link8_visual
-      xyz: [0.0, 0.0, 0.1858]
-      rpy: [1.5708, 0.0, -3.1416]
+      xyz:
+      - 0.0
+      - 0.0
+      - 0.1858
+      rpy:
+      - 1.5708
+      - 0.0
+      - -3.1416
       mesh: package://sa2_description/meshes/ee/link8.STL
-      mesh_xyz: [0.0, 0.0, 0.0]
-      mesh_rpy: [0.0, 0.0, 0.0]
+      mesh_xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      mesh_rpy:
+      - 0.0
+      - 0.0
+      - 0.0
       scale: 1.0
-      color: [0.7922, 0.8196, 0.9333, 1.0]
-
+      color:
+      - 0.7922
+      - 0.8196
+      - 0.9333
+      - 1.0
     robot2_schunk_base:
       parent: robot2_shuck_dock
       child: robot2_schunk_gripper_base_visual
-      xyz: [0.0, 0.0, 0.0] # set to schunk_gripper macro xyz
-      rpy: [0.0 ,1.57, 0.0] # set to schunk_gripper macro rpy
+      xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      rpy:
+      - 0.0
+      - 1.57
+      - 0.0
       mesh: package://sa2_description/meshes/ee/schunk_gripper_binary.stl
-      mesh_xyz: [0.0, 0.0, 0.0]
-      mesh_rpy: [1.5708, 0.0, 1.5708]
+      mesh_xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      mesh_rpy:
+      - 1.5708
+      - 0.0
+      - 1.5708
       scale: 0.001
-      color: [0.7922, 0.8196, 0.9333, 1.0]
-
+      color:
+      - 0.7922
+      - 0.8196
+      - 0.9333
+      - 1.0
     robot2_schunk_link7:
       parent: robot2_schunk_gripper_base_visual
       child: robot2_schunk_link7_visual
-      xyz: [0.0, 0.0, 0.1858]
-      rpy: [1.5708, 0.0, 0.0]
+      xyz:
+      - 0.0
+      - 0.0
+      - 0.1858
+      rpy:
+      - 1.5708
+      - 0.0
+      - 0.0
       mesh: package://sa2_description/meshes/ee/link7.STL
-      mesh_xyz: [0.0, 0.0, 0.0]
-      mesh_rpy: [0.0, 0.0, 0.0]
+      mesh_xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      mesh_rpy:
+      - 0.0
+      - 0.0
+      - 0.0
       scale: 1.0
-      color: [0.7922, 0.8196, 0.9333, 1.0]
-
+      color:
+      - 0.7922
+      - 0.8196
+      - 0.9333
+      - 1.0
     robot2_schunk_link8:
       parent: robot2_schunk_gripper_base_visual
       child: robot2_schunk_link8_visual
-      xyz: [0.0, 0.0, 0.1858]
-      rpy: [1.5708, 0.0, -3.1416]
+      xyz:
+      - 0.0
+      - 0.0
+      - 0.1858
+      rpy:
+      - 1.5708
+      - 0.0
+      - -3.1416
       mesh: package://sa2_description/meshes/ee/link8.STL
-      mesh_xyz: [0.0, 0.0, 0.0]
-      mesh_rpy: [0.0, 0.0, 0.0]
+      mesh_xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      mesh_rpy:
+      - 0.0
+      - 0.0
+      - 0.0
       scale: 1.0
-      color: [0.7922, 0.8196, 0.9333, 1.0]
-
-
-  # =========================================================
-  # FLANGE PICK/PLACE — CONFIGURATION USED BY flange_pp.cpp
-  # Keep the original environment/frame/object keys above unchanged.
-  # =========================================================
-  flange_pp:
-    combined_group: robot3_robot4_arms
-    # MoveIt group names and end-effector links are existing SRDF/URDF names.
-    robot3:
-      group: robot3_arm
-      link: robot3_end_effactor_ff
-      pick_frame: inventory_3a_4a_frame
-      place_frame: place_frame_10_l
-      arc_frames: [r3_arc_start, r3_arc_mid, r3_arc_end]
-      object_id: rebar_3c
-      inventory_id: inventory_3a_4a
-      touch_links: [robot3_end_effactor_ff, robot3_J6_link, robot3_sa3_grpr01_r]
-      pick_offset: [0.0, 0.0, 0.0]
-      place_offset: [0.0, 0.0, 0.0]
-    robot4:
-      group: robot4_arm
-      link: robot4_end_effactor_ff
-      pick_frame: inventory_3a_4a_frame_2
-      place_frame: place_frame_10
-      arc_frames: [r4_arc_start, r4_arc_mid, r4_arc_end]
-      object_id: rebar_4c
-      inventory_id: inventory_3a_4a_2
-      touch_links: [robot4_end_effactor_ff, robot4_J6_link, robot4_sa3_grpr01_r]
-      pick_offset: [0.0, 0.0, 0.0]
-      place_offset: [0.0, 0.0, 0.0]
-    jig_object_id: jig_clamp
-    # Three-point circular transfer is sampled into this many paired waypoints.
-    arc_points: 8
-    planning:
-      planning_time: 15.0
-      planning_attempts: 10
-      retries: 3
-      ik_timeout: 1.0
-      movej_velocity: 0.10
-      movej_acceleration: 0.10
-      movel_velocity: 0.10
-      movel_acceleration: 0.10
-
-  # Each ordered step is executed ONLY after the previous step succeeded.
-  # Paired moves: moveJ = one combined 12-joint OMPL plan; moveL = separate
-  # Pilz LIN plans merged and executed as one combined 12-joint trajectory.
-  # In each robot entry, reference = pick_frame | place_frame | arc_waypoint
-  # | current_tcp. XYZ offsets use world/local axes; RPY offsets default to
-  # local axes (rpy_frame: world is supported). All distances in metres;
-  # all angles in radians. Arc starts, mids and ends come from arc_frames above.
-  # before_actions and after_actions affect MoveIt collision/attachment state.
-  # =========================================================
-  # GANTRY + ROBOT 3 REBAR 1A PICK/PLACE
-  # YAML is the motion program's single source of truth.  ROS launch
-  # parameter overrides take precedence over ros_parameters defaults.
-  # Gantry travel is controller joint-space motion, not MoveIt Cartesian LIN.
-  # =========================================================
-  gantry_move:
-    ros_parameters:
-      controller_action: /gantry_controller/follow_joint_trajectory
-      horizontal_joint: gantry_slide_joint
-      vertical_joint: gantry_down_joint
-      rebar_object_id: rebar_1A
-      attach_link: gantry_part_link
-      move_group_name: robot3_arm
-      horizontal_home_m: 0.0
-      vertical_home_m: 0.0
-      robot3_group: robot3_arm
-      robot3_planning_link: robot3_end_effactor
-      robot_rebar_object_id: rebar_1A
-      robot3_pick_frame: bm_pkL
-      robot3_place_frame: bm_pfl
-      jig_clamp_name: jig_clamp
-      rebar_allowed_contact_objects: []
-      approach_height_m: 0.60
-      place_approach_distance_m: 0.10
-      pick_approach_dx_m: 0.0
-      pick_approach_dz_m: 0.60
-      horizontal_pick_target_m: 0.0
-      vertical_pick_target_m: 4.1
-      horizontal_target_m: -6.0
-      down_target_m: 1.2
-      speed_mps: 0.30
-      acceleration_mps2: 0.50
-      horizontal_min_m: -10.6
-      horizontal_limit_m: 10.6
-      vertical_limit_m: 6.6
-      settle_time_sec: 0.5
-      trajectory_timeout_sec: 60.0
-      auto_start: true
-      start_delay_sec: 3.0
-      ready_timeout_sec: 90.0
-    robot3_touch_links: [robot3_end_effactor, robot3_J6_link, robot3_sa3_grpr01]
-    planning:
-      planning_time: 15.0
-      joint_movej_velocity: 0.50
-      joint_movej_acceleration: 0.40
-      cartesian_velocity: 0.15
-      cartesian_acceleration: 0.10
-      cartesian_max_translation_step_m: 0.01
-      cartesian_max_rotation_step_rad: 0.03
-      cartesian_eef_step_m: 0.01
-      cartesian_min_fraction: 0.99
-      pilz_velocity: 0.20
-      pilz_acceleration: 0.10
-
-
-  # Shared YAML programs for shear links, tying rebars, and dual gripper change.
-  shear_links_pp:
-    combined_group: sa3_robots_1_2
-    world_frame: world
-    jig_object_id: jig_clamp
+      color:
+      - 0.7922
+      - 0.8196
+      - 0.9333
+      - 1.0
+  robots:
     robot1:
       group: robot1_arm
       planning_link: robot1_end_effactor
+      tool_mount_link: robot1_tool_mount
+      tying_link: robot1_tg_end_effactor
+      touch_links:
+      - robot1_end_effactor
+      - robot1_tool_mount
+      - robot1_J6_link
+      - robot1_schunk_base
+      - robot1_schunk_link7
+      - robot1_schunk_link8
       web_ring: web_ring
-      via_world_x: 0.235
       gripper_touch_links:
       - robot1_end_effactor
       - robot1_tool_mount
@@ -979,75 +1472,24 @@ workcell:
       - robot1_schunk_base
       - robot1_schunk_link7
       - robot1_schunk_link8
-      pairs:
-      - pick_frame: 5pf
-        place_frame: 5_placef_l
-        object_id: rebar_5a
-        pick_offset:
-        - 0
-        - 0.0
-        - 0.0
-      - pick_frame: 13pf
-        place_frame: 13_placef1_l
-        object_id: rebar_13_1
-        pick_offset:
-        - 0
-        - 0.0
-        - 0.0
-      - pick_frame: 13pf
-        place_frame: 13_placef2_l
-        object_id: rebar_13_2
-        pick_offset:
-        - 0.1
-        - 0.0
-        - 0.0
-      - pick_frame: 13pf
-        place_frame: 13_placef3_l
-        object_id: rebar_13_3
-        pick_offset:
-        - 0.2
-        - 0.0
-        - 0.0
-      - pick_frame: 13pf
-        place_frame: 13_placef4_l
-        object_id: rebar_13_4
-        pick_offset:
-        - 0.3
-        - 0.0
-        - 0.0
-      - pick_frame: 14pf
-        place_frame: 14_placef1_l
-        object_id: rebar_14_1
-        pick_offset:
-        - 0
-        - 0.0
-        - 0.0
-      - pick_frame: 14pf
-        place_frame: 14_placef2_l
-        object_id: rebar_14_2
-        pick_offset:
-        - 0.2
-        - 0.0
-        - 0.0
-      - pick_frame: 14pf
-        place_frame: 14_placef3_l
-        object_id: rebar_14_3
-        pick_offset:
-        - 0.4
-        - 0.0
-        - 0.0
-      - pick_frame: 14pf
-        place_frame: 14_placef4_l
-        object_id: rebar_14_4
-        pick_offset:
-        - 0.6
-        - 0.0
-        - 0.0
+      gripper_change_arm_touch_links:
+      - robot1_tool_mount
+      - robot1_J4_link
+      - robot1_J5_link
+      - robot1_J6_link
     robot2:
       group: robot2_arm
       planning_link: robot2_end_effactor
+      tool_mount_link: robot2_tool_mount
+      tying_link: robot2_tg_end_effactor
+      touch_links:
+      - robot2_end_effactor
+      - robot2_tool_mount
+      - robot2_J6_link
+      - robot2_schunk_base
+      - robot2_schunk_link7
+      - robot2_schunk_link8
       web_ring: web_ring_2
-      via_world_x: 5.22
       gripper_touch_links:
       - robot2_end_effactor
       - robot2_tool_mount
@@ -1055,573 +1497,142 @@ workcell:
       - robot2_schunk_base
       - robot2_schunk_link7
       - robot2_schunk_link8
-      pairs:
-      - pick_frame: 6pf
-        place_frame: 6_placef_r
-        object_id: rebar_6
-        pick_offset:
-        - 0
-        - 0.0
-        - 0.0
-      - pick_frame: 13_1pf
-        place_frame: 13_placef1_r
-        object_id: rebar_13_1_R
-        pick_offset:
-        - 0
-        - 0.0
-        - 0.0
-      - pick_frame: 13_1pf
-        place_frame: 13_placef2_r
-        object_id: rebar_13_2_R
-        pick_offset:
-        - 0.118
-        - 0.0
-        - 0.0
-      - pick_frame: 13_2pf
-        place_frame: 13_placef3_r
-        object_id: rebar_13_3_R
-        pick_offset:
-        - 0
-        - 0.0
-        - 0.0
-      - pick_frame: 14_4pf
-        place_frame: 14_placef4_r
-        object_id: rebar_14_1_R
-        pick_offset:
-        - 0
-        - 0.0
-        - 0.0
-      - pick_frame: 14_4pf
-        place_frame: 14_placef3_r
-        object_id: rebar_14_2_R
-        pick_offset:
-        - 0.112
-        - 0.0
-        - 0.0
-      - pick_frame: 14_4pf
-        place_frame: 14_placef2_r
-        object_id: rebar_14_3_R
-        pick_offset:
-        - 0.224
-        - 0.0
-        - 0.0
-      - pick_frame: 14_4pf
-        place_frame: 14_placef1_r
-        object_id: rebar_14_4_R
-        pick_offset:
-        - 0.336
-        - 0.0
-        - 0.0
-    approach:
-      offset_frame: world
-      xyz:
-      - 0.0
-      - -0.25
-      - 0.0
-    planning:
-      planning_time: 15.0
-      ompl_attempts: 10
-      plan_retries: 3
-      movej_velocity: 0.3
-      movej_acceleration: 0.2
-      movel_acceleration: 0.1
-      movec_acceleration: 0.1
-      lin_velocity_scales:
-      - 0.1
-      - 0.05
-      - 0.03
-      - 0.02
-      - 0.01
-      circ_velocity_scales:
-      - 0.1
-      - 0.05
-      - 0.03
-      - 0.02
-      - 0.01
-      transit_strategies:
-      - moveL
-      - moveC
-      - moveJ
-  tying_rebars:
-    combined_group: sa3_robots_1_2
-    world_frame: world
-    robot1:
-      group: robot1_arm
-      planning_link: robot1_tg_end_effactor
-      enabled: true
-      jobs:
-      - clamp: 5_placef_l
-        tie_count: 3
-      - clamp: 13_placef1_l
-        tie_count: 2
-      - clamp: 13_placef2_l
-        tie_count: 2
-      - clamp: 13_placef3_l
-        tie_count: 2
-      - clamp: 13_placef4_l
-        tie_count: 2
-      - clamp: 14_placef1_l
-        tie_count: 2
-      - clamp: 14_placef2_l
-        tie_count: 2
-      - clamp: 14_placef3_l
-        tie_count: 2
-      - clamp: 14_placef4_l
-        tie_count: 2
-    robot2:
-      group: robot2_arm
-      planning_link: robot2_tg_end_effactor
-      enabled: true
-      jobs:
-      - clamp: 6_placef_r
-        tie_count: 3
-      - clamp: 13_placef1_r
-        tie_count: 2
-      - clamp: 13_placef2_r
-        tie_count: 2
-      - clamp: 13_placef3_r
-        tie_count: 2
-      - clamp: 14_placef1_r
-        tie_count: 2
-      - clamp: 14_placef2_r
-        tie_count: 2
-      - clamp: 14_placef3_r
-        tie_count: 2
-      - clamp: 14_placef4_r
-        tie_count: 2
-    approach:
-      offset_frame: local
-      xyz:
-      - -0.2
-      - 0.0
-      - 0.0
-    stop_on_first_failure: false
-    planning:
-      planning_time: 15.0
-      ompl_attempts: 10
-      plan_retries: 3
-      movej_velocity: 0.3
-      movej_acceleration: 0.2
-      movel_acceleration: 0.05
-      lin_velocity_scales:
-      - 0.1
-  robot1_gripper_change:
-    combined_group: sa3_robots_1_2
-    world_frame: world
-    robot1:
-      group: robot1_arm
-      planning_link: robot1_tool_mount
-      schunk_dock_frame: robot1_shuck_dock
-      gun_dock_frame: robot1_tyinggun_dock
-      schunk_object_ids:
-      - robot1_schunk_base
-      - robot1_schunk_link7
-      - robot1_schunk_link8
-      gun_object_id: robot1_tying_gun
-      arm_touch_links:
-      - robot1_tool_mount
-      - robot1_J4_link
-      - robot1_J5_link
-      - robot1_J6_link
-    robot2:
-      group: robot2_arm
-      planning_link: robot2_tool_mount
-      schunk_dock_frame: robot2_shuck_dock
-      gun_dock_frame: robot2_tyinggun_dock
-      schunk_object_ids:
-      - robot2_schunk_base
-      - robot2_schunk_link7
-      - robot2_schunk_link8
-      gun_object_id: robot2_tying_gun
-      arm_touch_links:
+      gripper_change_arm_touch_links:
       - robot2_tool_mount
       - robot2_J4_link
       - robot2_J5_link
       - robot2_J6_link
-    planning:
-      planning_time: 15.0
-      movej_plan_retries: 3
-      ompl_attempts: 10
-      ik_timeout: 1.0
-      movej_velocity: 0.3
-      movej_acceleration: 0.2
-      movel_velocity: 0.2
-      movel_acceleration: 0.1
-
-  planner_sequence:
-
-    # SA1-style ordered planner programs; actions after each completed step.
-    shear_links_pp:
-      stages:
-      - id: P1
-        description: pick approach
-        reference: pick_approach
-        motion: moveJ
-        after_actions:
-        - allow_pick_contact
-      - id: P2
-        description: pick
-        reference: pick
-        motion: moveL
-        after_actions:
-        - attach_rebar
-        - allow_web_ring_contact
-      - id: P3
-        description: pick approach
-        reference: pick_approach
-        motion: moveL
-        after_actions:
-        - restore_pick_contact
-      - id: T1
-        description: place approach
-        reference: place_approach
-        motion: fallback
-        after_actions:
-        - allow_place_contact
-      - id: G1
-        description: place
-        reference: place
-        motion: moveL
-        after_actions:
-        - detach_rebar
-      - id: G2
-        description: place approach
-        reference: place_approach
-        motion: moveL
-        after_actions:
-        - restore_place_contact
-        - complete_pair
-      finish:
-      - id: H1
-        reference: home
-        motion: moveJ
-    tying_rebars:
-      point:
-      - id: T1
-        reference: tie_approach
-        motion: moveJ
-      - id: T2
-        reference: tie_frame
-        motion: moveL
-      - id: T3
-        reference: tie_approach
-        motion: moveL
-        after_actions:
-        - mark_point_complete
-      finish:
-      - id: H1
-        reference: home
-        motion: moveJ
-    robot1_gripper_change:
-      steps:
-      - id: D1
-        description: schunk_dock moveJ
-        reference: schunk_dock
-        motion: moveJ
-        offset_frame: world
-        xyz:
-        - 0.0
-        - 0.0
-        - 0.5
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
-        after_actions: []
-      - id: D2
-        description: schunk_dock moveL
-        reference: schunk_dock
-        motion: moveL
-        offset_frame: world
-        xyz:
-        - 0.0
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
-        after_actions:
-        - detach_schunk
-        - allow_schunk_contacts
-      - id: D3
-        description: schunk_dock moveL
-        reference: schunk_dock
-        motion: moveL
-        offset_frame: world
-        xyz:
-        - 0.0
-        - 0.0
-        - 0.5
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
-        after_actions:
-        - restore_schunk_contacts
-        - allow_gun_contacts
-      - id: D4
-        description: gun_dock moveJ
-        reference: gun_dock
-        motion: moveJ
-        offset_frame: world
-        xyz:
-        - 0.0
-        - 0.0
-        - 0.5
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
-        after_actions: []
-      - id: D5
-        description: gun_dock moveL
-        reference: gun_dock
-        motion: moveL
-        offset_frame: world
-        xyz:
-        - 0.0
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
-        after_actions:
-        - attach_tying_gun
-      - id: D6
-        description: gun_dock moveL
-        reference: gun_dock
-        motion: moveL
-        offset_frame: world
-        xyz:
-        - 0.0
-        - 0.0
-        - 0.5
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
-        after_actions:
-        - restore_gun_contacts
-
-    # Gantry uses joint action goals; Robot 3 uses MoveIt MoveL/MoveJ.
-    # Actions are executed before/after the indicated motion and fail closed.
-    # The gantry cannot lift until Robot 3 has attached AND retracted.
-    # Horizontal gantry return overlaps Robot 3 pre-place/insert/retract only.
-    gantry_move:
-      gantry:
-        - id: G1
-          description: raised gantry moves horizontally to rebar pickup
-          motion: joint
-          joint: horizontal
-          reference: pick
-        - id: G2
-          description: gantry lowers to pickup and attaches rebar
-          motion: joint
-          joint: vertical
-          reference: pick
-          after_actions: [settle, attach_gantry, settle]
-        - id: G3
-          description: gantry raises with rebar before horizontal transport
-          motion: joint
-          joint: vertical
-          reference: home
-        - id: G4
-          description: gantry transports rebar horizontally to handoff
-          motion: joint
-          joint: horizontal
-          reference: handoff
-        - id: G5
-          description: gantry lowers for handoff and releases rebar
-          motion: joint
-          joint: vertical
-          reference: handoff
-          after_actions: [settle, detach_gantry]
-      robot3:
-        - id: R1
-          description: robot3 collision-checked side approach (priority ordered)
-          reference: pick_frame
-          motion: moveL
-          planner: cartesian
-          offset_frame: world
-          xyz: [0.0, 0.0, 0.0]
-          rpy: [0.0, 0.0, 0.0]
-          before_actions: [prepare_robot3_pick]
-          # Side approaches preserve the existing ordering: world then local,
-          # 30 cm candidates before 50 cm candidates within each frame.
-          candidates:
-            - {offset_frame: world, xyz: [-0.30,  0.00, 0.00]}
-            - {offset_frame: world, xyz: [ 0.30,  0.00, 0.00]}
-            - {offset_frame: world, xyz: [ 0.00, -0.30, 0.00]}
-            - {offset_frame: world, xyz: [ 0.00,  0.30, 0.00]}
-            - {offset_frame: world, xyz: [-0.50,  0.00, 0.00]}
-            - {offset_frame: world, xyz: [ 0.50,  0.00, 0.00]}
-            - {offset_frame: world, xyz: [ 0.00, -0.50, 0.00]}
-            - {offset_frame: world, xyz: [ 0.00,  0.50, 0.00]}
-            - {offset_frame: local, xyz: [-0.30,  0.00, 0.00]}
-            - {offset_frame: local, xyz: [ 0.30,  0.00, 0.00]}
-            - {offset_frame: local, xyz: [ 0.00, -0.30, 0.00]}
-            - {offset_frame: local, xyz: [ 0.00,  0.30, 0.00]}
-            - {offset_frame: local, xyz: [-0.50,  0.00, 0.00]}
-            - {offset_frame: local, xyz: [ 0.50,  0.00, 0.00]}
-            - {offset_frame: local, xyz: [ 0.00, -0.50, 0.00]}
-            - {offset_frame: local, xyz: [ 0.00,  0.50, 0.00]}
-        - id: R2
-          description: straight Pilz LIN to Robot3 pick frame and attach
-          reference: pick_frame
-          motion: moveL
-          planner: pilz
-          offset_frame: world
-          xyz: [0.0, 0.0, 0.0]
-          rpy: [0.0, 0.0, 0.0]
-          after_actions: [attach_robot3]
-        - id: R3
-          description: 10 cm local negative X post-pick retract, THEN raise gantry
-          reference: pick_frame
-          motion: moveL
-          planner: cartesian
-          offset_frame: local
-          xyz: [-0.10, 0.0, 0.0]
-          rpy: [0.0, 0.0, 0.0]
-          ik_check: true
-          after_actions: [lift_gantry_start_parallel_return]
-        - id: R4
-          description: direct continuous Cartesian MoveL to pre-place
-          reference: place_frame
-          motion: moveL
-          planner: cartesian
-          offset_frame: local
-          xyz: [-0.10, 0.0, 0.0]
-          rpy: [0.0, 0.0, 0.0]
-          ik_check: true
-          before_actions: [allow_jig_contact]
-        - id: R5
-          description: final straight Cartesian insertion and detach to world
-          reference: place_frame
-          motion: moveL
-          planner: cartesian
-          offset_frame: world
-          xyz: [0.0, 0.0, 0.0]
-          rpy: [0.0, 0.0, 0.0]
-          after_actions: [detach_robot3]
-        - id: R6
-          description: sideways local positive Y retract
-          reference: place_frame
-          motion: moveL
-          planner: cartesian
-          offset_frame: local
-          xyz: [0.0, 0.10, 0.0]
-          rpy: [0.0, 0.0, 0.0]
-          ik_check: true
-          after_actions: [wait_gantry_parallel_return]
-        - id: R7
-          description: Robot3 returns to captured startup joint state
-          reference: home
-          motion: moveJ
-
-    flange_pp:
-      pick:
-        - id: P1
-          description: both robots pick approach
-          motion: moveJ
-          robot3: {reference: pick_frame, offset_frame: world, xyz: [-0.600, 0.0, 0.600], rpy: [0.0, 0.0, 0.0]}
-          robot4: {reference: pick_frame, offset_frame: world, xyz: [ 0.600, 0.0, 0.600], rpy: [0.0, 0.0, 0.0]}
-
-        - id: P2
-          description: synchronized linear pick
-          motion: moveL
-          before_actions: [prepare_pick]
-          after_actions: [attach_objects, allow_inventory_contact]
-          robot3: {reference: pick_frame, offset_frame: world, xyz: [0.0, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}
-          robot4: {reference: pick_frame, offset_frame: world, xyz: [0.0, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}
-
-        - id: P3
-          description: synchronized pick retract
-          motion: moveL
-          after_actions: [restore_inventory_contact]
-          robot3: {reference: pick_frame, offset_frame: world, xyz: [-0.600, 0.0, 0.600], rpy: [0.0, 0.0, 0.0]}
-          robot4: {reference: pick_frame, offset_frame: world, xyz: [ 0.600, 0.0, 0.600], rpy: [0.0, 0.0, 0.0]}
-
-      transfer:
-        - id: T1
-          description: synchronized circular transfer (all arc waypoints)
-          motion: moveL
-          repeat: arc_waypoints
-          robot3: {reference: arc_waypoint, offset_frame: world, xyz: [0.0, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}
-          robot4: {reference: arc_waypoint, offset_frame: world, xyz: [0.0, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}
-
-      place:
-        - id: G1
-          description: synchronized place approach
-          motion: moveL
-          before_actions: [allow_place_contact]
-          robot3: {reference: place_frame, offset_frame: world, xyz: [0.0, -0.250, 0.0], rpy: [0.0, 0.0, 0.0]}
-          robot4: {reference: place_frame, offset_frame: world, xyz: [0.0, -0.250, 0.0], rpy: [0.0, 0.0, 0.0]}
-
-        - id: G2
-          description: synchronized exact place
-          motion: moveL
-          after_actions: [detach_objects]
-          robot3: {reference: place_frame, offset_frame: world, xyz: [0.0, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}
-          robot4: {reference: place_frame, offset_frame: world, xyz: [0.0, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}
-
-        - id: G3
-          description: synchronized place retract
-          motion: moveL
-          after_actions: [restore_gripper_contact]
-          robot3: {reference: place_frame, offset_frame: world, xyz: [0.0, -0.250, 0.0], rpy: [0.0, 0.0, 0.0]}
-          robot4: {reference: place_frame, offset_frame: world, xyz: [0.0, -0.250, 0.0], rpy: [0.0, 0.0, 0.0]}
-
-      finish:
-        - id: H1
-          description: combined home
-          motion: moveJ
-          reference: home
-
+    robot3:
+      group: robot3_arm
+      link: robot3_end_effactor_ff
+      touch_links:
+      - robot3_end_effactor_ff
+      - robot3_J6_link
+      - robot3_sa3_grpr01_r
+      gantry_touch_links:
+      - robot3_end_effactor
+      - robot3_J6_link
+      - robot3_sa3_grpr01
+    robot4:
+      group: robot4_arm
+      link: robot4_end_effactor_ff
+      touch_links:
+      - robot4_end_effactor_ff
+      - robot4_J6_link
+      - robot4_sa3_grpr01_r
+    combined_groups:
+      flange_pair: robot3_robot4_arms
+      shear_and_tying_pair: sa3_robots_1_2
+  gantry_robot:
+    horizontal_joint: gantry_slide_joint
+    vertical_joint: gantry_down_joint
+    controller_action: /gantry_controller/follow_joint_trajectory
+    attach_link: gantry_part_link
+    move_group_name: robot3_arm
+    robot3_group: robot3_arm
+    robot3_planning_link: robot3_end_effactor
 environment:
   sa3_main_jig:
-    xyz: [0.0, 1.0, 0.0]
-    rpy: [0.0, 0.0, 0.0]
-
+    xyz:
+    - 0.0
+    - 1.0
+    - 0.0
+    rpy:
+    - 0.0
+    - 0.0
+    - 0.0
   inventory_3a_4a:
-    xyz: [2.6, -0.7, 0.0] #  y=1.7
-    rpy: [0.0, 0.0, 3.14]
-
+    xyz:
+    - 2.6
+    - -0.7
+    - 0.0
+    rpy:
+    - 0.0
+    - 0.0
+    - 3.14
   inventory_3a_4a_2:
-    xyz: [2.9, -1.7, 0.0] #  y=-1.7
-    rpy: [0.0, 0.0, 0.0]
-
+    xyz:
+    - 2.9
+    - -1.7
+    - 0.0
+    rpy:
+    - 0.0
+    - 0.0
+    - 0.0
   jig_clamp:
-    xyz: [0.0, 3.1, 0.0] # y=2.6,0
-    rpy: [0.0, 0.0, -1.5708]
-
+    xyz:
+    - 0.0
+    - 3.1
+    - 0.0
+    rpy:
+    - 0.0
+    - 0.0
+    - -1.5708
   web_ring:
-    xyz: [-1.18, 3.3, 0.0] # y=2.6
-    rpy: [0.0, 0.0, -1.5708]
-
+    xyz:
+    - -1.18
+    - 3.3
+    - 0.0
+    rpy:
+    - 0.0
+    - 0.0
+    - -1.5708
   web_ring_2:
-    xyz: [5.9, 3.3, 0.0] #y=2.6
-    rpy: [0.0, 0.0, -1.5708]
-
+    xyz:
+    - 5.9
+    - 3.3
+    - 0.0
+    rpy:
+    - 0.0
+    - 0.0
+    - -1.5708
   gantry:
-    xyz: [-1.3, 1.0, 0.0]
-    rpy: [0.0, 0.0, 0.0]
-    scale: [0.001, 0.001, 0.001]
-
+    xyz:
+    - -1.3
+    - 1.0
+    - 0.0
+    rpy:
+    - 0.0
+    - 0.0
+    - 0.0
+    scale:
+    - 0.001
+    - 0.001
+    - 0.001
 robot_pedestals:
   robot1_pedestal:
-    xyz: [-1.0, 1.4, 0.0] #0.7,1.2
-    rpy: [0.0, 0.0, -1.5708]
-
+    xyz:
+    - -1.0
+    - 1.4
+    - 0.0
+    rpy:
+    - 0.0
+    - 0.0
+    - -1.5708
   robot2_pedestal:
-    xyz: [6.0, 1.4, 0.0]  # 5.8x
-    rpy: [0.0, 0.0, -1.5708]
-
+    xyz:
+    - 6.0
+    - 1.4
+    - 0.0
+    rpy:
+    - 0.0
+    - 0.0
+    - -1.5708
   robot3_pedestal:
-    xyz: [-1.00000, 0.15, 0.0]  # -0.9,0.6
-    rpy: [0.0, 0.0, -1.5708]
-
+    xyz:
+    - -1.0
+    - 0.15
+    - 0.0
+    rpy:
+    - 0.0
+    - 0.0
+    - -1.5708
   robot4_pedestal:
-    xyz: [5.6, 0.15, 0.0] #5.8x, 0.6
-    rpy: [0.0, 0.0, -1.5708]
+    xyz:
+    - 5.6
+    - 0.15
+    - 0.0
+    rpy:
+    - 0.0
+    - 0.0
+    - -1.5708

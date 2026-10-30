@@ -62,6 +62,7 @@
 
 #include "sa3_motion/planning_scene_objects.hpp"
 #include "sa3_motion/workcell_program.hpp"
+#include "sa3_motion/motion_task.hpp"
 
 using namespace std::chrono_literals;
 using MoveItErr = moveit_msgs::msg::MoveItErrorCodes;
@@ -96,11 +97,13 @@ std::vector<std::string> kRobot1PairSpecs, kRobot2PairSpecs;
 
 void loadShearProgram(const rclcpp::Node::SharedPtr & node) {
   const auto w = sa3_yaml::loadWorkcell(node);
-  const auto c = sa3_yaml::require(w, "shear_links_pp", "workcell");
+  const auto task = sa3_recipe::loadTask(node, "shear_links_pp");
+  const auto c = sa3_yaml::require(task, "config", "shear task");
+  const auto robots = sa3_yaml::require(w, "robots", "workcell");
   const auto p = sa3_yaml::require(c, "planning", "workcell.shear_links_pp");
-  kCombinedGroup = sa3_yaml::name(sa3_yaml::require(c, "combined_group", "shear_links_pp"), "combined_group");
-  if (c["world_frame"].as<std::string>("world") != "world") throw std::runtime_error("shear_links_pp world_frame must be world");
-  kJigClampId = sa3_yaml::name(sa3_yaml::require(c, "jig_object_id", "shear_links_pp"), "jig_object_id");
+  kCombinedGroup = sa3_yaml::name(robots["combined_groups"]["shear_and_tying_pair"], "combined_group");
+  if (w["world_frame"].as<std::string>("world") != "world") throw std::runtime_error("shear_links_pp world_frame must be world");
+  kJigClampId = "jig_clamp";
   kPlanningTime = sa3_yaml::finite(p["planning_time"], "shear planning_time");
   kOmplAttempts = p["ompl_attempts"].as<int>();
   kPlanRetries = p["plan_retries"].as<int>();
@@ -126,11 +129,12 @@ void loadShearProgram(const rclcpp::Node::SharedPtr & node) {
   auto arm = [&](const char * key, std::string & group, std::string & link, std::string & ring,
                  double & via, std::vector<std::string> & touch, std::vector<std::string> & pairs) {
     const auto a = sa3_yaml::require(c, key, "shear_links_pp");
-    group = sa3_yaml::name(a["group"], std::string(key) + ".group");
-    link = sa3_yaml::name(a["planning_link"], std::string(key) + ".planning_link");
-    ring = sa3_yaml::name(a["web_ring"], std::string(key) + ".web_ring");
+    const auto physical = sa3_yaml::require(robots, key, "workcell.robots");
+    group = sa3_yaml::name(physical["group"], std::string(key) + ".group");
+    link = sa3_yaml::name(physical["planning_link"], std::string(key) + ".planning_link");
+    ring = sa3_yaml::name(physical["web_ring"], std::string(key) + ".web_ring");
     via = sa3_yaml::finite(a["via_world_x"], std::string(key) + ".via_world_x");
-    touch = sa3_yaml::strings(a["gripper_touch_links"], std::string(key) + ".gripper_touch_links");
+    touch = sa3_yaml::strings(physical["gripper_touch_links"], std::string(key) + ".gripper_touch_links");
     const auto entries = sa3_yaml::require(a, "pairs", key);
     if (!entries.IsSequence()) throw std::runtime_error("shear pairs must be a list");
     pairs.clear();
@@ -147,9 +151,7 @@ void loadShearProgram(const rclcpp::Node::SharedPtr & node) {
   };
   arm("robot1", kRobot1Group, kRobot1Link, kRobot1Ring, kRobot1ViaX, kRobot1GripperLinks, kRobot1PairSpecs);
   arm("robot2", kRobot2Group, kRobot2Link, kRobot2Ring, kRobot2ViaX, kRobot2GripperLinks, kRobot2PairSpecs);
-  auto sequence = sa3_yaml::require(w, "planner_sequence", "workcell");
-  auto program = sa3_yaml::require(sequence, "shear_links_pp", "planner_sequence");
-  kConfiguredStages = sa3_yaml::steps(program["stages"], "planner_sequence.shear_links_pp.stages");
+  kConfiguredStages = sa3_yaml::steps(task["stages"], "motion task.shear_links_pp.stages");
   const std::vector<std::string> references = {"pick_approach", "pick", "pick_approach", "place_approach", "place", "place_approach"};
   const std::vector<std::string> motions = {"moveJ", "moveL", "moveL", "fallback", "moveL", "moveL"};
   const std::vector<std::vector<std::string>> actions = {
@@ -162,7 +164,7 @@ void loadShearProgram(const rclcpp::Node::SharedPtr & node) {
     if (kConfiguredStages[i].xyz != std::array<double, 3>{0.,0.,0.} || kConfiguredStages[i].offset_frame != "world")
       throw std::runtime_error("shear stage xyz must be zero: approach is configured under shear_links_pp.approach");
   }
-  const auto finish = sa3_yaml::steps(program["finish"], "shear finish");
+  const auto finish = sa3_yaml::steps(task["finish"], "shear finish");
   if (finish.size()!=1) throw std::runtime_error("shear requires combined home step");
   sa3_yaml::expectedStep(finish[0], "home", "moveJ");
   RCLCPP_INFO(node->get_logger(), "Shear YAML program loaded: robot1=%zu pairs, robot2=%zu pairs", kRobot1PairSpecs.size(), kRobot2PairSpecs.size());
