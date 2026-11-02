@@ -10,6 +10,8 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 
 from launch_ros.actions import Node
+import xml.etree.ElementTree as ET
+from xml.dom import minidom
 
 
 def vector_to_string(values):
@@ -120,44 +122,102 @@ def generate_launch_description():
     print(f"  scale={gantry['scale']}")
 
     # =========================================================
-    # ENVIRONMENT XACRO
+    # DYNAMIC ENVIRONMENT XACRO FROM YAML
     # =========================================================
 
-    env_xacro = os.path.join(pkg, "urdf", "sa3_env.urdf.xacro")
+    env_xacro = os.path.join(
+        pkg, "urdf", "sa3_env.urdf.xacro"
+    )
 
-    env_mappings = {}
+    # Load reusable environment macro
+    env_doc = xacro.parse(open(env_xacro, "r"))
 
-    environment_objects = [
-        "sa3_main_jig",
-        "inventory_3a_4a",
-        "inventory_3a_4a_2",
-        "jig_clamp",
-        "web_ring",
-        "web_ring_2",
-    ]
+    # Access root <robot>
+    root = env_doc.documentElement
 
-    for name in environment_objects:
-        if name not in environment:
-            raise KeyError(
-                f"Missing environment object '{name}' in {workcell_yaml}"
+    # Xacro namespace
+    XACRO_NS = "http://www.ros.org/wiki/xacro"
+
+    # All environment objects except gantry
+    environment_objects = {
+        name: obj
+        for name, obj in environment.items()
+        if name != "gantry"
+    }
+
+    # Validate parent references before generating URDF
+    for name, obj in environment_objects.items():
+
+        if not isinstance(obj, dict):
+            raise ValueError(
+                f"Invalid environment object '{name}'"
             )
 
-        obj = environment[name]
+        parent = obj.get("parent", "world")
 
-        env_mappings[f"{name}_xyz"] = vector_to_string(obj["xyz"])
-        env_mappings[f"{name}_rpy"] = vector_to_string(obj["rpy"])
+        if parent == name:
+            raise ValueError(
+                f"Environment object '{name}' cannot parent itself"
+            )
 
-    env_description = xacro.process_file(
-        env_xacro,
-        mappings=env_mappings,
-    ).toxml()
+        if parent != "world" and parent not in environment_objects:
+            raise ValueError(
+                f"Unknown parent '{parent}' for '{name}'"
+            )
 
-    print("\nEnvironment Xacro parameters loaded from YAML:")
-    for name in environment_objects:
+        for field in ("xyz", "rpy", "mesh"):
+            if field not in obj:
+                raise KeyError(
+                    f"Missing environment.{name}.{field}"
+                )
+
+        if not isinstance(obj["mesh"], str) or not obj["mesh"]:
+            raise ValueError(f"Invalid mesh for '{name}'")
+
+        # Create a Xacro macro invocation
+        element = env_doc.createElementNS(
+            XACRO_NS,
+            "xacro:environment_object"
+        )
+
+        element.setAttribute("name", name)
+        element.setAttribute("parent", parent)
+
+        element.setAttribute(
+            "xyz", vector_to_string(obj["xyz"])
+        )
+
+        element.setAttribute(
+            "rpy", vector_to_string(obj["rpy"])
+        )
+
+        element.setAttribute(
+            "mesh", obj["mesh"]
+        )
+
+        element.setAttribute(
+            "scale",
+            vector_to_string(
+                obj.get("scale", [0.001, 0.001, 0.001])
+            )
+        )
+
+        root.appendChild(element)
+
+    # Expand all Xacro macros
+    xacro.process_doc(env_doc)
+
+    # Final environment URDF
+    env_description = env_doc.toxml()
+
+    print("\nEnvironment objects loaded from YAML:")
+
+    for name, obj in environment_objects.items():
         print(
             f"  {name}: "
-            f"xyz={environment[name]['xyz']}, "
-            f"rpy={environment[name]['rpy']}"
+            f"parent={obj.get('parent', 'world')}, "
+            f"xyz={obj['xyz']}, "
+            f"rpy={obj['rpy']}"
         )
 
     # =========================================================
@@ -340,5 +400,5 @@ def generate_launch_description():
         gantry_controller,
 
         # Uncomment to launch RViz automatically.
-        # rviz_node,
+        rviz_node,
     ])

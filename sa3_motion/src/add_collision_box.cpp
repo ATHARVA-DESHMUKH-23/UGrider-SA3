@@ -1,77 +1,82 @@
+#include <chrono>
+#include <cmath>
+#include <string>
+#include <vector>
+
 #include <rclcpp/rclcpp.hpp>
-
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
-
 #include <moveit_msgs/msg/collision_object.hpp>
 #include <shape_msgs/msg/solid_primitive.hpp>
-
 #include <geometry_msgs/msg/pose.hpp>
+#include <tf2/LinearMath/Quaternion.h>
 
 int main(int argc, char * argv[])
 {
-    rclcpp::init(argc, argv);
+  rclcpp::init(argc, argv);
+  auto node = rclcpp::Node::make_shared("add_collision_box");
+  const auto id = node->declare_parameter<std::string>("box_id", "my_collision_box");
+  const auto frame = node->declare_parameter<std::string>("frame_id", "world");
+  const auto sx = node->declare_parameter<double>("size_x", 10.0);
+  const auto sy = node->declare_parameter<double>("size_y", 0.5);
+  const auto sz = node->declare_parameter<double>("size_z", 10.3);
+  const auto x = node->declare_parameter<double>("x", -1.0);
+  const auto y = node->declare_parameter<double>("y", 0.4);
+  const auto z = node->declare_parameter<double>("z", 5.15);
+  const auto roll = node->declare_parameter<double>("roll", 0.0);
+  const auto pitch = node->declare_parameter<double>("pitch", 0.0);
+  const auto yaw = node->declare_parameter<double>("yaw", 0.0);
+  const auto operation = node->declare_parameter<std::string>("operation", "add");
 
-    auto node = rclcpp::Node::make_shared("add_collision_box");
-
-    moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
-
-    // ============================================================
-    // Collision object
-    // ============================================================
-
-    moveit_msgs::msg::CollisionObject collision_object;
-
-    collision_object.header.frame_id = "world";
-    collision_object.id = "my_collision_box";
-
-    // ============================================================
-    // Define cuboid
-    // ============================================================
-
-    shape_msgs::msg::SolidPrimitive primitive;
-
-    primitive.type = shape_msgs::msg::SolidPrimitive::BOX;
-
-    // BOX dimensions = X, Y, Z
-    primitive.dimensions.resize(3);
-
-    primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_X] = 10.0;
-    primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_Y] = 0.5;
-    primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_Z] = 10.3;
-
-    // ============================================================
-    // Position of cuboid
-    // ============================================================
-
-    geometry_msgs::msg::Pose box_pose;
-
-    box_pose.position.x = -1.0;
-    box_pose.position.y = 0.4;
-    box_pose.position.z = 5.15;
-
-    // No rotation
-    box_pose.orientation.x = 0.0;
-    box_pose.orientation.y = 0.0;
-    box_pose.orientation.z = 0.0;
-    box_pose.orientation.w = 1.0;
-
-    collision_object.primitives.push_back(primitive);
-    collision_object.primitive_poses.push_back(box_pose);
-
-    // ADD object to planning scene
-    collision_object.operation =
-        moveit_msgs::msg::CollisionObject::ADD;
-
-    planning_scene_interface.applyCollisionObject(collision_object);
-
-    RCLCPP_INFO(
-        node->get_logger(),
-        "Added collision box to MoveIt planning scene."
-    );
-
-    rclcpp::sleep_for(std::chrono::seconds(2));
-
+  const std::vector<double> values{sx, sy, sz, x, y, z, roll, pitch, yaw};
+  for (double v : values) {
+    if (!std::isfinite(v)) {
+      RCLCPP_ERROR(node->get_logger(), "All box parameters must be finite.");
+      rclcpp::shutdown();
+      return 1;
+    }
+  }
+  if (id.empty() || frame.empty() ||
+      (operation != "add" && operation != "remove") ||
+      (operation == "add" && (sx <= 0.0 || sy <= 0.0 || sz <= 0.0))) {
+    RCLCPP_ERROR(node->get_logger(), "Invalid id/frame/operation or box dimensions.");
     rclcpp::shutdown();
+    return 1;
+  }
 
-    return 0;
+  moveit::planning_interface::PlanningSceneInterface scene;
+  moveit_msgs::msg::CollisionObject object;
+  object.header.frame_id = frame;
+  object.id = id;
+
+  if (operation == "remove") {
+    object.operation = moveit_msgs::msg::CollisionObject::REMOVE;
+  } else {
+    shape_msgs::msg::SolidPrimitive primitive;
+    primitive.type = shape_msgs::msg::SolidPrimitive::BOX;
+    primitive.dimensions = {sx, sy, sz};
+    geometry_msgs::msg::Pose pose;
+    pose.position.x = x;
+    pose.position.y = y;
+    pose.position.z = z;
+    tf2::Quaternion q;
+    q.setRPY(roll, pitch, yaw);
+    q.normalize();
+    pose.orientation.x = q.x();
+    pose.orientation.y = q.y();
+    pose.orientation.z = q.z();
+    pose.orientation.w = q.w();
+    object.primitives.push_back(primitive);
+    object.primitive_poses.push_back(pose);
+    object.operation = moveit_msgs::msg::CollisionObject::ADD;
+  }
+
+  const bool ok = scene.applyCollisionObject(object);
+  if (ok) {
+    RCLCPP_INFO(node->get_logger(), "%s collision object '%s' in frame '%s'.",
+      operation == "add" ? "Applied" : "Removed", id.c_str(), frame.c_str());
+  } else {
+    RCLCPP_ERROR(node->get_logger(), "Planning scene failed to apply '%s'.", id.c_str());
+  }
+  rclcpp::shutdown();
+  return ok ? 0 : 1;
 }

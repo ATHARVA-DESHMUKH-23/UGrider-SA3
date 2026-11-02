@@ -72,24 +72,39 @@ struct ArmConfig
   std::vector<std::string> touch_links;
   std::array<double, 3> pick_offset{0.0, 0.0, 0.0};
   std::array<double, 3> place_offset{0.0, 0.0, 0.0};
+  std::array<double, 3> pick_offset_rpy{0.0, 0.0, 0.0};
+  std::array<double, 3> place_offset_rpy{0.0, 0.0, 0.0};
   bool pick_offset_local{false};
   bool place_offset_local{false};
+  bool pick_offset_rpy_local{true};
+  bool place_offset_rpy_local{true};
 };
 
+// XYZ is applied using the ORIGINAL reference orientation; RPY then rotates
+// the target tool pose. This avoids unintentionally rotating the XYZ offset.
+// RPY values are in radians. Local RPY is post-multiplied; world is pre-multiplied.
 geometry_msgs::msg::Pose offsetPose(
   const geometry_msgs::msg::Pose & p, const std::array<double, 3> & d,
-  bool local)
+  bool xyz_local, const std::array<double, 3> & rpy, bool rpy_local)
 {
   auto out = p;
-  tf2::Vector3 offset(d[0],d[1],d[2]);
-  if (local) {
-    tf2::Quaternion q(p.orientation.x,p.orientation.y,p.orientation.z,p.orientation.w);
-    q.normalize();
-    offset = tf2::quatRotate(q,offset);
-  }
+  tf2::Quaternion q_ref(p.orientation.x, p.orientation.y,
+                        p.orientation.z, p.orientation.w);
+  q_ref.normalize();
+  tf2::Vector3 offset(d[0], d[1], d[2]);
+  if (xyz_local) offset = tf2::quatRotate(q_ref, offset);
   out.position.x += offset.x();
   out.position.y += offset.y();
   out.position.z += offset.z();
+
+  tf2::Quaternion q_delta;
+  q_delta.setRPY(rpy[0], rpy[1], rpy[2]);
+  tf2::Quaternion q_target = rpy_local ? q_ref * q_delta : q_delta * q_ref;
+  q_target.normalize();
+  out.orientation.x = q_target.x();
+  out.orientation.y = q_target.y();
+  out.orientation.z = q_target.z();
+  out.orientation.w = q_target.w();
   return out;
 }
 
@@ -695,17 +710,26 @@ ArmConfig readArmConfig(const YAML::Node & static_arm,
   arm.place_frame = task_arm["place_frame"].as<std::string>();
   arm.object_id = task_arm["object_id"].as<std::string>();
   arm.inventory_id = task_arm["inventory_id"].as<std::string>();
-  const auto pick = task_arm["pick_offset"];
-  const auto place = task_arm["place_offset"];
-  if (pick) arm.pick_offset = requiredVector3(task_arm,"pick_offset",name);
-  if (place) arm.place_offset = requiredVector3(task_arm,"place_offset",name);
+  if (task_arm["pick_offset"])
+    arm.pick_offset = requiredVector3(task_arm, "pick_offset", name);
+  if (task_arm["place_offset"])
+    arm.place_offset = requiredVector3(task_arm, "place_offset", name);
+  if (task_arm["pick_offset_rpy"])
+    arm.pick_offset_rpy = requiredVector3(task_arm, "pick_offset_rpy", name);
+  if (task_arm["place_offset_rpy"])
+    arm.place_offset_rpy = requiredVector3(task_arm, "place_offset_rpy", name);
   const auto pick_axis = task_arm["pick_offset_frame"].as<std::string>("world");
   const auto place_axis = task_arm["place_offset_frame"].as<std::string>("world");
-  if ((pick_axis != "world" && pick_axis != "local") ||
-      (place_axis != "world" && place_axis != "local"))
-    throw std::runtime_error(name + ": offset frame must be world or local");
+  const auto pick_rpy_axis = task_arm["pick_offset_rpy_frame"].as<std::string>("local");
+  const auto place_rpy_axis = task_arm["place_offset_rpy_frame"].as<std::string>("local");
+  for (const auto & axis : {pick_axis, place_axis, pick_rpy_axis, place_rpy_axis}) {
+    if (axis != "world" && axis != "local")
+      throw std::runtime_error(name + ": offset frame must be world or local");
+  }
   arm.pick_offset_local = pick_axis == "local";
   arm.place_offset_local = place_axis == "local";
+  arm.pick_offset_rpy_local = pick_rpy_axis == "local";
+  arm.place_offset_rpy_local = place_rpy_axis == "local";
   if (task_arm["arc_frames"]) {
     const auto frames = task_arm["arc_frames"].as<std::vector<std::string>>();
     if (frames.size() != 3)
@@ -808,11 +832,26 @@ void applyRosOverrides(const rclcpp::Node::SharedPtr & node, FlangeProgram & pro
     const auto place = node->declare_parameter<std::vector<double>>(
       prefix + "place_offset",
       std::vector<double>(arm.place_offset.begin(), arm.place_offset.end()));
-    if (pick.size() != 3 || place.size() != 3) {
-      throw std::runtime_error(prefix + "pick/place_offset must contain 3 values");
+    const auto pick_rpy = node->declare_parameter<std::vector<double>>(
+      prefix + "pick_offset_rpy",
+      std::vector<double>(arm.pick_offset_rpy.begin(), arm.pick_offset_rpy.end()));
+    const auto place_rpy = node->declare_parameter<std::vector<double>>(
+      prefix + "place_offset_rpy",
+      std::vector<double>(arm.place_offset_rpy.begin(), arm.place_offset_rpy.end()));
+    if (pick.size() != 3 || place.size() != 3 ||
+        pick_rpy.size() != 3 || place_rpy.size() != 3) {
+      throw std::runtime_error(prefix + "pick/place XYZ and RPY offsets must contain 3 values");
+    }
+    for (const auto & values : {pick, place, pick_rpy, place_rpy}) {
+      for (const double value : values) {
+        if (!std::isfinite(value))
+          throw std::runtime_error(prefix + "pick/place offsets must be finite");
+      }
     }
     std::copy(pick.begin(), pick.end(), arm.pick_offset.begin());
     std::copy(place.begin(), place.end(), arm.place_offset.begin());
+    std::copy(pick_rpy.begin(), pick_rpy.end(), arm.pick_offset_rpy.begin());
+    std::copy(place_rpy.begin(), place_rpy.end(), arm.place_offset_rpy.begin());
   };
   override_arm(program.robot3);
   override_arm(program.robot4);
@@ -954,11 +993,15 @@ bool runConfiguredProgram(
     return false;
   }
   std::map<std::string, geometry_msgs::msg::Pose> refs3{
-    {"pick_frame", offsetPose(pick3, a3.pick_offset, a3.pick_offset_local)},
-    {"place_frame", offsetPose(place3, a3.place_offset, a3.place_offset_local)}};
+    {"pick_frame", offsetPose(pick3, a3.pick_offset, a3.pick_offset_local,
+       a3.pick_offset_rpy, a3.pick_offset_rpy_local)},
+    {"place_frame", offsetPose(place3, a3.place_offset, a3.place_offset_local,
+       a3.place_offset_rpy, a3.place_offset_rpy_local)}};
   std::map<std::string, geometry_msgs::msg::Pose> refs4{
-    {"pick_frame", offsetPose(pick4, a4.pick_offset, a4.pick_offset_local)},
-    {"place_frame", offsetPose(place4, a4.place_offset, a4.place_offset_local)}};
+    {"pick_frame", offsetPose(pick4, a4.pick_offset, a4.pick_offset_local,
+       a4.pick_offset_rpy, a4.pick_offset_rpy_local)},
+    {"place_frame", offsetPose(place4, a4.place_offset, a4.place_offset_local,
+       a4.place_offset_rpy, a4.place_offset_rpy_local)}};
   std::vector<geometry_msgs::msg::Pose> arc3, arc4;
   bool needs_arc = false;
   for (const auto & step : program.steps) {

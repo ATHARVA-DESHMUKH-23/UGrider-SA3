@@ -1,0 +1,18 @@
+add_collision_box:
+  ros__parameters:
+    box_id: wall_1
+    frame_id: world
+
+    size_x: 5.0
+    size_y: 4.5
+    size_z: 1.7
+
+    x: 2.5
+    y: -2.0
+    z: 0.85
+
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
+
+    operation: add

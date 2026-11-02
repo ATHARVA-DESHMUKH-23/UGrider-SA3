@@ -1,12 +1,5 @@
-"""SA3 hardware selector: four FANUC arms, each independently mock or real.
-
-Matches the paths in the user's pasted launcher (package: sa2_description).
-If the package was renamed to sa3_description, change PACKAGE below and
-change the Gazebo plugin's $(find sa2_description) path in the Xacro.
-"""
-
+"""SA3 bringup with independently selected hardware and YAML-driven environment meshes."""
 import os
-
 import yaml
 import xacro
 from ament_index_python.packages import get_package_share_directory
@@ -17,24 +10,59 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-PACKAGE = "sa2_description"  # Change to "sa3_description" if that is the real package.
+PACKAGE = "sa2_description"
 
 
 def vector_to_string(values):
-    if len(values) != 3:
-        raise ValueError(f"Expected 3 XYZ/RPY/scale values, received: {values}")
+    if not isinstance(values, (list, tuple)) or len(values) != 3:
+        raise ValueError(f"Expected three numeric values, got {values!r}")
     return " ".join(str(value) for value in values)
 
 
+def build_environment_description(pkg, environment):
+    """Instantiate the environment_object Xacro macro once per YAML mesh object."""
+    path = os.path.join(pkg, "urdf", "sa3_env.urdf.xacro")
+    with open(path, "r", encoding="utf-8") as source:
+        doc = xacro.parse(source)
+    root = doc.documentElement
+    ns = "http://www.ros.org/wiki/xacro"
+    objects = {name: config for name, config in environment.items() if name != "gantry"}
+
+    for name, config in objects.items():
+        if not isinstance(config, dict):
+            raise ValueError(f"environment.{name} must be a mapping")
+        parent = config.get("parent", "world")
+        if parent == name or (parent != "world" and parent not in objects):
+            raise ValueError(f"Invalid parent {parent!r} for environment.{name}")
+        for required in ("xyz", "rpy", "mesh"):
+            if required not in config:
+                raise KeyError(f"Missing environment.{name}.{required}")
+        if not isinstance(config["mesh"], str) or not config["mesh"]:
+            raise ValueError(f"Invalid mesh for environment.{name}")
+        node = doc.createElementNS(ns, "xacro:environment_object")
+        for key, value in {
+            "name": name,
+            "parent": parent,
+            "xyz": vector_to_string(config["xyz"]),
+            "rpy": vector_to_string(config["rpy"]),
+            "mesh": config["mesh"],
+            "scale": vector_to_string(config.get("scale", [0.001, 0.001, 0.001])),
+        }.items():
+            node.setAttribute(key, value)
+        root.appendChild(node)
+
+    xacro.process_doc(doc)
+    description = doc.toxml()
+    for name in objects:
+        if f'<link name="{name}"' not in description and f'<link name="{name}"' not in description:
+            raise RuntimeError(f"Environment Xacro did not generate link {name}")
+    print(f"[SA3] Generated {len(objects)} environment mesh links: {', '.join(objects)}")
+    return description
+
+
 def launch_setup(context, *args, **kwargs):
-    # OpaqueFunction resolves launch substitutions BEFORE calling xacro.process_file.
-    # Calling xacro.process_file with an unresolved LaunchConfiguration will NOT work.
     mode = LaunchConfiguration("hardware_mode").perform(context)
-    hardware_modes = {
-        i: LaunchConfiguration(f"robot{i}_hardware").perform(context)
-        for i in range(1, 5)
-    }
-    # Prevent two physical plugins from opening the same FANUC RMI endpoint.
+    hardware_modes = {i: LaunchConfiguration(f"robot{i}_hardware").perform(context) for i in range(1, 5)}
     endpoints = {}
     for i, selected_mode in hardware_modes.items():
         if selected_mode == "fanuc":
@@ -43,24 +71,17 @@ def launch_setup(context, *args, **kwargs):
                 LaunchConfiguration(f"robot{i}_rmi_port").perform(context),
             )
             if endpoint in endpoints:
-                raise RuntimeError(
-                    f"Robot {i} and robot {endpoints[endpoint]} both target "
-                    f"FANUC endpoint {endpoint}. Use distinct controllers/endpoints."
-                )
+                raise RuntimeError(f"Robots {endpoints[endpoint]} and {i} target the same FANUC endpoint {endpoint}")
             endpoints[endpoint] = i
 
     all_gazebo = all(value == "gazebo" for value in hardware_modes.values())
     if any(value == "gazebo" for value in hardware_modes.values()) and not all_gazebo:
-        raise RuntimeError(
-            "Mixed Gazebo with FANUC/mock is not supported by this launcher. "
-            "Use mock/fanuc for independent robot selection, or all gazebo."
-        )
+        raise RuntimeError("Mixed Gazebo with FANUC/mock is not supported; use all Gazebo or mock/FANUC")
 
     pkg = get_package_share_directory(PACKAGE)
     workcell_yaml = os.path.join(pkg, "config", "workcell.yaml")
     with open(workcell_yaml, "r", encoding="utf-8") as f:
         workcell_config = yaml.safe_load(f)
-
     environment = workcell_config["environment"]
     robot_pedestals = workcell_config["robot_pedestals"]
     gantry = environment["gantry"]
@@ -75,29 +96,13 @@ def launch_setup(context, *args, **kwargs):
         pedestal = robot_pedestals[pedestal_name]
         mappings[f"{pedestal_name}_xyz"] = vector_to_string(pedestal["xyz"])
         mappings[f"{pedestal_name}_rpy"] = vector_to_string(pedestal["rpy"])
-
     for transform in ("xyz", "rpy", "scale"):
         mappings[f"gantry_{transform}"] = vector_to_string(gantry[transform])
 
     robot_description = xacro.process_file(
-        os.path.join(pkg, "urdf", "robot.urdf.xacro"),
-        mappings=mappings,
+        os.path.join(pkg, "urdf", "robot.urdf.xacro"), mappings=mappings
     ).toxml()
-
-    env_mappings = {}
-    for name in (
-        "sa3_main_jig", "inventory_3a_4a", "inventory_3a_4a_2",
-        "jig_clamp", "web_ring", "web_ring_2",
-    ):
-        obj = environment[name]
-        env_mappings[f"{name}_xyz"] = vector_to_string(obj["xyz"])
-        env_mappings[f"{name}_rpy"] = vector_to_string(obj["rpy"])
-
-    env_description = xacro.process_file(
-        os.path.join(pkg, "urdf", "sa3_env.urdf.xacro"),
-        mappings=env_mappings,
-    ).toxml()
-
+    env_description = build_environment_description(pkg, environment)
     controllers_yaml = os.path.join(pkg, "config", "ros2_controller.yaml")
     rviz_config = os.path.join(pkg, "rviz", "sa2_description.rviz")
 
@@ -109,119 +114,64 @@ def launch_setup(context, *args, **kwargs):
 
     actions = [
         Node(
-            package="robot_state_publisher",
-            executable="robot_state_publisher",
-            name="robot_state_publisher",
-            output="screen",
-            parameters=[{"robot_description": robot_description,
-                         "use_sim_time": all_gazebo}],
+            package="robot_state_publisher", executable="robot_state_publisher",
+            name="robot_state_publisher", output="screen",
+            parameters=[{"robot_description": robot_description, "use_sim_time": all_gazebo}],
         ),
         Node(
-            package="robot_state_publisher",
-            executable="robot_state_publisher",
-            name="environment_state_publisher",
-            namespace="environment",
-            output="screen",
-            parameters=[{"robot_description": env_description,
-                         "use_sim_time": all_gazebo}],
-            remappings=[("joint_states", "/environment_joint_states")],
+            package="robot_state_publisher", executable="robot_state_publisher",
+            name="environment_state_publisher", namespace="environment", output="screen",
+            parameters=[{"robot_description": env_description, "use_sim_time": all_gazebo}],
+            remappings=[
+                ("joint_states", "/environment_joint_states"),
+                ("tf", "/tf"),
+                ("tf_static", "/tf_static"),
+            ],
         ),
     ]
 
     if all_gazebo:
-        # Gazebo Classic owns /controller_manager when all four robots are Gazebo.
         gazebo_share = get_package_share_directory("gazebo_ros")
-        actions.append(
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(gazebo_share, "launch", "gazebo.launch.py")
-                ),
-            )
-        )
-        actions.append(
-            Node(
-                package="gazebo_ros",
-                executable="spawn_entity.py",
-                output="screen",
-                arguments=["-topic", "/robot_description", "-entity", "sa3"],
-            )
-        )
+        actions.append(IncludeLaunchDescription(PythonLaunchDescriptionSource(
+            os.path.join(gazebo_share, "launch", "gazebo.launch.py"))))
+        actions.append(Node(package="gazebo_ros", executable="spawn_entity.py", output="screen",
+                            arguments=["-topic", "/robot_description", "-entity", "sa3"]))
     else:
-        # One manager loads five independent ros2_control systems.
-        actions.append(
-            Node(
-                package="controller_manager",
-                executable="ros2_control_node",
-                output="screen",
-                parameters=[
-                    {"robot_description": robot_description,
-                     "use_sim_time": False},
-                    controllers_yaml,
-                ],
-            )
-        )
+        actions.append(Node(
+            package="controller_manager", executable="ros2_control_node", output="screen",
+            parameters=[{"robot_description": robot_description, "use_sim_time": False}, controllers_yaml],
+        ))
 
     controllers = [
-        "joint_state_broadcaster",
-        "robot1_arm_controller",
-        "robot2_arm_controller",
-        "robot3_arm_controller",
-        "robot4_arm_controller",
-        "gantry_controller",
+        "joint_state_broadcaster", "robot1_arm_controller", "robot2_arm_controller",
+        "robot3_arm_controller", "robot4_arm_controller", "gantry_controller",
     ]
-    # Spawn sequentially to keep the ros2_control startup logs understandable.
     for index, controller_name in enumerate(controllers):
-        actions.append(
-            TimerAction(
-                period=3.0 + 1.5 * index,
-                actions=[Node(
-                    package="controller_manager",
-                    executable="spawner",
-                    arguments=[
-                        controller_name,
-                        "--controller-manager", "/controller_manager",
-                        "--controller-manager-timeout", "120",
-                    ],
-                    output="screen",
-                )],
-            )
-        )
+        actions.append(TimerAction(period=3.0 + 1.5 * index, actions=[Node(
+            package="controller_manager", executable="spawner",
+            arguments=[controller_name, "--controller-manager", "/controller_manager",
+                       "--controller-manager-timeout", "120"], output="screen",
+        )]))
 
-    actions.append(
-        Node(
-            package="rviz2",
-            executable="rviz2",
-            name="rviz2",
-            output="screen",
-            arguments=["-d", rviz_config],
-            parameters=[{"use_sim_time": all_gazebo}],
-            condition=IfCondition(LaunchConfiguration("use_rviz")),
-        )
-    )
+    actions.append(Node(
+        package="rviz2", executable="rviz2", name="rviz2", output="screen",
+        arguments=["-d", rviz_config], parameters=[{"use_sim_time": all_gazebo}],
+        condition=IfCondition(LaunchConfiguration("use_rviz")),
+    ))
     return actions
 
 
 def generate_launch_description():
-    declarations = [
-        DeclareLaunchArgument(
-            "hardware_mode", default_value="mock",
-            choices=["mock", "fanuc", "gazebo"],
-            description="Default mode for all four robots",
-        ),
-    ]
-
+    declarations = [DeclareLaunchArgument(
+        "hardware_mode", default_value="mock", choices=["mock", "fanuc", "gazebo"],
+        description="Default mode for all four robots")]
     for i in range(1, 5):
         declarations.extend([
-            DeclareLaunchArgument(
-                f"robot{i}_hardware", default_value=LaunchConfiguration("hardware_mode"),
-                choices=["mock", "fanuc", "gazebo"],
-            ),
+            DeclareLaunchArgument(f"robot{i}_hardware", default_value=LaunchConfiguration("hardware_mode"),
+                                  choices=["mock", "fanuc", "gazebo"]),
             DeclareLaunchArgument(f"robot{i}_ip", default_value="192.168.2.3"),
             DeclareLaunchArgument(f"robot{i}_rmi_port", default_value="16001"),
             DeclareLaunchArgument(f"robot{i}_stream_motion_port", default_value="60015"),
         ])
-
-    declarations.append(
-        DeclareLaunchArgument("use_rviz", default_value="false", choices=["true", "false"])
-    )
+    declarations.append(DeclareLaunchArgument("use_rviz", default_value="false", choices=["true", "false"]))
     return LaunchDescription(declarations + [OpaqueFunction(function=launch_setup)])
