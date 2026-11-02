@@ -1,6 +1,7 @@
 // Combined Robot 3 + Robot 4 pick/place node.
-// Combined transitions use OMPL; dual-arm LIN moves are planned per arm,
-// merged into one 12-joint trajectory, and executed through the combined group.
+// Combined MoveJ uses OMPL; combined transfer PTP uses Pilz PTP.
+// Dual-arm LIN moves are planned per arm, merged into one 12-joint trajectory,
+// and executed through the combined group.
 // Verify all frames, object IDs, touch links, and controller execution in RViz/mock first.
 
 #include <algorithm>
@@ -402,7 +403,8 @@ bool planAndExecuteBoth(
   moveit::planning_interface::MoveGroupInterface & combined,
   const geometry_msgs::msg::Pose & target3,
   const geometry_msgs::msg::Pose & target4,
-  const std::string & stage)
+  const std::string & stage,
+  bool pilz_ptp = false)
 {
   for (int attempt = 1; attempt <= tuning.retries; ++attempt) {
     auto state = combined.getCurrentState(10.0);
@@ -426,10 +428,14 @@ bool planAndExecuteBoth(
     }
 
     combined.setStartStateToCurrentState();
-    combined.setPlanningPipelineId("ompl");
-    combined.setPlannerId("RRTConnectkConfigDefault");
+    // PTP is a JOINT-space point-to-point transfer. Both TCP targets are
+    // solved with IK, then both arms are planned TOGETHER so the planning
+    // scene checks inter-arm and attached-object collisions.
+    combined.setPlanningPipelineId(
+      pilz_ptp ? "pilz_industrial_motion_planner" : "ompl");
+    combined.setPlannerId(pilz_ptp ? "PTP" : "RRTConnectkConfigDefault");
     combined.setPlanningTime(tuning.planning_time);
-    combined.setNumPlanningAttempts(tuning.planning_attempts);
+    combined.setNumPlanningAttempts(pilz_ptp ? 1 : tuning.planning_attempts);
     combined.setMaxVelocityScalingFactor(tuning.movej_velocity);
     combined.setMaxAccelerationScalingFactor(tuning.movej_acceleration);
     combined.clearPoseTargets();
@@ -440,11 +446,14 @@ bool planAndExecuteBoth(
       continue;
     }
 
+    RCLCPP_INFO(logger, "[%s] Planning combined 12-joint %s to TF goals.",
+      stage.c_str(), pilz_ptp ? "Pilz PTP" : "OMPL MoveJ");
     moveit::planning_interface::MoveGroupInterface::Plan plan;
     const auto planned = combined.plan(plan);
     if (planned != moveit::core::MoveItErrorCode::SUCCESS) {
-      RCLCPP_WARN(logger, "[%s] combined OMPL plan attempt %d/%d failed (code %d).",
-        stage.c_str(), attempt, tuning.retries, planned.val);
+      RCLCPP_WARN(logger, "[%s] combined %s planning attempt %d/%d failed (code %d).",
+        stage.c_str(), pilz_ptp ? "Pilz PTP" : "OMPL",
+        attempt, tuning.retries, planned.val);
       continue;
     }
 
@@ -454,7 +463,8 @@ bool planAndExecuteBoth(
         stage.c_str(), executed.val);
       return false;
     }
-    RCLCPP_INFO(logger, "[%s] both arms completed combined MoveJ.", stage.c_str());
+    RCLCPP_INFO(logger, "[%s] both arms completed combined %s.",
+      stage.c_str(), pilz_ptp ? "Pilz PTP" : "MoveJ");
     return true;
   }
   RCLCPP_ERROR(logger, "[%s] all combined planning attempts failed.", stage.c_str());
@@ -505,7 +515,7 @@ bool moveCombinedHome(
 // Each step provides one target per arm for synchronized moves.
 // ---------------------------------------------------------------------------
 enum class OffsetFrame { kWorld, kLocal };
-enum class MotionType { kMoveJ, kMoveL };
+enum class MotionType { kMoveJ, kMoveL, kMovePTP };
 
 struct ArmTargetSpec
 {
@@ -635,7 +645,8 @@ std::vector<ConfiguredPlannerStep> readPlannerSteps(const YAML::Node & task)
     const auto motion = entry["motion"].as<std::string>();
     if (motion == "moveJ") step.motion = MotionType::kMoveJ;
     else if (motion == "moveL") step.motion = MotionType::kMoveL;
-    else throw std::runtime_error(step.id + ": motion must be moveJ or moveL");
+    else if (motion == "movePTP") step.motion = MotionType::kMovePTP;
+    else throw std::runtime_error(step.id + ": motion must be moveJ, moveL, or movePTP");
     step.before_actions = readActions(entry,"before_actions","before_action",step.id);
     step.after_actions = readActions(entry,"after_actions","after_action",step.id);
     for (const auto & action : step.before_actions) {
@@ -955,13 +966,23 @@ bool executeConfiguredPlannerSteps(
           step.robot4, robot4, program.robot4.link, refs4, label + ".robot4");
         const auto waypoint_label = step.repeat_arc ?
           "arc waypoint " + std::to_string(i + 1) + "/" + std::to_string(count) : label;
-        RCLCPP_INFO(logger, "[%s] YAML motion=%s", waypoint_label.c_str(),
-          step.motion == MotionType::kMoveJ ? "moveJ (combined OMPL)" : "moveL (paired Pilz LIN)");
-        const bool succeeded = step.motion == MotionType::kMoveJ ?
-          planAndExecuteBoth(logger, program.tuning, program.robot3, program.robot4,
-            combined, goal3, goal4, waypoint_label) :
-          movel_combined(logger, program.tuning, program.robot3, program.robot4,
+        const char * kind = step.motion == MotionType::kMoveJ ?
+          "moveJ (combined OMPL)" :
+          step.motion == MotionType::kMovePTP ?
+          "movePTP (combined Pilz PTP)" : "moveL (paired Pilz LIN)";
+        RCLCPP_INFO(logger, "[%s] YAML motion=%s", waypoint_label.c_str(), kind);
+        bool succeeded = false;
+        if (step.motion == MotionType::kMoveJ ||
+            step.motion == MotionType::kMovePTP) {
+          succeeded = planAndExecuteBoth(
+            logger, program.tuning, program.robot3, program.robot4,
+            combined, goal3, goal4, waypoint_label,
+            step.motion == MotionType::kMovePTP);
+        } else {
+          succeeded = movel_combined(
+            logger, program.tuning, program.robot3, program.robot4,
             robot3, robot4, combined, goal3, goal4, waypoint_label);
+        }
         if (!succeeded) {
           RCLCPP_ERROR(logger, "[%s] Motion failed, aborting YAML program", waypoint_label.c_str());
           return false;
