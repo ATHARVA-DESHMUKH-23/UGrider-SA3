@@ -50,6 +50,16 @@ workcell:
       child: inventory_3a_4a_frame_2
       xyz: [0.446, 0.979, 2.133]
       rpy: [0.307, 0.0, -1.572]
+    flange_inv:
+      parent: inventory_3a_4a
+      child: inventory_3a_4a_frame
+      xyz: [0.448, -0.032, 2.119]
+      rpy: [-0.316, 0.0, 1.572]
+    flange_inv_2:
+      parent: inventory_3a_4a_2
+      child: inventory_3a_4a_frame_2
+      xyz: [0.446, 0.979, 2.133]
+      rpy: [0.307, 0.0, -1.572]
     bm_pkL:
       parent: inventory_3a_4a
       child: bm_pkL
@@ -406,18 +416,39 @@ workcell:
     r4_arc_start:
       parent: robot4_base_link
       child: r4_arc_start
-      xyz: [1.4900001, 0.349999, 1.113]
+      xyz: [0.5001, 1.9, 1.113]
       rpy: [0.0, 0.0, 1.5732]
     r4_arc_mid:
       parent: robot4_base_link
       child: r4_arc_mid
-      xyz: [2.069901, -0.786501, 1.113]
+      xyz: [2.5, -0.0, 1.113]
       rpy: [0.0, 0.0, 0.0732]
     r4_arc_end:
       parent: robot4_base_link
       child: r4_arc_end
       xyz: [1.674201, -2.015401, 1.113]
       rpy: [0.0, 0.0, -1.566799]
+    r3_ptp_start:
+      parent: robot3_base_link
+      child: r3_ptp_start
+      xyz: [0.501, -1.900, 1.113]
+      rpy: [0.000, 0.000, -1.573]
+    r4_ptp_start:
+      parent: robot4_base_link
+      child: r4_ptp_start
+      xyz: [0.501, 1.900, 1.112]
+      rpy: [0.000, 0.001, 1.573]
+    r3_ptp_end:
+      parent: robot3_base_link
+      child: r3_ptp_end
+      xyz: [1.170, 1.589, 1.113]
+      rpy: [0.000, 0.000, 0.851]
+    r4_ptp_end:
+      parent: robot4_base_link
+      child: r4_ptp_end
+      xyz: [1.135, -1.609, 1.112]
+      rpy: [0.000, 0.001, -0.927]
+
   tool_dock_frames:
     robot1_tyinggun_dock:
       parent: world
@@ -450,21 +481,21 @@ workcell:
     rebar_3d:
       parent: inventory_3a_4a_frame
       child: 3d
-      xyz: [1.05, 0.0, 0.0]
+      xyz: [0.85, 0.0, 0.0]
       rpy: [-1.57, 0.316, -1.57]
       mesh: package://sa2_description/meshes/rebars/3D_2.stl
       scale: 0.1
     rebar_4c:
       parent: inventory_3a_4a_frame_2
       child: 4c
-      xyz: [0.05, 0.0, 0.0]
+      xyz: [0.55, 0.0, 0.0]
       rpy: [-1.57, -0.316, -1.57]
       mesh: package://sa2_description/meshes/rebars/4C_2.stl
       scale: 0.1
     rebar_4d:
       parent: inventory_3a_4a_frame_2
       child: 4d
-      xyz: [0.15, 0.0, 0.0]
+      xyz: [0.85, 0.0, 0.0]
       rpy: [-1.57, -0.316, -1.57]
       mesh: package://sa2_description/meshes/rebars/4D_2.stl
       scale: 0.1
