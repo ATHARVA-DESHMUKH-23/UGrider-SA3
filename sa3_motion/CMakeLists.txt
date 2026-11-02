@@ -52,6 +52,10 @@ ament_target_dependencies(sa3_motion_node
 # IK reach test
 # ============================================================
 
+# ============================================================
+# IK Reachability and Trajectory Validation Test
+# ============================================================
+
 add_executable(ik_reach_test
   src/ik_reach_test.cpp
 )
@@ -59,13 +63,19 @@ add_executable(ik_reach_test
 ament_target_dependencies(ik_reach_test
   rclcpp
   moveit_ros_planning_interface
+  moveit_core
   moveit_msgs
   geometry_msgs
   sensor_msgs
+  trajectory_msgs
   tf2
   tf2_ros
+  ament_index_cpp
 )
 
+target_link_libraries(ik_reach_test
+  yaml-cpp
+)
 # ============================================================
 # Add collision cuboid to MoveIt Planning Scene
 # ============================================================

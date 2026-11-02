@@ -734,29 +734,29 @@ environment:
     parent: world
     xyz: [-0.2, -2.7, 0.0]
     rpy: [0.0, 0.0, 1.57]
-    mesh: package://sa2_description/meshes/sa3_env/SA3_INTRY_29_10.STL
-    scale: [1, 1, 1]
+    mesh: package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL
+    scale: [0.001, 0.001, 0.001]
 
   inventory_3a_4a_2:
     parent: world
     xyz: [6.49, -2.7, 0.0]
     rpy: [0.0, 0.0, 1.57]
-    mesh: package://sa2_description/meshes/sa3_env/SA3_INTRY_29_10.STL
-    scale: [1, 1, 1]
+    mesh: package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL
+    scale: [0.001, 0.001, 0.001]
 
   flange_inv:
     parent: world
     xyz: [-0.2, -2.8, 0.0]
     rpy: [0.0, 0.0, 3.14]
-    mesh: package://sa2_description/meshes/sa3_env/SA3_INTRY_29_10.STL
-    scale: [1, 1, 1]
+    mesh: package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL
+    scale: [0.001, 0.001, 0.001]
 
   flange_inv_2:
     parent: world
     xyz: [5.6, -3.6, 0.0]
     rpy: [0.0, 0.0, 0.0]
-    mesh: package://sa2_description/meshes/sa3_env/SA3_INTRY_29_10.STL
-    scale: [1, 1, 1]
+    mesh: package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL
+    scale: [0.001, 0.001, 0.001]
 
   jig_clamp:
     parent: world

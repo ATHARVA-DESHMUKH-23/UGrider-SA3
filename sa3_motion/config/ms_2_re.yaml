@@ -75,18 +75,18 @@ motion_sequence:
   #   retries: 1
   #   on_failure: abort
   
-  - name: place rebar 1A with gantry and robot3
-    executables:
-    - name: gantry_move
-      parameters:
-        workcell_config_package: sa2_description
-        workcell_config_file: config/workcell.yaml
-        motion_config_package: sa3_motion
-        motion_config_file: config/ms_2_re.yaml
-        motion_task: gantry_bottom_mat_2_re
-    mode: sequential
-    retries: 1
-    on_failure: abort
+  # - name: place rebar 1A with gantry and robot3
+  #   executables:
+  #   - name: gantry_move
+  #     parameters:
+  #       workcell_config_package: sa2_description
+  #       workcell_config_file: config/workcell.yaml
+  #       motion_config_package: sa3_motion
+  #       motion_config_file: config/ms_2_re.yaml
+  #       motion_task: gantry_bottom_mat_2_re
+  #   mode: sequential
+  #   retries: 1
+  #   on_failure: abort
   
   # - name: Tie Bottom Mat with tying guns
   #   executables:
