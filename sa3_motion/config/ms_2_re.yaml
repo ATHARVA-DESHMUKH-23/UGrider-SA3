@@ -10,18 +10,18 @@ motion_sequence:
     retries: 1
     on_failure: abort
  
-  - name: Pick/place flange pair 3C + 4C
-    executables:
-    - name: flange_pp
-      parameters:
-        workcell_config_package: sa2_description
-        workcell_config_file: config/workcell.yaml
-        motion_config_package: sa3_motion
-        motion_config_file: config/ms_2_re.yaml
-        motion_task: flange_3c_4c
-    mode: sequential
-    retries: 1
-    on_failure: abort
+  # - name: Pick/place flange pair 3C + 4C
+  #   executables:
+  #   - name: flange_pp
+  #     parameters:
+  #       workcell_config_package: sa2_description
+  #       workcell_config_file: config/workcell.yaml
+  #       motion_config_package: sa3_motion
+  #       motion_config_file: config/ms_2_re.yaml
+  #       motion_task: flange_3c_4c
+  #   mode: sequential
+  #   retries: 1
+  #   on_failure: abort
  
   # - name: Pick/place flange pair 3D + 4D
   #   executables:
@@ -62,7 +62,7 @@ motion_sequence:
   #   retries: 3
   #   on_failure: abort
   
-  # # - name: Tie clamps with tying guns
+  # - name: Tie clamps with tying guns
   #   executables:
   #   - name: tying_rebars
   #     parameters:
@@ -115,13 +115,82 @@ motion_sequence:
   #   on_failure: abort
   
   
+  - name: Pick/place final assembly
+    executables:
+      - name: robot3_sa3pp
+        parameters:
+          pick_frame: sa3_pick_point
+          place_frame: sa3_place
+          object_id: rebar_3c
+
+          children:
+            - rebar_4c
+
+          # Planning settings
+          planning_time: 15.0
+          ompl_attempts: 10
+          plan_retries: 3
+
+          # MoveJ, MoveL and MoveC acceleration
+          movej_velocity: 0.5
+          movej_acceleration: 0.5
+          movel_acceleration: 0.5
+          movec_acceleration: 0.5
+
+          # Pilz LIN descending velocity retries
+          lin_velocity_scales:
+            - 0.45
+            - 0.4
+            - 0.35
+            - 0.3
+            - 0.2
+            - 0.1
+            - 0.05
+
+          # Pilz CIRC descending velocity retries
+          circ_velocity_scales:
+            - 0.45
+            - 0.4
+            - 0.35
+            - 0.3
+            - 0.2
+            - 0.1
+
+          # Fallback priority
+          transit_strategies:
+            - moveL
+            # - moveC
+            - moveJ
+
+          # CIRC via-point offset in world frame
+          circ_via_offset_world: [0.0, -0.10, 0.10]
+
+          # Motion selection for each step
+          pick_approach_motion: fallback
+          pick_motion: moveL
+          pick_retract_motion: moveL
+          place_approach_motion: fallback
+          place_motion: moveL
+          place_retract_motion: moveL
+
+          # Independent XYZ offsets in world frame
+          pick_approach_offset_world: [-0.10, 0.0, 0.0]
+          pick_retract_offset_world: [0.0, -0.20, 0.0]
+          place_approach_offset_world: [0.0, 0.0, 0.30]
+          place_retract_offset_world: [-0.05, 0.0, 0.0]
+
+    mode: sequential
+    retries: 1
+    on_failure: abort
+
+ 
   # - name: Pick/place final assembly
   #   executables:
   #   - name: robot3_sa3pp
   #     parameters:
   #       pick_frame: sa3_pick_point
   #       place_frame: sa3_place
-  #       object_id: rebar_1A
+  #       object_id: rebar_3c
   #       children:
   #       - rebar_3c
   #       - rebar_4c
@@ -202,10 +271,10 @@ motion_sequence:
         planning_attempts: 10
         retries: 3
         ik_timeout: 1.0
-        movej_velocity: 0.1
-        movej_acceleration: 0.1
-        movel_velocity: 0.1
-        movel_acceleration: 0.1
+        movej_velocity: 0.5
+        movej_acceleration: 0.5
+        movel_velocity: 0.45
+        movel_acceleration: 0.45
       
       steps:
       - id: P1
@@ -255,16 +324,28 @@ motion_sequence:
         after_actions:
         - restore_inventory_contact
       - id: T1
-        description: Original sampled arc transfer
         motion: moveL
-        repeat: arc_waypoints
+        description: Move both robots to PTP start frames
         robot3:
-          reference: arc_waypoint
+          reference: r3_ptp_start
           offset_frame: world
           xyz: [0, 0, 0]
           rpy: [0.0, 0.0, 0.0]
         robot4:
-          reference: arc_waypoint
+          reference: r4_ptp_start
+          offset_frame: world
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
+      - id: T2
+        motion: movePTP
+        description: Combined Pilz PTP transfer from start to end frames
+        robot3:
+          reference: r3_ptp_end
+          offset_frame: world
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
+        robot4:
+          reference: r4_ptp_end
           offset_frame: world
           xyz: [0, 0, 0]
           rpy: [0.0, 0.0, 0.0]
@@ -330,25 +411,33 @@ motion_sequence:
         pick_offset: [0.0, 0.0, 0.0]
         pick_offset_frame: local
 
-        pick_offset_rpy: [0.0, 0.0, 0.174533]
+        pick_offset_rpy: [0.627, -1.570, 0.627]
         pick_offset_rpy_frame: local
-        arc_frames:
-        - r3_arc_start
-        - r3_arc_mid
-        - r3_arc_end
+
+        place_offset: [0.0, 0.0, 0.0]
+        place_offset_rpy: [0.0, 0.0, 0.0]
+
+        arc_frames: [r3_arc_start, r3_arc_mid, r3_arc_end]
+      
         pick_offset_frame: local
       robot4:
-        pick_frame: inventory_3a_4a_frame_2
+        pick_frame: 4d
         place_frame: place_frame_10
         object_id: rebar_4d
         inventory_id: inventory_3a_4a_2
-        pick_offset: [0.1, 0, 0]
-        place_offset: [0, 0, 0]
-        arc_frames:
-        - r4_arc_start
-        - r4_arc_mid
-        - r4_arc_end
+        
+        pick_offset: [0.0, 0.0, 0.0]
         pick_offset_frame: local
+
+        pick_offset_rpy: [0.943, -1.570, 0.943]
+        pick_offset_rpy_frame: local
+
+        place_offset: [0.0, 0.0, 0.0]
+        place_offset_rpy: [0.0, 0.0, 0.0]
+
+        arc_frames: [r4_arc_start, r4_arc_mid, r4_arc_end]
+        pick_offset_frame: local
+      
       jig_object_id: jig_clamp
       arc_points: 8
       planning:
@@ -356,23 +445,23 @@ motion_sequence:
         planning_attempts: 10
         retries: 3
         ik_timeout: 1.0
-        movej_velocity: 0.1
-        movej_acceleration: 0.1
-        movel_velocity: 0.1
-        movel_acceleration: 0.1
+        movej_velocity: 0.5
+        movej_acceleration: 0.5
+        movel_velocity: 0.45
+        movel_acceleration: 0.45
       steps:
       - id: P1
         motion: moveJ
         description: Pick approach
         robot3:
-          reference: pick_frame
+          reference: inventory_3a_4a_frame
           offset_frame: world
-          xyz: [-0.6, 0, 0.6]
+          xyz: [0.0, 0, 0]
           rpy: [0.0, 0.0, 0.0]
         robot4:
-          reference: pick_frame
+          reference: inventory_3a_4a_frame_2
           offset_frame: world
-          xyz: [0.6, 0, 0.6]
+          xyz: [0, 0.0, 0]
           rpy: [0.0, 0.0, 0.0]
       - id: P2
         motion: moveL
@@ -380,7 +469,7 @@ motion_sequence:
         robot3:
           reference: pick_frame
           offset_frame: world
-          xyz: [0, 0, 0]
+          xyz: [0.0, 0, 0]
           rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: pick_frame
@@ -398,38 +487,38 @@ motion_sequence:
         robot3:
           reference: pick_frame
           offset_frame: world
-          xyz: [-0.6, 0, 0.6]
+          xyz: [0, 0.3, 0.3]
           rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: pick_frame
           offset_frame: world
-          xyz: [0.6, 0, 0.6]
+          xyz: [0, 0.3, 0.3]
           rpy: [0.0, 0.0, 0.0]
         after_actions:
         - restore_inventory_contact
-      - id: T_pre1
-        motion: moveJ
-        description: 'Operator-editable intermediate TF #1'
-        robot3:
-          reference: r3_arc_start
-          offset_frame: world
-          xyz: [0, 0, 0]
-          rpy: [0.0, 0.0, 0.0]
-        robot4:
-          reference: r4_arc_start
-          offset_frame: world
-          xyz: [0, 0, 0]
-          rpy: [0.0, 0.0, 0.0]
-      - id: T_pre2
+      - id: T1
         motion: moveL
-        description: 'Operator-editable intermediate TF #2'
+        description: Move both robots to PTP start frames
         robot3:
-          reference: r3_arc_mid
+          reference: r3_ptp_start
           offset_frame: world
           xyz: [0, 0, 0]
           rpy: [0.0, 0.0, 0.0]
         robot4:
-          reference: r4_arc_mid
+          reference: r4_ptp_start
+          offset_frame: world
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
+      - id: T2
+        motion: movePTP
+        description: Combined Pilz PTP transfer from start to end frames
+        robot3:
+          reference: r3_ptp_end
+          offset_frame: world
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
+        robot4:
+          reference: r4_ptp_end
           offset_frame: world
           xyz: [0, 0, 0]
           rpy: [0.0, 0.0, 0.0]
@@ -482,6 +571,7 @@ motion_sequence:
         motion: moveJ
         description: Coordinated home
         reference: home
+    
     shear_links_2_re:
       type: shear_links_pp
       config:
@@ -617,22 +707,24 @@ motion_sequence:
           planning_time: 15.0
           ompl_attempts: 10
           plan_retries: 3
-          movej_velocity: 0.3
-          movej_acceleration: 0.2
-          movel_acceleration: 0.1
-          movec_acceleration: 0.1
+          movej_velocity: 0.5
+          movej_acceleration: 0.5
+          movel_acceleration: 0.5
+          movec_acceleration: 0.5
           lin_velocity_scales:
+          - 0.45
+          - 0.4
+          - 0.35
+          - 0.3
+          - 0.2
           - 0.1
-          - 0.05
-          - 0.03
-          - 0.02
-          - 0.01
           circ_velocity_scales:
+          - 0.45
+          - 0.4
+          - 0.35
+          - 0.3
+          - 0.2
           - 0.1
-          - 0.05
-          - 0.03
-          - 0.02
-          - 0.01
           transit_strategies:
           - moveL
           - moveC
@@ -680,6 +772,8 @@ motion_sequence:
       - id: H1
         reference: home
         motion: moveJ
+    
+    
     change_to_tying_guns:
       type: robot1_gripper_change
       config:
@@ -749,6 +843,8 @@ motion_sequence:
         - restore_target_contacts
       source_tool: schunk
       target_tool: tying_gun
+    
+    
     tying_2_re:
       type: tying_rebars
       config:
@@ -795,32 +891,61 @@ motion_sequence:
         approach:
           offset_frame: local
           xyz: [-0.2, 0.0, 0.0]
+
         stop_on_first_failure: false
+
         planning:
           planning_time: 15.0
           ompl_attempts: 10
           plan_retries: 3
-          movej_velocity: 0.3
-          movej_acceleration: 0.2
-          movel_acceleration: 0.05
+
+          movej_velocity: 0.5
+          movej_acceleration: 0.5
+          movel_acceleration: 0.5
+          movec_acceleration: 0.5
+
           lin_velocity_scales:
-          - 0.1
+            - 0.45
+            - 0.4
+            - 0.35
+            - 0.3
+            - 0.2
+            - 0.1
+
+          circ_velocity_scales:
+            - 0.45
+            - 0.4
+            - 0.35
+            - 0.3
+            - 0.2
+            - 0.1
+
+          transit_strategies:
+            - moveL
+            - moveJ
+
+          circ_via_offset_world: [0.0, 0.0, 0.10]
+
       point_steps: &id001
-      - id: T1
-        reference: tie_approach
-        motion: moveJ
-      - id: T2
-        reference: tie_frame
-        motion: moveL
-      - id: T3
-        reference: tie_approach
-        motion: moveL
-        after_actions:
-        - mark_point_complete
+        - id: T1
+          reference: tie_approach
+          motion: fallback
+
+        - id: T2
+          reference: tie_frame
+          motion: moveL
+
+        - id: T3
+          reference: tie_approach
+          motion: moveL
+          after_actions:
+            - mark_point_complete
+
       finish: &id002
-      - id: H1
-        reference: home
-        motion: moveJ
+        - id: H1
+          reference: home
+          motion: moveJ
+    
     gantry_bottom_mat_2_re:
       type: gantry_move
       config:
@@ -966,34 +1091,64 @@ motion_sequence:
         description: Robot3 returns to captured startup joint state
         reference: home
         motion: moveJ
+    
+    
     tying_bottom_mat_2_re:
       type: tying_rebars
       config:
         robot1:
           enabled: true
           jobs:
-          - clamp: 1A_l
-            tie_count: 3
+            - clamp: 1A_l
+              tie_count: 3
+
         robot2:
           enabled: true
           jobs:
-          - clamp: 1A_r
-            tie_count: 3
+            - clamp: 1A_r
+              tie_count: 3
+
         approach:
           offset_frame: local
           xyz: [-0.2, 0.0, 0.0]
+
         stop_on_first_failure: false
+
         planning:
           planning_time: 15.0
           ompl_attempts: 10
           plan_retries: 3
-          movej_velocity: 0.3
-          movej_acceleration: 0.2
-          movel_acceleration: 0.05
+
+          movej_velocity: 0.5
+          movej_acceleration: 0.5
+          movel_acceleration: 0.5
+          movec_acceleration: 0.5
+
           lin_velocity_scales:
-          - 0.1
+            - 0.45
+            - 0.4
+            - 0.35
+            - 0.3
+            - 0.2
+            - 0.1
+
+          circ_velocity_scales:
+            - 0.45
+            - 0.4
+            - 0.35
+            - 0.3
+            - 0.2
+            - 0.1
+
+          transit_strategies:
+            - moveL
+            - moveJ
+
+          circ_via_offset_world: [0.0, 0.0, 0.10]
+
       point_steps: *id001
       finish: *id002
+
     change_to_schunk:
       type: robot1_gripper_change
       config:

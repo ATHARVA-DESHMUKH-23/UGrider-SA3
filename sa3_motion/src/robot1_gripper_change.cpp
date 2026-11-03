@@ -9,6 +9,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <future>
 #include <map>
@@ -121,9 +122,26 @@ void loadGripperProgram(const rclcpp::Node::SharedPtr & node) {
       dock_frames[prefix + "_shuck_dock"]["child"], "schunk_dock_frame");
     r.gun_dock_frame = sa3_yaml::name(
       dock_frames[prefix + "_tyinggun_dock"]["child"], "tyinggun_dock_frame");
-    r.schunk_ids = {prefix + "_schunk_base", prefix + "_schunk_link7", prefix + "_schunk_link8"};
+    // Discover the Schunk collision objects actually configured in workcell.yaml.
+    // The current SHEARGRP.STL combines the gripper into one *_schunk_base object;
+    // older workcells can still include separate *_schunk_link7/8 objects.
+    const std::string schunk_base = prefix + "_schunk_base";
+    if (!available_tools[schunk_base])
+      throw std::runtime_error("Missing workcell gripper object: " + schunk_base);
+    r.schunk_ids = {schunk_base};
+    const std::string schunk_prefix = prefix + "_schunk_";
+    std::vector<std::string> additional_schunk_ids;
+    for (const auto & entry : available_tools) {
+      const auto id = entry.first.as<std::string>();
+      if (id != schunk_base && id.compare(0, schunk_prefix.size(), schunk_prefix) == 0)
+        additional_schunk_ids.push_back(id);
+    }
+    std::sort(additional_schunk_ids.begin(), additional_schunk_ids.end());
+    r.schunk_ids.insert(r.schunk_ids.end(), additional_schunk_ids.begin(), additional_schunk_ids.end());
+    RCLCPP_INFO(node->get_logger(), "[%s] Schunk collision objects configured: %zu",
+      prefix.c_str(), r.schunk_ids.size());
     for (const auto & id : r.schunk_ids)
-      if (!available_tools[id]) throw std::runtime_error("Missing workcell gripper object: " + id);
+      RCLCPP_INFO(node->get_logger(), "[%s]   %s", prefix.c_str(), id.c_str());
     r.gun_id = prefix + "_tying_gun";
     if (!available_tools[r.gun_id])
       throw std::runtime_error("Missing workcell tying gun: " + r.gun_id);
@@ -425,7 +443,9 @@ public:
       }
       return ok;
     };
-    for (const auto & step : kGripperSteps) {
+    for (std::size_t step_index = 0; step_index < kGripperSteps.size(); ++step_index) {
+      const auto & step = kGripperSteps[step_index];
+      active_step_index_ = step_index;
       std::array<geometry_msgs::msg::Pose, 2> targets;
       const std::string selected_tool = step.reference == "source_dock" ? kSourceTool : kTargetTool;
       for (std::size_t i = 0; i < arms_.size(); ++i) {
@@ -470,7 +490,41 @@ public:
     return true;
   }
 
+  // Reports completed execute() calls only. Planning, TF, scene operations and
+  // physical tool-change IO (not implemented) are excluded.
+  void printExecutionSummary() const
+  {
+    double total_success_seconds = 0.0;
+    std::printf("\n================ GRIPPER CHANGE EXECUTION-ONLY TIME ================\n");
+    std::printf("Tool change: %s -> %s (both arms, combined execution)\n",
+      kSourceTool.c_str(), kTargetTool.c_str());
+    std::printf("%-5s %-36s %-8s %12s\n", "STEP", "DESCRIPTION / PLANNER", "STATUS", "EXEC TIME");
+    for (std::size_t i = 0; i < kGripperSteps.size(); ++i) {
+      const auto & step = kGripperSteps[i];
+      const auto & timing = execution_times_[i];
+      const char * status = timing.succeeded ? "OK" :
+        timing.attempted ? "FAILED" : "NOT RUN";
+      if (timing.succeeded) total_success_seconds += timing.seconds;
+      const std::string description = step.description + " [" + step.motion + "]";
+      std::printf("%-5s %-36.36s %-8s %9.3f s\n",
+        step.id.c_str(), description.c_str(), status, timing.seconds);
+    }
+    std::printf("TOTAL SUCCESSFUL EXECUTION TIME: %.3f s\n", total_success_seconds);
+    std::printf("Robot1 and Robot2 move together; time is counted once per combined execution.\n");
+    std::printf("Planning, TF lookups, collision-scene operations and tool IO excluded.\n");
+    std::printf("====================================================================\n");
+    std::fflush(stdout);
+  }
+
 private:
+  struct StepExecutionTime {
+    double seconds = 0.0;
+    bool attempted = false;
+    bool succeeded = false;
+  };
+  std::array<StepExecutionTime, 6> execution_times_{};
+  std::size_t active_step_index_ = 0;
+
   // ---- logging ------------------------------------------------------------
   void logI(const std::string & m) {RCLCPP_INFO(node_->get_logger(), "[dual] %s", m.c_str());}
   void logW(const std::string & m) {RCLCPP_WARN(node_->get_logger(), "[dual] %s", m.c_str());}
@@ -629,11 +683,21 @@ private:
   // ---- execution ------------------------------------------------------------
   bool executeCombined(MGI::Plan & plan, const std::string & label)
   {
+    // Wall-clock time of the blocking execution call only (no planning / TF / scene updates).
+    const auto started = std::chrono::steady_clock::now();
     const auto r = combined_->execute(plan);
-    if (r != moveit::core::MoveItErrorCode::SUCCESS) {
-      logE("combined execution failed for " + label + " (code " + std::to_string(r.val) + ").");
+    const double elapsed = std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - started).count();
+    auto & timing = execution_times_.at(active_step_index_);
+    timing.seconds = elapsed;
+    timing.attempted = true;
+    timing.succeeded = (r == moveit::core::MoveItErrorCode::SUCCESS);
+    if (!timing.succeeded) {
+      logE("combined execution failed for " + label + " (code " + std::to_string(r.val) +
+        ", execute wall time " + std::to_string(elapsed) + " s).");
       return false;
     }
+    logI("[EXEC ONLY] " + label + ": " + std::to_string(elapsed) + " s (both arms combined)");
     return true;
   }
 
@@ -811,6 +875,7 @@ int main(int argc, char ** argv)
     loadGripperProgram(node);
     DualGripperChanger changer(node, tf_buffer);
     ok = changer.run();
+    changer.printExecutionSummary();
 
     (void)tf_listener;
   } catch (const std::exception & ex) {

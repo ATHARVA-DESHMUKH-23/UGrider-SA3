@@ -629,101 +629,109 @@ workcell:
     robot1_tying_gun:
       parent: robot1_tyinggun_dock
       child: robot1_tying_gun_visual
-      xyz: [0.15, 0.005, -0.015]
-      rpy: [1.5708, -0.3005, 3.1415]
+      xyz: [0.15, 0.005, -0.015] # set to tying_gun macro xyz
+      rpy: [1.5708, -0.3005, 3.1415] # set to tying_gun macro rpy
       mesh: package://sa2_description/meshes/ee/TYING_GUN_v2.stl
       mesh_xyz: [-0.612, -0.914, -1.319]
       mesh_rpy: [0.0, 0.0, 0.0]
       scale: 0.001
       color: [0.12, 0.12, 0.12, 1.0]
+
     robot2_tying_gun:
       parent: robot2_tyinggun_dock
       child: robot2_tying_gun_visual
-      xyz: [0.15, 0.005, -0.015]
-      rpy: [1.5708, -0.3005, 3.1415]
+      xyz: [0.15, 0.005, -0.015] # set to tying_gun macro xyz
+      rpy: [1.5708, -0.3005, 3.1415] # set to tying_gun macro rpy
       mesh: package://sa2_description/meshes/ee/TYING_GUN_v2.stl
       mesh_xyz: [-0.612, -0.914, -1.319]
       mesh_rpy: [0.0, 0.0, 0.0]
       scale: 0.001
       color: [0.12, 0.12, 0.12, 1.0]
+
     robot1_schunk_base:
       parent: robot1_shuck_dock
       child: robot1_schunk_gripper_base_visual
-      xyz: [0.0, 0.0, 0.0]
-      rpy: [0.0, 1.57, 0.0]
-      mesh: package://sa2_description/meshes/ee/schunk_gripper_binary.stl
-      mesh_xyz: [0.0, 0.0, 0.0]
-      mesh_rpy: [1.5708, 0.0, 1.5708]
-      scale: 0.001
+      xyz: [0.0, 0.0, 0.0] # set to schunk_gripper macro xyz
+      rpy: [0.0 ,1.57, 0.0] # set to schunk_gripper macro rpy
+      mesh: package://sa2_description/meshes/ee/SHEARGRP.STL
+      mesh_xyz: [0.035, -0.035, 0.0]
+      mesh_rpy: [0.0, -1.57, 0.0]
+      scale: 1
       color: [0.7922, 0.8196, 0.9333, 1.0]
-    robot1_schunk_link7:
-      parent: robot1_schunk_gripper_base_visual
-      child: robot1_schunk_link7_visual
-      xyz: [0.0, 0.0, 0.1858]
-      rpy: [1.5708, 0.0, 0.0]
-      mesh: package://sa2_description/meshes/ee/link7.STL
-      mesh_xyz: [0.0, 0.0, 0.0]
-      mesh_rpy: [0.0, 0.0, 0.0]
-      scale: 1.0
-      color: [0.7922, 0.8196, 0.9333, 1.0]
-    robot1_schunk_link8:
-      parent: robot1_schunk_gripper_base_visual
-      child: robot1_schunk_link8_visual
-      xyz: [0.0, 0.0, 0.1858]
-      rpy: [1.5708, 0.0, -3.1416]
-      mesh: package://sa2_description/meshes/ee/link8.STL
-      mesh_xyz: [0.0, 0.0, 0.0]
-      mesh_rpy: [0.0, 0.0, 0.0]
-      scale: 1.0
-      color: [0.7922, 0.8196, 0.9333, 1.0]
+
+    # robot1_schunk_link7:
+    #   parent: robot1_schunk_gripper_base_visual
+    #   child: robot1_schunk_link7_visual
+    #   xyz: [0.0, 0.0, 0.1858]
+    #   rpy: [1.5708, 0.0, 0.0]
+    #   mesh: package://sa2_description/meshes/ee/link7.STL
+    #   mesh_xyz: [0.0, 0.0, 0.0]
+    #   mesh_rpy: [0.0, 0.0, 0.0]
+    #   scale: 1.0
+    #   color: [0.7922, 0.8196, 0.9333, 1.0]
+
+    # robot1_schunk_link8:
+    #   parent: robot1_schunk_gripper_base_visual
+    #   child: robot1_schunk_link8_visual
+    #   xyz: [0.0, 0.0, 0.1858]
+    #   rpy: [1.5708, 0.0, -3.1416]
+    #   mesh: package://sa2_description/meshes/ee/link8.STL
+    #   mesh_xyz: [0.0, 0.0, 0.0]
+    #   mesh_rpy: [0.0, 0.0, 0.0]
+    #   scale: 1.0
+    #   color: [0.7922, 0.8196, 0.9333, 1.0]
+
     robot2_schunk_base:
       parent: robot2_shuck_dock
       child: robot2_schunk_gripper_base_visual
-      xyz: [0.0, 0.0, 0.0]
-      rpy: [0.0, 1.57, 0.0]
-      mesh: package://sa2_description/meshes/ee/schunk_gripper_binary.stl
-      mesh_xyz: [0.0, 0.0, 0.0]
-      mesh_rpy: [1.5708, 0.0, 1.5708]
-      scale: 0.001
+      xyz: [0.0, 0.0, 0.0] # set to schunk_gripper macro xyz
+      rpy: [0.0 ,1.57, 0.0] # set to schunk_gripper macro rpy
+      mesh: package://sa2_description/meshes/ee/SHEARGRP.STL
+      mesh_xyz: [0.035, -0.035, 0.0]
+      mesh_rpy: [0.0, -1.57, 0.0]
+      scale: 1
       color: [0.7922, 0.8196, 0.9333, 1.0]
-    robot2_schunk_link7:
-      parent: robot2_schunk_gripper_base_visual
-      child: robot2_schunk_link7_visual
-      xyz: [0.0, 0.0, 0.1858]
-      rpy: [1.5708, 0.0, 0.0]
-      mesh: package://sa2_description/meshes/ee/link7.STL
-      mesh_xyz: [0.0, 0.0, 0.0]
-      mesh_rpy: [0.0, 0.0, 0.0]
-      scale: 1.0
-      color: [0.7922, 0.8196, 0.9333, 1.0]
-    robot2_schunk_link8:
-      parent: robot2_schunk_gripper_base_visual
-      child: robot2_schunk_link8_visual
-      xyz: [0.0, 0.0, 0.1858]
-      rpy: [1.5708, 0.0, -3.1416]
-      mesh: package://sa2_description/meshes/ee/link8.STL
-      mesh_xyz: [0.0, 0.0, 0.0]
-      mesh_rpy: [0.0, 0.0, 0.0]
-      scale: 1.0
-      color: [0.7922, 0.8196, 0.9333, 1.0]
+
+    # robot2_schunk_link7:
+    #   parent: robot2_schunk_gripper_base_visual
+    #   child: robot2_schunk_link7_visual
+    #   xyz: [0.0, 0.0, 0.1858]
+    #   rpy: [1.5708, 0.0, 0.0]
+    #   mesh: package://sa2_description/meshes/ee/link7.STL
+    #   mesh_xyz: [0.0, 0.0, 0.0]
+    #   mesh_rpy: [0.0, 0.0, 0.0]
+    #   scale: 1.0
+    #   color: [0.7922, 0.8196, 0.9333, 1.0]
+
+    # robot2_schunk_link8:
+    #   parent: robot2_schunk_gripper_base_visual
+    #   child: robot2_schunk_link8_visual
+    #   xyz: [0.0, 0.0, 0.1858]
+    #   rpy: [1.5708, 0.0, -3.1416]
+    #   mesh: package://sa2_description/meshes/ee/link8.STL
+    #   mesh_xyz: [0.0, 0.0, 0.0]
+    #   mesh_rpy: [0.0, 0.0, 0.0]
+    #   scale: 1.0
+    #   color: [0.7922, 0.8196, 0.9333, 1.0]
+
   robots:
     robot1:
       group: robot1_arm
       planning_link: robot1_end_effactor
       tool_mount_link: robot1_tool_mount
       tying_link: robot1_tg_end_effactor
-      touch_links: [robot1_end_effactor, robot1_tool_mount, robot1_J6_link, robot1_schunk_base, robot1_schunk_link7, robot1_schunk_link8]
+      touch_links: [robot1_end_effactor, robot1_tool_mount, robot1_J6_link, robot1_schunk_base]
       web_ring: web_ring
-      gripper_touch_links: [robot1_end_effactor, robot1_tool_mount, robot1_J6_link, robot1_schunk_base, robot1_schunk_link7, robot1_schunk_link8]
+      gripper_touch_links: [robot1_end_effactor, robot1_tool_mount, robot1_J6_link, robot1_schunk_base]
       gripper_change_arm_touch_links: [robot1_tool_mount, robot1_J4_link, robot1_J5_link, robot1_J6_link]
     robot2:
       group: robot2_arm
       planning_link: robot2_end_effactor
       tool_mount_link: robot2_tool_mount
       tying_link: robot2_tg_end_effactor
-      touch_links: [robot2_end_effactor, robot2_tool_mount, robot2_J6_link, robot2_schunk_base, robot2_schunk_link7, robot2_schunk_link8]
+      touch_links: [robot2_end_effactor, robot2_tool_mount, robot2_J6_link, robot2_schunk_base]
       web_ring: web_ring_2
-      gripper_touch_links: [robot2_end_effactor, robot2_tool_mount, robot2_J6_link, robot2_schunk_base, robot2_schunk_link7, robot2_schunk_link8]
+      gripper_touch_links: [robot2_end_effactor, robot2_tool_mount, robot2_J6_link, robot2_schunk_base]
       gripper_change_arm_touch_links: [robot2_tool_mount, robot2_J4_link, robot2_J5_link, robot2_J6_link]
     robot3:
       group: robot3_arm
@@ -775,19 +783,19 @@ environment:
     mesh: package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL
     scale: [0.001, 0.001, 0.001]
 
-  flange_inv:
-    parent: world
-    xyz: [-0.2, -2.8, 0.0]
-    rpy: [0.0, 0.0, 3.14]
-    mesh: package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL
-    scale: [0.001, 0.001, 0.001]
+  # flange_inv:
+  #   parent: world
+  #   xyz: [-0.2, -2.8, 0.0]
+  #   rpy: [0.0, 0.0, 3.14]
+  #   mesh: package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL
+  #   scale: [0.001, 0.001, 0.001]
 
-  flange_inv_2:
-    parent: world
-    xyz: [5.6, -3.6, 0.0]
-    rpy: [0.0, 0.0, 0.0]
-    mesh: package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL
-    scale: [0.001, 0.001, 0.001]
+  # flange_inv_2:
+  #   parent: world
+  #   xyz: [5.6, -3.6, 0.0]
+  #   rpy: [0.0, 0.0, 0.0]
+  #   mesh: package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL
+  #   scale: [0.001, 0.001, 0.001]
 
   jig_clamp:
     parent: world

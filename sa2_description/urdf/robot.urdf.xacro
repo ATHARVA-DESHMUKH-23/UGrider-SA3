@@ -164,7 +164,7 @@
   </link>
 
   <joint name="robot1_end_effactor_joint" type="fixed">
-    <origin xyz="0.2 0 0" rpy="0 0 0"/>
+    <origin xyz="0.3 0 0" rpy="0 0 0"/>
     <parent link="robot1_flange"/>
     <child link="robot1_end_effactor"/>
   </joint>
@@ -275,7 +275,7 @@
   </link>
 
   <joint name="robot2_end_effactor_joint" type="fixed">
-    <origin xyz="0.2 0 0" rpy="0 0 0"/>
+    <origin xyz="0.3 0 0" rpy="0 0 0"/>
     <parent link="robot2_flange"/>
     <child link="robot2_end_effactor"/>
   </joint>

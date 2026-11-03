@@ -1,20 +1,22 @@
+# SA3 static endpoint IK audit launcher.
+# Use with sa3_motion_sequence.launch.py; it injects MoveItConfigsBuilder parameters.
+# The actual motion tasks are read from ms_2_re.yaml, not from this file.
 motion_sequence:
   schema_version: 2
-
   stages:
-    - name: SA3 IK Reachability and Trajectory Test
+    - name: SA3 static IK reachability audit
       mode: sequential
       retries: 1
       on_failure: abort
-
       executables:
         - name: ik_reach_test
           parameters:
             workcell_config_package: sa2_description
             workcell_config_file: config/workcell.yaml
-
             motion_config_package: sa3_motion
             motion_config_file: config/ms_2_re.yaml
-
+            # Empty = audit active motion_task entries from ms_2_re.yaml.
+            # Set e.g. flange_3c_4c to run a single task.
+            motion_task: ""
+            include_inactive_tasks: false
             report_csv: /tmp/sa3_ik_reachability.csv
-            chain_plans: true

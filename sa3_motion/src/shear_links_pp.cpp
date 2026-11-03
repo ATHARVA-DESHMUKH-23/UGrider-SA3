@@ -89,6 +89,14 @@ double kMoveLAcceleration = 0.10, kMoveCAcceleration = 0.10;
 std::vector<double> kLinVelScales = {0.10, 0.05, 0.03, 0.02, 0.01};
 std::vector<double> kCircVelScales = {0.10, 0.05, 0.03, 0.02, 0.01};
 std::vector<std::string> kTransitStrategies = {"moveL", "moveC", "moveJ"};
+// Default P1 choices; each robot may override these under config.robot1/robot2.
+std::string kRobot1FirstPickApproach = "moveJ", kRobot1NextPickApproach = "moveJ";
+std::string kRobot2FirstPickApproach = "moveJ", kRobot2NextPickApproach = "moveJ";
+
+void validatePickPlanner(const std::string & planner, const std::string & field) {
+  if (planner != "moveJ" && planner != "moveL")
+    throw std::runtime_error(field + " must be moveJ or moveL (got '" + planner + "')");
+}
 std::vector<sa3_yaml::Step> kConfiguredStages;
 std::string kRobot1Ring = "web_ring", kRobot2Ring = "web_ring_2";
 std::vector<std::string> kRobot1GripperLinks, kRobot2GripperLinks;
@@ -114,8 +122,21 @@ void loadShearProgram(const rclcpp::Node::SharedPtr & node) {
   kLinVelScales = sa3_yaml::scales(p["lin_velocity_scales"], "shear LIN scales");
   kCircVelScales = sa3_yaml::scales(p["circ_velocity_scales"], "shear CIRC scales");
   kTransitStrategies = sa3_yaml::strings(p["transit_strategies"], "transit_strategies");
-  if (kTransitStrategies != std::vector<std::string>{"moveL", "moveC", "moveJ"})
-    throw std::runtime_error("Transit fallback must remain moveL -> moveC -> moveJ for this implementation");
+  if (kTransitStrategies.empty())
+    throw std::runtime_error("transit_strategies needs at least one planner");
+  std::vector<std::string> seen;
+  for (const auto & strategy : kTransitStrategies) {
+    if (strategy != "moveL" && strategy != "moveC" && strategy != "moveJ")
+      throw std::runtime_error("Unknown transit strategy: " + strategy);
+    if (std::find(seen.begin(), seen.end(), strategy) != seen.end())
+      throw std::runtime_error("Duplicate transit strategy: " + strategy);
+    seen.push_back(strategy);
+  }
+  // Optional shared defaults. Per-robot settings below take precedence.
+  const auto first_pick_default = p["first_pick_approach_planner"].as<std::string>("moveJ");
+  const auto next_pick_default = p["subsequent_pick_approach_planner"].as<std::string>("moveJ");
+  validatePickPlanner(first_pick_default, "planning.first_pick_approach_planner");
+  validatePickPlanner(next_pick_default, "planning.subsequent_pick_approach_planner");
   if (kPlanningTime <= 0 || kOmplAttempts < 1 || kPlanRetries < 1 ||
       kMoveJVelocity <= 0 || kMoveJVelocity > 1 || kMoveJAcceleration <= 0 || kMoveJAcceleration > 1 ||
       kMoveLAcceleration <= 0 || kMoveLAcceleration > 1 || kMoveCAcceleration <= 0 || kMoveCAcceleration > 1)
@@ -151,8 +172,19 @@ void loadShearProgram(const rclcpp::Node::SharedPtr & node) {
   };
   arm("robot1", kRobot1Group, kRobot1Link, kRobot1Ring, kRobot1ViaX, kRobot1GripperLinks, kRobot1PairSpecs);
   arm("robot2", kRobot2Group, kRobot2Link, kRobot2Ring, kRobot2ViaX, kRobot2GripperLinks, kRobot2PairSpecs);
+  const auto r1 = sa3_yaml::require(c, "robot1", "shear_links_pp");
+  const auto r2 = sa3_yaml::require(c, "robot2", "shear_links_pp");
+  kRobot1FirstPickApproach = r1["first_pick_approach_planner"].as<std::string>(first_pick_default);
+  kRobot1NextPickApproach = r1["subsequent_pick_approach_planner"].as<std::string>(next_pick_default);
+  kRobot2FirstPickApproach = r2["first_pick_approach_planner"].as<std::string>(first_pick_default);
+  kRobot2NextPickApproach = r2["subsequent_pick_approach_planner"].as<std::string>(next_pick_default);
+  validatePickPlanner(kRobot1FirstPickApproach, "robot1.first_pick_approach_planner");
+  validatePickPlanner(kRobot1NextPickApproach, "robot1.subsequent_pick_approach_planner");
+  validatePickPlanner(kRobot2FirstPickApproach, "robot2.first_pick_approach_planner");
+  validatePickPlanner(kRobot2NextPickApproach, "robot2.subsequent_pick_approach_planner");
   kConfiguredStages = sa3_yaml::steps(task["stages"], "motion task.shear_links_pp.stages");
   const std::vector<std::string> references = {"pick_approach", "pick", "pick_approach", "place_approach", "place", "place_approach"};
+  // P1 is selected dynamically per arm and pair index, regardless of its YAML hint.
   const std::vector<std::string> motions = {"moveJ", "moveL", "moveL", "fallback", "moveL", "moveL"};
   const std::vector<std::vector<std::string>> actions = {
     {"allow_pick_contact"}, {"attach_rebar", "allow_web_ring_contact"},
@@ -160,7 +192,13 @@ void loadShearProgram(const rclcpp::Node::SharedPtr & node) {
     {"restore_place_contact", "complete_pair"}};
   if (kConfiguredStages.size() != references.size()) throw std::runtime_error("shear requires six ordered stages");
   for (std::size_t i = 0; i < references.size(); ++i) {
-    sa3_yaml::expectedStep(kConfiguredStages[i], references[i], motions[i], actions[i]);
+    // P1 accepts moveJ or moveL as a YAML hint; runtime selection uses config
+    // first_pick_approach_planner/subsequent_pick_approach_planner.
+    if (i == 0 && kConfiguredStages[i].motion != "moveJ" &&
+        kConfiguredStages[i].motion != "moveL")
+      throw std::runtime_error("P1 motion must be moveJ or moveL");
+    sa3_yaml::expectedStep(kConfiguredStages[i], references[i],
+      i == 0 ? kConfiguredStages[i].motion : motions[i], actions[i]);
     if (kConfiguredStages[i].xyz != std::array<double, 3>{0.,0.,0.} || kConfiguredStages[i].offset_frame != "world")
       throw std::runtime_error("shear stage xyz must be zero: approach is configured under shear_links_pp.approach");
   }
@@ -213,6 +251,10 @@ struct Arm
   std::size_t completed = 0;
   Stage stage = Stage::kPickApproach;
   bool pair_ready = false;
+  double last_velocity_scale = 0.0;  // selected scaling factor for the latest successful plan
+  double pair_execution_seconds = 0.0;  // Sum of successful combined.execute() wall times for P1..G2
+  std::string first_pick_approach_planner = "moveJ";
+  std::string subsequent_pick_approach_planner = "moveJ";
 
   geometry_msgs::msg::Pose pick, place, pick_approach, place_approach, via;
 
@@ -310,6 +352,58 @@ bool lookupPose(
   }
 }
 
+// A motion is recorded ONLY after the merged trajectory executes successfully.
+struct MotionRecord {
+  int tick = 0;
+  std::string robot;
+  std::size_t pair_number = 0;
+  std::string object_id;
+  std::string stage;
+  std::string planner;
+  double velocity_scale = 0.0;
+};
+
+std::vector<MotionRecord> gMotionHistory;
+
+// Sum only wall-clock time spent inside successful combined.execute() calls
+// for P1 through G2. No planning, trajectory merging, or scene actions.
+struct PairTimeRecord {
+  std::string robot;
+  std::size_t pair_number = 0;
+  std::string object_id;
+  double elapsed_seconds = 0.0;
+};
+std::vector<PairTimeRecord> gPairTimes;
+
+void printMotionSummary() {
+  std::printf("\n========== PLACE APPROACH / PAIR TIME SUMMARY ==========\n");
+  for (const char * robot : {"robot1", "robot2"}) {
+    std::printf("\n%s\n", robot);
+    std::printf("%-19s %-14s %-13s %s\n", "REBAR", "T1 PLANNER", "VEL SCALE", "EXEC TIME");
+    bool found = false;
+    for (const auto & t : gPairTimes) {
+      if (t.robot != robot) continue;
+      found = true;
+      const MotionRecord * transit = nullptr;
+      for (const auto & r : gMotionHistory) {
+        if (r.robot == t.robot && r.pair_number == t.pair_number &&
+            r.stage.find("transit") == 0) { transit = &r; break; }
+      }
+      if (transit) {
+        std::printf("%-19s %-14s %5.3f (%4.1f%%) %8.2f s\n",
+          t.object_id.c_str(), transit->planner.c_str(),
+          transit->velocity_scale, 100.0 * transit->velocity_scale,
+          t.elapsed_seconds);
+      } else {
+        std::printf("%-19s %-14s %-13s %8.2f s\n",
+          t.object_id.c_str(), "N/A", "N/A", t.elapsed_seconds);
+      }
+    }
+    if (!found) std::printf("No completed pairs.\n");
+  }
+  std::printf("==========================================================\n");
+}
+
 // ===========================================================================
 // single-arm planning primitives (planning only, nothing is executed here)
 // ===========================================================================
@@ -341,7 +435,10 @@ bool planOmpl(
     const auto r = mg.plan(plan);
     mg.clearPoseTargets();
     last_code = r.val;
-    if (r == moveit::core::MoveItErrorCode::SUCCESS) {return true;}
+    if (r == moveit::core::MoveItErrorCode::SUCCESS) {
+      a.last_velocity_scale = kMoveJVelocity;
+      return true;
+    }
     RCLCPP_WARN(
       logger, "%sOMPL attempt %d/%d failed: %s", tagOf(a).c_str(), attempt, kPlanRetries,
       errStr(last_code).c_str());
@@ -375,6 +472,7 @@ bool planLin(
     const auto r = mg.plan(plan);
     mg.clearPoseTargets();
     if (r == moveit::core::MoveItErrorCode::SUCCESS) {
+      a.last_velocity_scale = scale;
       RCLCPP_INFO(
         logger, "%sLIN planned on attempt %d/%d (velocity scale %.3f)",
         tagOf(a).c_str(), attempt, total, scale);
@@ -426,6 +524,7 @@ bool planCirc(
     }
     const auto r = mg.plan(plan);
     if (r == moveit::core::MoveItErrorCode::SUCCESS) {
+      a.last_velocity_scale = scale;
       RCLCPP_INFO(
         logger, "%sCIRC planned on attempt %d/%d (velocity scale %.3f)",
         tagOf(a).c_str(), attempt, total, scale);
@@ -470,20 +569,24 @@ bool planStage(
   MGI::Plan & plan, std::string & method)
 {
   const auto & step = kConfiguredStages.at(static_cast<std::size_t>(a.stage));
+  a.last_velocity_scale = 0.0;
+  const std::string motion = (a.stage == Stage::kPickApproach)
+    ? (a.idx == 0 ? a.first_pick_approach_planner : a.subsequent_pick_approach_planner)
+    : step.motion;
   RCLCPP_INFO(logger, "%sYAML step %s: %s -> %s", tagOf(a).c_str(),
-              step.id.c_str(), step.motion.c_str(), step.reference.c_str());
-  if (step.motion == "fallback") return planTransit(logger, a, start, plan, method);
+              step.id.c_str(), motion.c_str(), step.reference.c_str());
+  if (motion == "fallback") return planTransit(logger, a, start, plan, method);
   const geometry_msgs::msg::Pose * target = nullptr;
   if (step.reference == "pick") target = &a.pick;
   else if (step.reference == "pick_approach") target = &a.pick_approach;
   else if (step.reference == "place") target = &a.place;
   else if (step.reference == "place_approach") target = &a.place_approach;
   if (target == nullptr) return false;
-  if (step.motion == "moveJ") {
+  if (motion == "moveJ") {
     method = "OMPL movej";
     return planOmpl(logger, a, start, *target, plan);
   }
-  if (step.motion == "moveL") {
+  if (motion == "moveL") {
     method = "LIN";
     return planLin(logger, a, start, *target, plan);
   }
@@ -772,6 +875,7 @@ bool moveCombinedHome(const rclcpp::Logger & logger, MGI & combined)
         RCLCPP_ERROR(logger, "Combined HOME execution failed (%s).", errStr(executed.val).c_str());
         return false;
       }
+      gMotionHistory.push_back({0, "combined", 0, "-", "HOME", "OMPL moveJ", kMoveJVelocity});
       RCLCPP_INFO(logger, "Both arms reached HOME.");
       return true;
     }
@@ -818,8 +922,10 @@ bool runSequence(
         methods[i] = "HOLD";
         continue;
       }
-      if (a.stage == Stage::kPickApproach && !a.pair_ready && !beginPair(logger, tf, scene, a)) {
-        return false;
+      if (a.stage == Stage::kPickApproach && !a.pair_ready) {
+        // Reset the per-pair execution accumulator at P1.
+        a.pair_execution_seconds = 0.0;
+        if (!beginPair(logger, tf, scene, a)) return false;
       }
       MGI::Plan plan;
       if (!planStage(logger, a, start_msg, plan, methods[i])) {
@@ -849,16 +955,44 @@ bool runSequence(
       a2.done() ? "done" : stageName(a2.stage), methods[1].c_str(),
       combined_plan.trajectory_.joint_trajectory.joint_names.size(), shared);
 
+    const auto execution_started = std::chrono::steady_clock::now();
     const auto executed = combined.execute(combined_plan);
+    const auto execution_finished = std::chrono::steady_clock::now();
     if (executed != moveit::core::MoveItErrorCode::SUCCESS) {
       RCLCPP_ERROR(logger, "Combined execution failed (%s).", errStr(executed.val).c_str());
       return false;
+    }
+    // Each active robot's pair receives the duration of this *shared* execution.
+    // The time is not divided between robots; completed robots on HOLD are skipped.
+    const double execution_seconds =
+      std::chrono::duration<double>(execution_finished - execution_started).count();
+    for (Arm * a : arms) {
+      if (!a->done()) a->pair_execution_seconds += execution_seconds;
+    }
+
+    // Executed successfully: preserve planner and velocity before stage advancement.
+    for (std::size_t i = 0; i < arms.size(); ++i) {
+      Arm & a = *arms[i];
+      if (a.done()) continue;  // HOLD is not a newly planned motion.
+      gMotionHistory.push_back({
+        tick, a.name, a.idx + 1, a.rebar(), stageName(a.stage),
+        methods[i], a.last_velocity_scale
+      });
     }
 
     // ---- scene operations / stage advance for every arm that moved ----
     for (Arm * a : arms) {
       if (a->done()) {continue;}
+      const bool completing_pair = a->stage == Stage::kPlaceRetract;
+      const std::size_t completed_pair_number = a->idx + 1;
+      const std::string completed_object = completing_pair ? a->rebar() : "";
       if (!finishStage(logger, scene, *a)) {return false;}
+      if (completing_pair) {
+        gPairTimes.push_back({
+          a->name, completed_pair_number, completed_object, a->pair_execution_seconds
+        });
+        a->pair_execution_seconds = 0.0;
+      }
     }
   }
 
@@ -1000,12 +1134,16 @@ int main(int argc, char ** argv)
         a1.web_ring = kRobot1Ring;
         a1.via_x = loadDouble(node, "robot1_via_x", kRobot1ViaX);
         a1.gripper_links = kRobot1GripperLinks;
+        a1.first_pick_approach_planner = kRobot1FirstPickApproach;
+        a1.subsequent_pick_approach_planner = kRobot1NextPickApproach;
         a2.name = "robot2";
         a2.link = kRobot2Link;
         a2.mg = &robot2;
         a2.web_ring = kRobot2Ring;
         a2.via_x = loadDouble(node, "robot2_via_x", kRobot2ViaX);
         a2.gripper_links = kRobot2GripperLinks;
+        a2.first_pick_approach_planner = kRobot2FirstPickApproach;
+        a2.subsequent_pick_approach_planner = kRobot2NextPickApproach;
         // YAML list is authoritative; optional ROS pair-list overrides remain supported.
         if (!loadPairs(node, "robot1_pick_place_pairs", kRobot1PairSpecs, a1.pairs) ||
             !loadPairs(node, "robot2_pick_place_pairs", kRobot2PairSpecs, a2.pairs)) return false;
@@ -1028,6 +1166,7 @@ int main(int argc, char ** argv)
         std::printf("robot2: %zu / %zu pairs completed\n", a2.completed, a2.pairs.size());
         std::printf("result: %s\n", success ? "OK (both arms home)" : "FAILED");
         std::printf("=====================================================\n");
+        printMotionSummary();
         return success;
       }();
   } catch (const std::exception & e) {

@@ -3,7 +3,7 @@
 // Rebar tying for robot1_arm + robot2_arm: SEPARATE planning, COMBINED execution.
 //
 // Per tying point <clamp>_t<n> each arm does (same as robot1_tying / robot2_tying):
-//     1  tie approach   tp -20 (tying-frame X)     OMPL movej
+//     1  tie approach   tp -20 (tying-frame X)     configurable LIN/CIRC/OMPL fallback
 //     2  tie            tp                         Pilz LIN
 //     3  tie retract    tp -20                     Pilz LIN
 //
@@ -48,6 +48,8 @@
 #include <moveit/robot_state/conversions.h>
 #include <moveit/robot_state/robot_state.h>
 #include <moveit_msgs/msg/move_it_error_codes.hpp>
+#include <moveit_msgs/msg/constraints.hpp>
+#include <moveit_msgs/msg/position_constraint.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Quaternion.h>
@@ -81,6 +83,12 @@ double kPlanningTime = 15.0;
 int kOmplAttempts = 10, kPlanRetries = 3;
 double kMoveJVelocity = 0.30, kMoveJAcceleration = 0.20, kMoveLAcceleration = 0.05;
 std::vector<double> kLinVelScales = {0.10};
+std::vector<double> kCircVelScales = {0.10};
+double kMoveCAcceleration = 0.05;
+// Ordered approach fallback, shared by both robots; CIRC is optional.
+std::vector<std::string> kApproachStrategies = {"moveL", "moveJ"};
+// CIRC interim point = midpoint of current tool pose and goal + this world XYZ offset.
+std::array<double, 3> kCircViaOffsetWorld = {0.0, 0.0, 0.10};
 bool kRobot1Enabled = true, kRobot2Enabled = true, kStopOnFirstFailure = false;
 std::vector<sa3_yaml::Step> kTyingSteps;
 
@@ -110,9 +118,33 @@ void loadTyingProgram(const rclcpp::Node::SharedPtr & node) {
   kMoveJAcceleration = sa3_yaml::finite(p["movej_acceleration"], "tying movej_acceleration");
   kMoveLAcceleration = sa3_yaml::finite(p["movel_acceleration"], "tying movel_acceleration");
   kLinVelScales = sa3_yaml::scales(p["lin_velocity_scales"], "tying LIN scales");
+  kCircVelScales = p["circ_velocity_scales"] ?
+    sa3_yaml::scales(p["circ_velocity_scales"], "tying CIRC scales") : kLinVelScales;
+  kMoveCAcceleration = p["movec_acceleration"] ?
+    sa3_yaml::finite(p["movec_acceleration"], "tying movec_acceleration") : kMoveLAcceleration;
+  // transit_strategies is also supported as an alias for the approach fallback.
+  // approach_strategies takes precedence when both exist.
+  if (p["approach_strategies"]) {
+    kApproachStrategies = sa3_yaml::strings(p["approach_strategies"], "approach_strategies");
+  } else if (p["transit_strategies"]) {
+    kApproachStrategies = sa3_yaml::strings(p["transit_strategies"], "transit_strategies");
+  }
+  if (kApproachStrategies.empty())
+    throw std::runtime_error("tying approach strategies cannot be empty");
+  std::vector<std::string> seen;
+  for (const auto & strategy : kApproachStrategies) {
+    if (strategy != "moveL" && strategy != "moveC" && strategy != "moveJ")
+      throw std::runtime_error("Unknown tying approach strategy: " + strategy);
+    if (std::find(seen.begin(), seen.end(), strategy) != seen.end())
+      throw std::runtime_error("Duplicate tying approach strategy: " + strategy);
+    seen.push_back(strategy);
+  }
+  if (p["circ_via_offset_world"])
+    kCircViaOffsetWorld = sa3_yaml::xyz(p["circ_via_offset_world"], "circ_via_offset_world");
   if (kPlanningTime <= 0 || kOmplAttempts < 1 || kPlanRetries < 1 ||
       kMoveJVelocity <= 0 || kMoveJVelocity > 1 || kMoveJAcceleration <= 0 || kMoveJAcceleration > 1 ||
-      kMoveLAcceleration <= 0 || kMoveLAcceleration > 1) throw std::runtime_error("Invalid tying planning settings");
+      kMoveLAcceleration <= 0 || kMoveLAcceleration > 1 ||
+       kMoveCAcceleration <= 0 || kMoveCAcceleration > 1) throw std::runtime_error("Invalid tying planning settings");
   kStopOnFirstFailure = c["stop_on_first_failure"].as<bool>();
   const auto approach = sa3_yaml::require(c, "approach", "tying_rebars");
   kApproachOffset = sa3_yaml::xyz(approach["xyz"], "tying approach xyz");
@@ -140,7 +172,10 @@ void loadTyingProgram(const rclcpp::Node::SharedPtr & node) {
   arm("robot2", kRobot2Group, kRobot2Link, kRobot2Enabled, kDefaultJobs2);
   kTyingSteps = sa3_yaml::steps(task["point_steps"], "motion task.tying_rebars.point_steps");
   if (kTyingSteps.size()!=3) throw std::runtime_error("tying requires exactly 3 steps per point");
-  sa3_yaml::expectedStep(kTyingSteps[0], "tie_approach", "moveJ");
+  if (kTyingSteps[0].motion != "fallback" && kTyingSteps[0].motion != "moveJ" &&
+      kTyingSteps[0].motion != "moveL")
+    throw std::runtime_error("T1 tie approach motion must be fallback, moveL or moveJ");
+  sa3_yaml::expectedStep(kTyingSteps[0], "tie_approach", kTyingSteps[0].motion);
   sa3_yaml::expectedStep(kTyingSteps[1], "tie_frame", "moveL");
   sa3_yaml::expectedStep(kTyingSteps[2], "tie_approach", "moveL", {"mark_point_complete"});
   for (const auto & step : kTyingSteps) if (step.xyz != std::array<double,3>{0.,0.,0.} || step.offset_frame != "world")
@@ -189,6 +224,10 @@ struct Point
   std::string clamp, frame;
   Status status = Status::kNotRun;
   Failure failure;
+  double execution_seconds = 0.0;
+  std::array<double, 3> stage_execution_seconds = {0.0, 0.0, 0.0};
+  std::string approach_planner = "-";
+  double approach_velocity_scale = 0.0;
 };
 
 struct Arm
@@ -201,6 +240,7 @@ struct Arm
   std::size_t idx = 0;
   Stage stage = Stage::kDone;
   bool ready = false;
+  double selected_velocity_scale = 0.0;
 
   geometry_msgs::msg::Pose tp, tp_approach;
 
@@ -415,7 +455,10 @@ bool planOmpl(
     const auto r = mg.plan(plan);
     mg.clearPoseTargets();
     code = r.val;
-    if (r == moveit::core::MoveItErrorCode::SUCCESS) {return true;}
+    if (r == moveit::core::MoveItErrorCode::SUCCESS) {
+      a.selected_velocity_scale = kMoveJVelocity;
+      return true;
+    }
     RCLCPP_WARN(
       logger, "%sOMPL attempt %d/%d failed: %s", tagOf(a).c_str(), attempt, kPlanRetries,
       errStr(code).c_str());
@@ -450,7 +493,10 @@ bool planLin(
     const auto r = mg.plan(plan);
     mg.clearPoseTargets();
     code = r.val;
-    if (r == moveit::core::MoveItErrorCode::SUCCESS) {return true;}
+    if (r == moveit::core::MoveItErrorCode::SUCCESS) {
+      a.selected_velocity_scale = scale;
+      return true;
+    }
     RCLCPP_WARN(
       logger, "%sLIN attempt %d/%d failed at velocity scale %.3f: %s",
       tagOf(a).c_str(), attempt, total, scale, errStr(code).c_str());
@@ -464,6 +510,82 @@ bool planLin(
   return false;
 }
 
+// Optional Pilz CIRC alternative for tie approach. A noncollinear via point
+// must be confirmed in RViz for the actual robot and fixture geometry.
+bool planCirc(
+  const rclcpp::Logger & logger, Arm & a, const moveit_msgs::msg::RobotState & start,
+  const geometry_msgs::msg::Pose & target, MGI::Plan & plan, int & code)
+{
+  auto & mg = *a.mg;
+  code = MoveItErr::FAILURE;
+  const auto current = mg.getCurrentPose(a.link).pose;
+  geometry_msgs::msg::Pose via = target;
+  via.position.x = 0.5 * (current.position.x + target.position.x) + kCircViaOffsetWorld[0];
+  via.position.y = 0.5 * (current.position.y + target.position.y) + kCircViaOffsetWorld[1];
+  via.position.z = 0.5 * (current.position.z + target.position.z) + kCircViaOffsetWorld[2];
+  moveit_msgs::msg::PositionConstraint pc;
+  pc.header.frame_id = kWorld;
+  pc.link_name = a.link;
+  pc.constraint_region.primitive_poses.push_back(via);
+  pc.weight = 1.0;
+  moveit_msgs::msg::Constraints constraints;
+  constraints.name = "interim";
+  constraints.position_constraints.push_back(pc);
+
+  const int total = static_cast<int>(kCircVelScales.size());
+  for (int i = 0; i < total; ++i) {
+    const double scale = kCircVelScales[i];
+    mg.setStartState(start);
+    mg.setPlanningPipelineId("pilz_industrial_motion_planner");
+    mg.setPlannerId("CIRC");
+    mg.setPlanningTime(kPlanningTime);
+    mg.setNumPlanningAttempts(1);
+    mg.setMaxVelocityScalingFactor(scale);
+    mg.setMaxAccelerationScalingFactor(std::min(kMoveCAcceleration, scale));
+    mg.clearPoseTargets();
+    mg.clearPathConstraints();
+    mg.setPathConstraints(constraints);
+    if (!mg.setPoseTarget(target, a.link)) {
+      code = MoveItErr::FAILURE;
+      break;
+    }
+    const auto r = mg.plan(plan);
+    mg.clearPoseTargets();
+    code = r.val;
+    if (r == moveit::core::MoveItErrorCode::SUCCESS) {
+      a.selected_velocity_scale = scale;
+      mg.clearPathConstraints();
+      return true;
+    }
+    RCLCPP_WARN(logger, "%sCIRC attempt %d/%d scale %.3f failed: %s",
+      tagOf(a).c_str(), i + 1, total, scale, errStr(code).c_str());
+    if (code == MoveItErr::NO_IK_SOLUTION || code == MoveItErr::GOAL_IN_COLLISION ||
+        code == MoveItErr::START_STATE_IN_COLLISION) break;
+  }
+  mg.clearPathConstraints();
+  mg.clearPoseTargets();
+  return false;
+}
+
+bool planApproachFallback(
+  const rclcpp::Logger & logger, Arm & a, const moveit_msgs::msg::RobotState & start,
+  const geometry_msgs::msg::Pose & target, MGI::Plan & plan, std::string & method, int & code)
+{
+  for (const auto & strategy : kApproachStrategies) {
+    if (strategy == "moveL") {
+      method = "LIN";
+      if (planLin(logger, a, start, target, plan, code)) return true;
+    } else if (strategy == "moveC") {
+      method = "CIRC";
+      if (planCirc(logger, a, start, target, plan, code)) return true;
+    } else if (strategy == "moveJ") {
+      method = "OMPL moveJ";
+      if (planOmpl(logger, a, start, target, plan, code)) return true;
+    }
+  }
+  return false;
+}
+
 // Execute the loaded and validated three-step YAML point program.
 bool planStage(
   const rclcpp::Logger & logger, Arm & a, const moveit_msgs::msg::RobotState & start,
@@ -471,8 +593,11 @@ bool planStage(
 {
   const auto & step = kTyingSteps.at(static_cast<std::size_t>(a.stage));
   const auto & target = step.reference == "tie_frame" ? a.tp : a.tp_approach;
+  a.selected_velocity_scale = 0.0;
   RCLCPP_INFO(logger, "%sYAML step %s: %s -> %s", tagOf(a).c_str(),
               step.id.c_str(), step.motion.c_str(), step.reference.c_str());
+  if (a.stage == Stage::kApproach && step.motion == "fallback")
+    return planApproachFallback(logger, a, start, target, plan, method, code);
   if (step.motion == "moveJ") {
     method = "OMPL";
     return planOmpl(logger, a, start, target, plan, code);
@@ -850,7 +975,10 @@ bool runSequence(
       a2.done() ? "done" : stageName(a2.stage), methods[1].c_str(),
       combined_plan.trajectory_.joint_trajectory.joint_names.size(), shared);
 
+    const auto execution_started = std::chrono::steady_clock::now();
     const auto executed = combined.execute(combined_plan);
+    const double execution_seconds = std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - execution_started).count();
     if (executed != moveit::core::MoveItErrorCode::SUCCESS) {
       RCLCPP_ERROR(logger, "Combined execution failed (%s).", errStr(executed.val).c_str());
       for (std::size_t i = 0; i < arms.size(); ++i) {
@@ -864,7 +992,16 @@ bool runSequence(
     }
 
     for (std::size_t i = 0; i < arms.size(); ++i) {
-      if (moving[i]) {finishStage(logger, *arms[i]);}
+      if (!moving[i]) continue;
+      Arm & a = *arms[i];
+      // Count only successful combined.execute() wall time; no planning/TF/HOME.
+      a.points[a.idx].execution_seconds += execution_seconds;
+      a.points[a.idx].stage_execution_seconds[static_cast<std::size_t>(a.stage)] += execution_seconds;
+      if (a.stage == Stage::kApproach) {
+        a.points[a.idx].approach_planner = methods[i];
+        a.points[a.idx].approach_velocity_scale = a.selected_velocity_scale;
+      }
+      finishStage(logger, a);
     }
   }
   return true;
@@ -882,6 +1019,8 @@ bool printSummary(const Arm & a)
     else {++not_run;}
   }
   std::printf("\n==================== TYING SUMMARY (%s) ====================\n", a.name.c_str());
+  std::printf("%-7s %-20s %-8s %-13s %-12s %8s %8s %8s %8s\n",
+    "POINT", "FRAME", "STATUS", "APPROACH", "VEL SCALE", "T1", "T2", "T3", "TOTAL");
   const int total = static_cast<int>(a.points.size());
   int idx = 0;
   for (const auto & p : a.points) {
@@ -889,17 +1028,22 @@ bool printSummary(const Arm & a)
     char col[16];
     std::snprintf(col, sizeof(col), "%d/%d", idx, total);
     if (p.status == Status::kOk) {
-      std::printf("%-7s %-18s | OK\n", col, p.frame.c_str());
+      std::printf("%-7s %-20s %-8s %-13s %5.3f (%4.1f%%) %7.2f s %7.2f s %7.2f s %7.2f s\n",
+        col, p.frame.c_str(), "OK", p.approach_planner.c_str(),
+        p.approach_velocity_scale, 100.0 * p.approach_velocity_scale,
+        p.stage_execution_seconds[0], p.stage_execution_seconds[1],
+        p.stage_execution_seconds[2], p.execution_seconds);
     } else if (p.status == Status::kNotRun) {
-      std::printf("%-7s %-18s | NOT RUN\n", col, p.frame.c_str());
+      std::printf("%-7s %-20s | NOT RUN\n", col, p.frame.c_str());
     } else {
       std::printf(
-        "%-7s %-18s | FAILED | step %d/3 %-13s | %-8s | %-12s | %s\n", col, p.frame.c_str(),
-        p.failure.step_idx, p.failure.step.c_str(), p.failure.planner.c_str(),
-        p.failure.stage.c_str(), errStr(p.failure.code).c_str());
+        "%-7s %-20s | FAILED step %d/3 %-13s | %-12s | %s | executed %.2f s before failure\n",
+        col, p.frame.c_str(), p.failure.step_idx, p.failure.step.c_str(),
+        p.failure.stage.c_str(), errStr(p.failure.code).c_str(), p.execution_seconds);
     }
   }
   std::printf("Points OK: %d / %d    FAILED: %d    NOT RUN: %d\n", ok, total, failed, not_run);
+  std::printf("EXEC TIME = sum of successful combined.execute() calls for each point's T1/T2/T3.\n");
   return failed == 0 && not_run == 0;
 }
 

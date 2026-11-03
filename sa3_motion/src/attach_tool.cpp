@@ -45,11 +45,11 @@ RobotConfig makeConfig(const std::string & prefix)
   c.tool_mount = prefix + "_tool_mount";
   c.dock = prefix + "_shuck_dock";
   c.object_ids = {
-    prefix + "_schunk_base", prefix + "_schunk_link7", prefix + "_schunk_link8"};
+    prefix + "_schunk_base"};
   // Arm links that may overlap the gripper. Add real link names if needed.
   c.touch_links = {
     c.tool_mount, prefix + "_J4_link", prefix + "_J5_link", prefix + "_J6_link",
-    prefix + "_schunk_base", prefix + "_schunk_link7", prefix + "_schunk_link8"};
+    prefix + "_schunk_base"};
   return c;
 }
 
