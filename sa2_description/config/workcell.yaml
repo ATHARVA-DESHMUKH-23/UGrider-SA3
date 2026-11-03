@@ -61,10 +61,10 @@ workcell:
       xyz: [0.446, 0.979, 2.133]
       rpy: [0.307, 0.0, -1.572]
     bm_pkL:
-      parent: inventory_3a_4a
+      parent: world
       child: bm_pkL
-      xyz: [1.837, -2.429, 4.306]
-      rpy: [-0.562, -0.007, -1.571]
+      xyz: [0.420, 1.864, 4.116]
+      rpy: [-0.571, -0.007, 1.573]
     bm_pkr:
       parent: inventory_3a_4a_2
       child: bm_pkr
@@ -169,7 +169,7 @@ workcell:
     bm_pfl:
       parent: jig_clamp
       child: bm_pfl
-      xyz: [-0.564, 0.317, -3.141]
+      xyz: [0.824, 0.396, 2.135]
       rpy: [-0.577, 0.317, -3.141]
     bm_pfr:
       parent: jig_clamp

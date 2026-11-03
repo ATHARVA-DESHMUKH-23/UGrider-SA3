@@ -10,96 +10,96 @@ motion_sequence:
     retries: 1
     on_failure: abort
  
-  # - name: Pick/place flange pair 3C + 4C
-  #   executables:
-  #   - name: flange_pp
-  #     parameters:
-  #       workcell_config_package: sa2_description
-  #       workcell_config_file: config/workcell.yaml
-  #       motion_config_package: sa3_motion
-  #       motion_config_file: config/ms_2_re.yaml
-  #       motion_task: flange_3c_4c
-  #   mode: sequential
-  #   retries: 1
-  #   on_failure: abort
+  - name: Pick/place flange pair 3C + 4C
+    executables:
+    - name: flange_pp
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_config_package: sa3_motion
+        motion_config_file: config/ms_2_re.yaml
+        motion_task: flange_3c_4c
+    mode: sequential
+    retries: 1
+    on_failure: abort
  
-  # - name: Pick/place flange pair 3D + 4D
-  #   executables:
-  #   - name: flange_pp
-  #     parameters:
-  #       workcell_config_package: sa2_description
-  #       workcell_config_file: config/workcell.yaml
-  #       motion_config_package: sa3_motion
-  #       motion_config_file: config/ms_2_re.yaml
-  #       motion_task: flange_3d_4d
-  #   mode: sequential
-  #   retries: 1
-  #   on_failure: abort
+  - name: Pick/place flange pair 3D + 4D
+    executables:
+    - name: flange_pp
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_config_package: sa3_motion
+        motion_config_file: config/ms_2_re.yaml
+        motion_task: flange_3d_4d
+    mode: sequential
+    retries: 1
+    on_failure: abort
 
-  # - name: Pick/place shear links with robot1 and robot2
-  #   executables:
-  #   - name: shear_links_pp
-  #     parameters:
-  #       workcell_config_package: sa2_description
-  #       workcell_config_file: config/workcell.yaml
-  #       motion_config_package: sa3_motion
-  #       motion_config_file: config/ms_2_re.yaml
-  #       motion_task: shear_links_2_re
-  #   mode: sequential
-  #   retries: 1
-  #   on_failure: abort
+  - name: Pick/place shear links with robot1 and robot2
+    executables:
+    - name: shear_links_pp
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_config_package: sa3_motion
+        motion_config_file: config/ms_2_re.yaml
+        motion_task: shear_links_2_re
+    mode: sequential
+    retries: 1
+    on_failure: abort
 
-  # - name: Change gripper
-  #   executables:
-  #   - name: robot1_gripper_change
-  #     parameters:
-  #       workcell_config_package: sa2_description
-  #       workcell_config_file: config/workcell.yaml
-  #       motion_config_package: sa3_motion
-  #       motion_config_file: config/ms_2_re.yaml
-  #       motion_task: change_to_tying_guns
-  #   mode: sequential
-  #   retries: 3
-  #   on_failure: abort
+  - name: Change gripper
+    executables:
+    - name: robot1_gripper_change
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_config_package: sa3_motion
+        motion_config_file: config/ms_2_re.yaml
+        motion_task: change_to_tying_guns
+    mode: sequential
+    retries: 3
+    on_failure: abort
   
-  # - name: Tie clamps with tying guns
-  #   executables:
-  #   - name: tying_rebars
-  #     parameters:
-  #       workcell_config_package: sa2_description
-  #       workcell_config_file: config/workcell.yaml
-  #       motion_config_package: sa3_motion
-  #       motion_config_file: config/ms_2_re.yaml
-  #       motion_task: tying_2_re
-  #   mode: parallel
-  #   retries: 1
-  #   on_failure: abort
+  - name: Tie clamps with tying guns
+    executables:
+    - name: tying_rebars
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_config_package: sa3_motion
+        motion_config_file: config/ms_2_re.yaml
+        motion_task: tying_2_re
+    mode: parallel
+    retries: 1
+    on_failure: abort
   
-  # - name: place rebar 1A with gantry and robot3
-  #   executables:
-  #   - name: gantry_move
-  #     parameters:
-  #       workcell_config_package: sa2_description
-  #       workcell_config_file: config/workcell.yaml
-  #       motion_config_package: sa3_motion
-  #       motion_config_file: config/ms_2_re.yaml
-  #       motion_task: gantry_bottom_mat_2_re
-  #   mode: sequential
-  #   retries: 1
-  #   on_failure: abort
+  - name: place rebar 1A with gantry and robot3
+    executables:
+    - name: gantry_move
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_config_package: sa3_motion
+        motion_config_file: config/ms_2_re.yaml
+        motion_task: gantry_bottom_mat_2_re
+    mode: sequential
+    retries: 1
+    on_failure: abort
   
-  # - name: Tie Bottom Mat with tying guns
-  #   executables:
-  #   - name: tying_rebars
-  #     parameters:
-  #       workcell_config_package: sa2_description
-  #       workcell_config_file: config/workcell.yaml
-  #       motion_config_package: sa3_motion
-  #       motion_config_file: config/ms_2_re.yaml
-  #       motion_task: tying_bottom_mat_2_re
-  #   mode: parallel
-  #   retries: 1
-  #   on_failure: abort
+  - name: Tie Bottom Mat with tying guns
+    executables:
+    - name: tying_rebars
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_config_package: sa3_motion
+        motion_config_file: config/ms_2_re.yaml
+        motion_task: tying_bottom_mat_2_re
+    mode: parallel
+    retries: 1
+    on_failure: abort
  
   # - name: Change back from tying guns to Schunk grippers
   #   executables:
@@ -121,10 +121,29 @@ motion_sequence:
         parameters:
           pick_frame: sa3_pick_point
           place_frame: sa3_place
-          object_id: rebar_3c
-
+          object_id: rebar_1A
           children:
-            - rebar_4c
+          - rebar_3c
+          - rebar_4c
+          - rebar_5a
+          - rebar_6
+          - rebar_13_1
+          - rebar_13_2
+          - rebar_13_3
+          - rebar_13_4
+          - rebar_14_1
+          - rebar_14_2
+          - rebar_14_3
+          - rebar_14_4
+          - rebar_13_1_R
+          - rebar_13_2_R
+          - rebar_13_3_R
+          - rebar_14_4_R
+          - rebar_14_3_R
+          - rebar_14_2_R
+          - rebar_14_1_R
+          - rebar_3d
+          - rebar_4d
 
           # Planning settings
           planning_time: 15.0
@@ -190,7 +209,7 @@ motion_sequence:
   #     parameters:
   #       pick_frame: sa3_pick_point
   #       place_frame: sa3_place
-  #       object_id: rebar_3c
+  #       object_id: rebar_1A
   #       children:
   #       - rebar_3c
   #       - rebar_4c
@@ -244,7 +263,7 @@ motion_sequence:
         pick_offset_rpy: [0.627, -1.570, 0.627]
         pick_offset_rpy_frame: local
 
-        place_offset: [0.0, 0.0, 0.0]
+        place_offset: [0.0, 0.01, 0.0]
         place_offset_rpy: [0.0, 0.0, 0.0]
 
         arc_frames: [r3_arc_start, r3_arc_mid, r3_arc_end]
@@ -260,6 +279,9 @@ motion_sequence:
 
         pick_offset_rpy: [0.943, -1.570, 0.943]
         pick_offset_rpy_frame: local
+
+        place_offset: [0.0, 0.01, 0.0]
+        place_offset_rpy: [0.0, 0.0, 0.0]
         
         arc_frames: [r4_arc_start, r4_arc_mid, r4_arc_end]
       
@@ -414,7 +436,7 @@ motion_sequence:
         pick_offset_rpy: [0.627, -1.570, 0.627]
         pick_offset_rpy_frame: local
 
-        place_offset: [0.0, 0.0, 0.0]
+        place_offset: [0.0, -0.02, 0.0]
         place_offset_rpy: [0.0, 0.0, 0.0]
 
         arc_frames: [r3_arc_start, r3_arc_mid, r3_arc_end]
@@ -432,7 +454,7 @@ motion_sequence:
         pick_offset_rpy: [0.943, -1.570, 0.943]
         pick_offset_rpy_frame: local
 
-        place_offset: [0.0, 0.0, 0.0]
+        place_offset: [0.0, -0.02, 0.0]
         place_offset_rpy: [0.0, 0.0, 0.0]
 
         arc_frames: [r4_arc_start, r4_arc_mid, r4_arc_end]
@@ -967,7 +989,7 @@ motion_sequence:
           vertical_pick_target_m: 4.1
           horizontal_target_m: -6.0
           down_target_m: 1.2
-          speed_mps: 0.3
+          speed_mps: 0.6
           acceleration_mps2: 0.5
           horizontal_min_m: -10.6
           horizontal_limit_m: 10.6
@@ -975,20 +997,20 @@ motion_sequence:
           settle_time_sec: 0.5
           trajectory_timeout_sec: 60.0
           auto_start: true
-          start_delay_sec: 3.0
+          start_delay_sec: 0.0
           ready_timeout_sec: 90.0
         planning:
           planning_time: 15.0
-          joint_movej_velocity: 0.5
-          joint_movej_acceleration: 0.4
+          joint_movej_velocity: 0.7
+          joint_movej_acceleration: 0.7
           cartesian_velocity: 0.15
-          cartesian_acceleration: 0.1
-          cartesian_max_translation_step_m: 0.01
-          cartesian_max_rotation_step_rad: 0.03
-          cartesian_eef_step_m: 0.01
+          cartesian_acceleration: 0.5
+          cartesian_max_translation_step_m: 0.05
+          cartesian_max_rotation_step_rad: 0.05
+          cartesian_eef_step_m: 0.05
           cartesian_min_fraction: 0.99
-          pilz_velocity: 0.2
-          pilz_acceleration: 0.1
+          pilz_velocity: 0.5
+          pilz_acceleration: 0.5
       gantry_steps:
       - id: G1
         description: raised gantry moves horizontally to rebar pickup
@@ -1024,7 +1046,7 @@ motion_sequence:
         - detach_gantry
       robot3_steps:
       - id: R1
-        description: approach 5 cm in front of pick frame on local negative X (no side candidates)
+        description: straight Pilz LIN approach 5 cm in front of pick frame on local negative X
         reference: pick_frame
         motion: moveJ
         planner: ompl
@@ -1056,7 +1078,7 @@ motion_sequence:
         after_actions:
         - lift_gantry_start_parallel_return
       - id: R4
-        description: direct collision-checked OMPL MoveJ to place approach (no waypoints)
+        description: straight Pilz LIN to place approach (no waypoints)
         reference: place_frame
         motion: moveJ
         planner: ompl
@@ -1091,7 +1113,6 @@ motion_sequence:
         description: Robot3 returns to captured startup joint state
         reference: home
         motion: moveJ
-    
     
     tying_bottom_mat_2_re:
       type: tying_rebars

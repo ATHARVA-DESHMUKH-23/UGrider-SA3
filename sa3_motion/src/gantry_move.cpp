@@ -2,6 +2,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -155,7 +156,7 @@ static std::vector<ConfiguredGantryStep> readConfiguredGantrySteps(
         step.rpy = configuredVector3(item, "rpy", step.id);
       }
       step.ik_check = item["ik_check"].as<bool>(false);
-      // No route anchors are supported: R4 is a direct OMPL MoveJ goal.
+      // Direct R4 transfer only: MoveJ/OMPL or MoveL/Cartesian, no route anchors.
       if (item["waypoints"] || item["min_samples"] || item["max_samples"]) {
         throw std::runtime_error(step.id + ": intermediate waypoints and sample counts are not supported.");
       }
@@ -210,11 +211,14 @@ static std::vector<ConfiguredGantryStep> readConfiguredGantrySteps(
         throw std::runtime_error("gantry_move: unsafe gantry joint order at " + result[i].id);
       }
     }
-  } else if (result[0].reference != "pick_frame" || result[0].motion != "moveJ" ||
-             !result[0].candidates.empty() ||
+  } else if (!((result[0].motion == "moveL" && result[0].planner == "pilz") ||
+                (result[0].motion == "moveJ" && result[0].planner == "ompl")) ||
+             result[0].reference != "pick_frame" || !result[0].candidates.empty() ||
              result[1].motion != "moveL" || result[1].planner != "pilz" || result[1].reference != "pick_frame" ||
              result[2].motion != "moveL" || result[2].planner != "cartesian" || result[2].reference != "pick_frame" ||
-             result[3].motion != "moveJ" || result[3].planner != "ompl" || result[3].reference != "place_frame" ||
+             !((result[3].motion == "moveL" && result[3].planner == "pilz") ||
+               (result[3].motion == "moveJ" && result[3].planner == "ompl")) ||
+             result[3].reference != "place_frame" ||
              !result[3].candidates.empty() || !result[3].ik_check ||
              result[4].motion != "moveL" || result[4].planner != "cartesian" || result[4].reference != "place_frame" ||
              result[5].motion != "moveL" || result[5].planner != "cartesian" || result[5].reference != "place_frame" ||
@@ -789,6 +793,150 @@ private:
     return false;
   }
 
+  using MoveGroup = moveit::planning_interface::MoveGroupInterface;
+
+  // Like shear_links_pp: time ONLY successfully executed trajectories.
+  // MoveIt planning, IK, TF lookup, scene actions and settle sleeps are excluded.
+  // A gantry return may overlap with Robot 3; the overall active time is the
+  // union of execution intervals, not the sum of both robots' totals.
+  using SteadyTime = std::chrono::steady_clock::time_point;
+  struct ExecutionRecord {
+    std::string actor;      // "gantry" or "robot3"
+    std::string step;       // G1..G5, G_RETURN_Z/X, R1..R7
+    std::string planner;
+    double speed_setting = 0.0;  // robot: scale, gantry: m/s
+    SteadyTime started, finished;
+    double seconds() const {
+      return std::chrono::duration<double>(finished - started).count();
+    }
+  };
+
+  std::mutex execution_history_mutex_;
+  std::vector<ExecutionRecord> execution_history_;
+
+  void recordSuccessfulExecution(
+    const std::string & actor, const std::string & step,
+    const std::string & planner, double speed_setting,
+    SteadyTime started, SteadyTime finished)
+  {
+    {
+      std::lock_guard<std::mutex> guard(execution_history_mutex_);
+      execution_history_.push_back({actor, step, planner, speed_setting, started, finished});
+    }
+    RCLCPP_INFO(get_logger(),
+      "[EXEC ONLY] %s %s | %s | speed setting %.3f | %.3f s",
+      actor.c_str(), step.c_str(), planner.c_str(), speed_setting,
+      std::chrono::duration<double>(finished - started).count());
+  }
+
+  // A single MoveIt execute() call: no planning or IK in the timed interval.
+  template<typename PlannedMotion>
+  auto executeRobot3Timed(
+    MoveGroup & group, const PlannedMotion & motion,
+    const std::string & label, const std::string & planner, double velocity_scale)
+  {
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = group.execute(motion);
+    const auto finished = std::chrono::steady_clock::now();
+    if (result == moveit::core::MoveItErrorCode::SUCCESS) {
+      const std::string step = label.substr(0, label.find(' '));
+      recordSuccessfulExecution("robot3", step, planner, velocity_scale, started, finished);
+    }
+    return result;
+  }
+
+  void printExecutionSummary(bool success)
+  {
+    std::vector<ExecutionRecord> records;
+    {
+      std::lock_guard<std::mutex> guard(execution_history_mutex_);
+      records = execution_history_;
+    }
+    const auto sumFor = [&](const std::string & actor, bool home_only = false) {
+      double sum = 0.0;
+      for (const auto & r : records) {
+        if (r.actor == actor && (!home_only || r.step == "R7")) sum += r.seconds();
+      }
+      return sum;
+    };
+    const auto findStep = [&](const std::string & actor, const std::string & step)
+      -> const ExecutionRecord * {
+      for (const auto & r : records) {
+        if (r.actor == actor && r.step == step) return &r;
+      }
+      return nullptr;
+    };
+
+    const double robot3_home = sumFor("robot3", true);
+    const double robot3_pair = sumFor("robot3") - robot3_home;  // R1..R6
+    const double gantry_total = sumFor("gantry");
+    const ExecutionRecord * transfer = findStep("robot3", "R4");
+
+    // Wall time actually inside motion execution intervals. Gantry horizontal
+    // return and Robot 3 can run concurrently; count their overlap only once.
+    std::vector<std::pair<SteadyTime, SteadyTime>> intervals;
+    for (const auto & r : records) intervals.emplace_back(r.started, r.finished);
+    std::sort(intervals.begin(), intervals.end(),
+      [](const auto & a, const auto & b) {return a.first < b.first;});
+    double active_seconds = 0.0;
+    if (!intervals.empty()) {
+      auto first = intervals.front().first;
+      auto last = intervals.front().second;
+      for (std::size_t i = 1; i < intervals.size(); ++i) {
+        if (intervals[i].first <= last) {
+          last = std::max(last, intervals[i].second);
+        } else {
+          active_seconds += std::chrono::duration<double>(last - first).count();
+          first = intervals[i].first;
+          last = intervals[i].second;
+        }
+      }
+      active_seconds += std::chrono::duration<double>(last - first).count();
+    }
+
+    std::printf("\n========== GANTRY / ROBOT3 EXECUTION SUMMARY ==========\n");
+    std::printf("\nrobot3\n");
+    std::printf("%-18s %-16s %-15s %s\n", "REBAR", "R4 PLANNER", "VEL SCALE", "EXEC TIME");
+    if (transfer) {
+      std::printf("%-18s %-16s %5.3f (%4.1f%%)   %8.2f s%s\n",
+        rebar_id_.c_str(), transfer->planner.c_str(), transfer->speed_setting,
+        transfer->speed_setting * 100.0, robot3_pair,
+        success ? "" : " [PARTIAL]");
+    } else {
+      std::printf("%-18s %-16s %-15s %8.2f s%s\n",
+        rebar_id_.c_str(), "N/A", "N/A", robot3_pair,
+        success ? "" : " [PARTIAL]");
+    }
+
+    std::printf("\nRobot 3 motion details (successful execute calls only)\n");
+    std::printf("%-13s %-19s %-12s %s\n", "STEP", "PLANNER", "VEL SCALE", "EXEC TIME");
+    for (const auto & step : {"R1","R2","R3","R4","R5","R6","R7"}) {
+      if (const auto * r = findStep("robot3", step)) {
+        std::printf("%-13s %-19s %-12.3f %8.2f s\n",
+          step, r->planner.c_str(), r->speed_setting, r->seconds());
+      }
+    }
+
+    std::printf("\nGantry joint motion details (successful action goals only)\n");
+    std::printf("%-13s %-19s %-12s %s\n", "STEP", "MOTION", "SPEED m/s", "EXEC TIME");
+    for (const auto & step : {"G1","G2","G3","G4","G5","G_RETURN_Z","G_RETURN_X"}) {
+      if (const auto * r = findStep("gantry", step)) {
+        std::printf("%-13s %-19s %-12.3f %8.2f s\n",
+          step, r->planner.c_str(), r->speed_setting, r->seconds());
+      }
+    }
+
+    std::printf("\nROBOT3 PICK/PLACE EXEC (R1..R6) : %8.2f s\n", robot3_pair);
+    std::printf("ROBOT3 HOME EXEC       (R7)    : %8.2f s\n", robot3_home);
+    std::printf("GANTRY JOINT EXEC      (all)   : %8.2f s\n", gantry_total);
+    std::printf("TOTAL ACTIVE EXEC TIME (overlap removed): %.2f s\n", active_seconds);
+    std::printf("RESULT: %s\n", success ? "COMPLETE" : "FAILED / PARTIAL");
+    std::printf("Planning, IK, collision-scene actions, settle delays excluded.\n");
+    std::printf("MoveIt execute() includes controller round-trip overhead.\n");
+    std::printf("=======================================================\n");
+    std::fflush(stdout);
+  }
+
   // Sends ONE goal that lists BOTH gantry joints, because gantry_controller
   // is configured with both joints and allow_partial_joints_goal=false.
   // The moving joint goes to its target; the other joint holds its position.
@@ -797,7 +945,8 @@ private:
     double target_position,
     double current_position,
     const std::string & holding_joint,
-    double holding_position)
+    double holding_position,
+    const std::string & stage_label)
   {
     if (!trajectory_client_->wait_for_action_server(5s)) {
       RCLCPP_ERROR(
@@ -854,6 +1003,7 @@ private:
     auto send_goal_options =
       rclcpp_action::Client<FollowTrajectory>::SendGoalOptions();
 
+    const auto execution_started = std::chrono::steady_clock::now();
     auto goal_handle_future =
       trajectory_client_->async_send_goal(goal, send_goal_options);
 
@@ -917,6 +1067,9 @@ private:
       return false;
     }
 
+    const auto execution_finished = std::chrono::steady_clock::now();
+    recordSuccessfulExecution("gantry", stage_label, "Joint trajectory", speed_,
+      execution_started, execution_finished);
     RCLCPP_INFO(
       get_logger(),
       "Trajectory completed for '%s'.",
@@ -927,7 +1080,8 @@ private:
 
   bool moveJointTo(
     const std::string & joint_name,
-    double target_position)
+    double target_position,
+    const std::string & stage_label = "GANTRY")
   {
     const std::string & holding_joint =
       (joint_name == horizontal_joint_) ? vertical_joint_ : horizontal_joint_;
@@ -942,10 +1096,8 @@ private:
 
     return executeTrajectory(
       joint_name, target_position, current_position,
-      holding_joint, holding_position);
+      holding_joint, holding_position, stage_label);
   }
-
-  using MoveGroup = moveit::planning_interface::MoveGroupInterface;
 
   bool captureHomeState(MoveGroup & group, std::vector<double> & home)
   {
@@ -1021,7 +1173,9 @@ private:
       RCLCPP_ERROR(get_logger(), "%s: planning failed (code %d).", label.c_str(), result.val);
       return false;
     }
-    const auto execution = group.execute(plan);
+    const auto execution = executeRobot3Timed(group, plan, label,
+      linear ? "Pilz LIN" : "OMPL MoveJ",
+      linear ? safe_linear_velocity : home_velocity_);
     if (execution != moveit::core::MoveItErrorCode::SUCCESS) {
       RCLCPP_ERROR(get_logger(), "%s: trajectory execution failed (code %d).", label.c_str(), execution.val);
       return false;
@@ -1134,7 +1288,8 @@ private:
       return false;
     }
 
-    const auto execution = group.execute(trajectory);
+    const auto execution = executeRobot3Timed(group, trajectory, label,
+      "Cartesian MoveL", cartesian_velocity_);
     if (execution != moveit::core::MoveItErrorCode::SUCCESS) {
       RCLCPP_ERROR(
         get_logger(), "%s: Cartesian MoveL trajectory execution failed (code %d).",
@@ -1242,7 +1397,8 @@ private:
       RCLCPP_ERROR(get_logger(), "%s: planning to IK joint goal failed (code %d).", label.c_str(), result.val);
       return false;
     }
-    const auto execution = group.execute(plan);
+    const auto execution = executeRobot3Timed(group, plan, label,
+      "OMPL MoveJ", 0.40);
     if (execution != moveit::core::MoveItErrorCode::SUCCESS) {
       RCLCPP_ERROR(get_logger(), "%s: trajectory execution failed (code %d).", label.c_str(), execution.val);
       return false;
@@ -1380,7 +1536,8 @@ private:
       return false;
     }
 
-    const auto execution = group.execute(plan);
+    const auto execution = executeRobot3Timed(group, plan, label,
+      "OMPL MoveJ", 0.40);
     if (execution != moveit::core::MoveItErrorCode::SUCCESS) {
       RCLCPP_ERROR(get_logger(), "%s: trajectory execution failed (code %d).", label.c_str(), execution.val);
       return false;
@@ -1404,7 +1561,8 @@ private:
       RCLCPP_ERROR(get_logger(), "%s home planning failed (code %d).", label.c_str(), planned.val);
       return false;
     }
-    const auto executed = group.execute(plan);
+    const auto executed = executeRobot3Timed(group, plan, label,
+      "OMPL MoveJ", home_velocity_);
     if (executed != moveit::core::MoveItErrorCode::SUCCESS) {
       RCLCPP_ERROR(get_logger(), "%s home execution failed (code %d).", label.c_str(), executed.val);
       return false;
@@ -1537,7 +1695,7 @@ private:
         (horizontal_axis ? horizontal_target_ : vertical_target_);
       RCLCPP_INFO(get_logger(), "[%s] %s: %s -> %.3f m",
         step.id.c_str(), step.description.c_str(), joint.c_str(), target);
-      return moveJointTo(joint, target);
+      return moveJointTo(joint, target, step.id);
     };
     for (const auto & step : gantry_planner_steps_) {
       // The pre-validated G1..G5 actions/order protects the rebar during
@@ -1615,10 +1773,10 @@ private:
           return false;
         }
         // This action occurs ONLY after R3's 5 cm retract MoveL succeeded.
-        if (!moveJointTo(vertical_joint_, vertical_home_)) return false;
+        if (!moveJointTo(vertical_joint_, vertical_home_, "G_RETURN_Z")) return false;
         horizontal_return_started = true;
         horizontal_return_thread = std::thread([&]() {
-          horizontal_return_success = moveJointTo(horizontal_joint_, horizontal_home_);
+          horizontal_return_success = moveJointTo(horizontal_joint_, horizontal_home_, "G_RETURN_X");
           if (!horizontal_return_success) {
             RCLCPP_ERROR(get_logger(), "Parallel gantry horizontal return failed.");
           }
@@ -1769,6 +1927,8 @@ private:
             get_logger(), "Unknown exception during gantry sequence.");
         }
 
+        // Print even on failure; successful motion calls completed so far are retained.
+        printExecutionSummary(success);
         {
           std::lock_guard<std::mutex> state_lock(sequence_mutex_);
           sequence_running_ = false;
