@@ -33,6 +33,7 @@
 #include <moveit_msgs/srv/apply_planning_scene.hpp>
 #include <moveit_msgs/srv/get_planning_scene.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <std_srvs/srv/trigger.hpp>
 #include <tf2/LinearMath/Transform.h>
 #include <tf2/exceptions.h>
 #include <tf2/time.h>
@@ -42,6 +43,7 @@
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
 #include "sa3_motion/workcell_program.hpp"
 #include "sa3_motion/motion_task.hpp"
+#include "sa3_motion/phase5_cell_safety.hpp"
 
 using namespace std::chrono_literals;
 using MGI = moveit::planning_interface::MoveGroupInterface;
@@ -403,6 +405,7 @@ public:
       arms_[i].mg->setPlanningTime(kPlanningTime);
     }
 
+    phase5_gate_enabled_ = sa3_phase5::enabledParam(node_);
     get_scene_ = node_->create_client<moveit_msgs::srv::GetPlanningScene>("get_planning_scene");
     apply_scene_ =
       node_->create_client<moveit_msgs::srv::ApplyPlanningScene>("apply_planning_scene");
@@ -443,7 +446,9 @@ public:
       }
       return ok;
     };
+    sa3_phase5::GateClient phase5_gate(node_, "robot12", phase5_gate_enabled_);
     for (std::size_t step_index = 0; step_index < kGripperSteps.size(); ++step_index) {
+      if (!phase5_gate.acquire()) return false;
       const auto & step = kGripperSteps[step_index];
       active_step_index_ = step_index;
       std::array<geometry_msgs::msg::Pose, 2> targets;
@@ -484,8 +489,11 @@ public:
           return false;
         }
       }
+      // Keep the cell locked through the final scene restoration, too.
+      if (step_index + 1 == kGripperSteps.size() && !restore()) return false;
+      if (!phase5_gate.release()) return false;
     }
-    if (!restore()) return false;
+    if (!phase5_gate.done()) return false;
     logI("combined gripper change completed: " + kSourceTool + " -> " + kTargetTool);
     return true;
   }
@@ -683,6 +691,20 @@ private:
   // ---- execution ------------------------------------------------------------
   bool executeCombined(MGI::Plan & plan, const std::string & label)
   {
+    if (phase5_gate_enabled_) {
+      auto state = combined_->getCurrentState(5.0);
+      if (!state || !sa3_phase5::validateFullArmTrajectory(
+          node_, plan.trajectory_, *state, label)) {
+        logE("Full-arm sampled collision validation failed for " + label);
+        return false;
+      }
+      const auto fresh = combined_->getCurrentState(5.0);
+      if (!fresh || !sa3_phase5::fullArmStartStillCurrent(
+          node_, *state, *fresh, label)) {
+        logE("Cell arm state changed before gripper execute for " + label);
+        return false;
+      }
+    }
     // Wall-clock time of the blocking execution call only (no planning / TF / scene updates).
     const auto started = std::chrono::steady_clock::now();
     const auto r = combined_->execute(plan);
@@ -839,6 +861,7 @@ private:
 
   rclcpp::Node::SharedPtr node_;
   tf2_ros::Buffer & tf_;
+  bool phase5_gate_enabled_{false};
 
   std::unique_ptr<MGI> combined_;
   std::array<Arm, 2> arms_;
@@ -846,6 +869,35 @@ private:
   rclcpp::Client<moveit_msgs::srv::GetPlanningScene>::SharedPtr get_scene_;
   rclcpp::Client<moveit_msgs::srv::ApplyPlanningScene>::SharedPtr apply_scene_;
 };
+
+// Optional handoff barrier: G5 is completed (and the gantry rebar has been
+// presented) before Robot1/2 start D1. The phase5 gate still forbids motion
+// by Robot3 and Robot1/2 at the same instant.
+bool waitForG5BeforeToolChange(const rclcpp::Node::SharedPtr & node)
+{
+  const bool enabled = node->get_parameter("wait_for_gantry_g5").as_bool();
+  if (!enabled) return true;
+  const auto budget = node->get_parameter("gantry_g5_wait_timeout_sec").as_double();
+  if (!(std::isfinite(budget) && budget > 0.0)) return false;
+  auto client = node->create_client<std_srvs::srv::Trigger>("/gantry_g5_complete_status");
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::duration<double>(budget);
+  while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
+    if (!client->wait_for_service(1s)) continue;
+    auto future = client->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
+    if (future.wait_for(3s) != std::future_status::ready) {
+      client->remove_pending_request(future);
+      continue;
+    }
+    const auto result = future.get();
+    if (result && result->success && result->message == "G5_COMPLETE") {
+      RCLCPP_INFO(node->get_logger(), "G5 complete: gripper change may begin with phase5 gate");
+      return true;
+    }
+    rclcpp::sleep_for(200ms);
+  }
+  RCLCPP_ERROR(node->get_logger(), "No verified G5 completion; refusing gripper-change motion");
+  return false;
+}
 
 // ===========================================================================
 // main
@@ -873,8 +925,13 @@ int main(int argc, char ** argv)
     tf2_ros::TransformListener tf_listener(tf_buffer, node, false);
 
     loadGripperProgram(node);
+    // Optional early Phase5 mode, defaults false for the existing programs.
+    if (!node->has_parameter("wait_for_gantry_g5"))
+      node->declare_parameter<bool>("wait_for_gantry_g5", false);
+    if (!node->has_parameter("gantry_g5_wait_timeout_sec"))
+      node->declare_parameter<double>("gantry_g5_wait_timeout_sec", 240.0);
     DualGripperChanger changer(node, tf_buffer);
-    ok = changer.run();
+    ok = waitForG5BeforeToolChange(node) && changer.run();
     changer.printExecutionSummary();
 
     (void)tf_listener;

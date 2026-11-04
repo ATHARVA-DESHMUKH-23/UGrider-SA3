@@ -90,36 +90,97 @@ def generate_launch_description():
                 )
             if not isinstance(name, str) or not name.strip():
                 raise RuntimeError(f"Stage '{stage_name}' has an executable with no valid name")
-            return {"name": name.strip(), "parameters": params}
+            return {"name": name.strip(), "parameters": params,
+                    "background": bool(raw.get("background", False)) if isinstance(raw, dict) else False}
 
         def make_node(entry):
+            params = dict(entry["parameters"])
+            # All recipe-backed C++ nodes must use the exact YAML selected at
+            # launch. Do not fall back to a stale/missing installed config copy.
+            if entry["name"] in (
+                "gantry_move", "flange_pp", "shear_links_pp",
+                "robot1_gripper_change", "tying_rebars",
+            ):
+                params["motion_config_path"] = config_path
             return Node(
                 package=PACKAGE_NAME,
                 executable=entry["name"],
                 output="screen",
-                parameters=[moveit_parameters, entry["parameters"]],
+                parameters=[moveit_parameters, params],
             )
 
         def stop(reason):
             return [LogInfo(msg=f"[motion_sequence] STOP: {reason}"),
                     EmitEvent(event=Shutdown(reason=reason))]
 
+        # Persistent background processes, e.g. the gantry waiting at G4.
+        background_state = {
+            "process": None,
+            "finished": False,
+            "phase5_started": False,
+            "gantry_exited_successfully": False,
+        }
+
         def run_stage(index):
             if index >= len(stages):
-                return stop("All configured stages finished.")
+                background_state["finished"] = True
+                if (background_state["process"] is not None and
+                        not background_state["gantry_exited_successfully"]):
+                    return [LogInfo(msg="[motion_sequence] All stages passed; waiting for the "
+                        "gantry/Robot3 node to exit successfully")]
+                return stop("ALL SIX PHASES COMPLETED; final home stage passed")
             stage = stages[index]
             if not isinstance(stage, dict):
                 return stop(f"Stage {index + 1} must be a YAML mapping")
 
             stage_name = str(stage.get("name", f"Stage {index + 1}"))
             raw_entries = stage.get("executables", [])
+            # This is a six-phase recipe: the persistent gantry must remain
+            # alive through G4 and the R3 hold, but it is EXPECTED to exit
+            # with code 0 after completing Robot3 R4-R7 in Phase 5.
+            # Recognize the actual workflow handler, not just the label.
+            if stage_name.startswith("PHASE 5 -") or any(
+                isinstance(item, dict)
+                and item.get("name", item.get("executable")) == "sa3_combined_motion"
+                and item.get("parameters", {}).get("workflow_mode") == "phase5_interlocked"
+                for item in raw_entries
+            ):
+                background_state["phase5_started"] = True
             mode = str(stage.get("mode", "sequential")).lower()
             retries = int(stage.get("retries", 1))
             policy = str(stage.get("on_failure", "abort")).lower()
 
+            if mode == "combined":
+                # A combined stage has exactly one motion owner: sa3_combined_motion.
+                # It reads the SAME source recipe path this launcher was given.
+                key = stage.get("combined_step")
+                if not isinstance(key, str) or not key.strip():
+                    return stop(f"Stage '{stage_name}': combined_step is required")
+                workcell_package = str(stage.get("workcell_config_package", "sa2_description"))
+                workcell_file = str(stage.get("workcell_config_file", "config/workcell.yaml"))
+                workcell_path = os.path.join(
+                    get_package_share_directory(workcell_package), workcell_file
+                )
+                if not os.path.isfile(workcell_path):
+                    return stop(f"Stage '{stage_name}': workcell file not found: {workcell_path}")
+                # Explicit opt-in required to execute combined motion.
+                run_motion = stage.get("execute_motion", False)
+                if not isinstance(run_motion, bool):
+                    return stop(f"Stage '{stage_name}': execute_motion must be true/false")
+                entry = {
+                    "name": "sa3_combined_motion",
+                    "parameters": {
+                        "sequence_config_path": config_path,
+                        "workcell_config_path": workcell_path,
+                        "combined_step": key.strip(),
+                        "execute_motion": run_motion,
+                    },
+                }
+                return run_single(index, stage_name, entry, retries, 1, policy)
+
             if not isinstance(raw_entries, list) or not raw_entries:
                 return stop(f"Stage '{stage_name}': executables must be a non-empty list")
-            if mode not in ("parallel", "sequential"):
+            if mode not in ("parallel", "sequential", "overlap"):
                 return stop(f"Stage '{stage_name}': invalid mode '{mode}'")
             if retries < 1:
                 return stop(f"Stage '{stage_name}': retries must be at least 1")
@@ -134,7 +195,50 @@ def generate_launch_description():
 
             if mode == "sequential":
                 return run_single(index, stage_name, entries[0], retries, 1, policy)
+            if mode == "overlap":
+                if retries != 1:
+                    return stop("Overlap cannot retry: the gantry may already hold a rebar")
+                if len(entries) != 2 or sum(bool(e["background"]) for e in entries) != 1:
+                    return stop("Overlap requires exactly two executables, one with background: true")
+                if background_state["process"] is not None:
+                    return stop("Only one persistent background operation is supported")
+                return run_overlap(index, stage_name, entries)
             return run_parallel(index, stage_name, entries, retries, 1, policy)
+
+        def run_overlap(index, stage_name, entries):
+            """Launch both nodes now. Advance after foreground exits successfully,
+            keeping the gantry alive and watching for an unexpected exit.
+            """
+            bg = next(e for e in entries if e["background"])
+            fg = next(e for e in entries if not e["background"])
+            bg_process = make_node(bg)
+            fg_process = make_node(fg)
+            background_state["process"] = bg_process
+
+            def background_exited(event, _context):
+                rc = event.returncode
+                if rc != 0:
+                    return stop(f"Background {bg['name']} exited with error {rc}; gantry/scene needs inspection")
+                if not background_state["phase5_started"]:
+                    return stop("Gantry exited before Phase 5 placement; inspect attachment and joints")
+                background_state["gantry_exited_successfully"] = True
+                if background_state["finished"]:
+                    return stop("ALL SIX PHASES COMPLETED; gantry exited successfully")
+                return [LogInfo(msg="[motion_sequence] Gantry/Robot3 R4-R7 exited "
+                    "successfully; allowing Phase 5 gripper change and coordinator to finish")]
+
+            def foreground_exited(event, _context):
+                rc = event.returncode
+                if rc != 0:
+                    return stop(f"Foreground {fg['name']} failed with code {rc}")
+                return [LogInfo(msg=f"[motion_sequence] {fg['name']} finished; gantry remains "
+                    "running, checking G4 hold before Phase 2.")] + run_stage(index + 1)
+
+            return [RegisterEventHandler(OnProcessExit(
+                        target_action=bg_process, on_exit=background_exited)),
+                    RegisterEventHandler(OnProcessExit(
+                        target_action=fg_process, on_exit=foreground_exited)),
+                    bg_process, fg_process]
 
         def run_single(index, stage_name, entry, retries, attempt, policy):
             process = make_node(entry)

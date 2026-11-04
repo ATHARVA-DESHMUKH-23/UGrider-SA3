@@ -28,6 +28,9 @@
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
 #include <moveit_msgs/msg/move_it_error_codes.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <std_srvs/srv/trigger.hpp>
+#include <chrono>
+#include <future>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Vector3.h>
@@ -55,6 +58,9 @@ struct MotionTuning
   int retries{3};
   double movej_velocity{0.10};
   double movej_acceleration{0.10};
+  // Optional faster scale for B2 (PTP end -> PTP start) only.
+  double reverse_ptp_velocity{0.10};
+  double reverse_ptp_acceleration{0.10};
   double movel_velocity{0.10};
   double movel_acceleration{0.10};
   double ik_timeout{1.0};
@@ -233,7 +239,7 @@ trajectory_msgs::msg::JointTrajectoryPoint sampleTrajectory(
     return true;
   };
 
-  if (!interpolate(a.positions, b.positions, out.positions, 1.0)) return {};
+  if (!interpolate(a.positions, b.positions, out.positions, 1.0)) return trajectory_msgs::msg::JointTrajectoryPoint();
   // If either plan omits derivatives, leave that derivative array empty.
   interpolate(a.velocities, b.velocities, out.velocities, 1.0 / factor);
   interpolate(a.accelerations, b.accelerations, out.accelerations, 1.0 / (factor * factor));
@@ -252,8 +258,10 @@ bool movel_combined(
   moveit::planning_interface::MoveGroupInterface & combinedgroup,
   const geometry_msgs::msg::Pose & goal1,
   const geometry_msgs::msg::Pose & goal2,
-  const std::string & stage)
+  const std::string & stage,
+  bool * execution_failed = nullptr)
 {
+  if (execution_failed) *execution_failed = false;
   auto start_state = combinedgroup.getCurrentState(10.0);
   if (!start_state) {
     RCLCPP_ERROR(logger, "[%s] Current combined robot state unavailable.", stage.c_str());
@@ -384,6 +392,9 @@ bool movel_combined(
   RCLCPP_INFO(logger,
     "[%s] Both LIN plans succeeded; executing merged %zu-joint trajectory (%.3f s).",
     stage.c_str(), merged.joint_names.size(), shared_duration);
+  // Once execution has been requested, do not switch planners automatically:
+  // the robot may already have moved, even if execute() returns an error.
+  if (execution_failed) *execution_failed = true;
   const auto executed = combinedgroup.execute(combined_plan);
   if (executed != moveit::core::MoveItErrorCode::SUCCESS) {
     RCLCPP_ERROR(logger, "[%s] Combined LIN execution failed (code %d).", stage.c_str(), executed.val);
@@ -404,8 +415,11 @@ bool planAndExecuteBoth(
   const geometry_msgs::msg::Pose & target3,
   const geometry_msgs::msg::Pose & target4,
   const std::string & stage,
-  bool pilz_ptp = false)
+  bool pilz_ptp = false,
+  bool * execution_failed = nullptr)
 {
+  // Planning fallback is permissible only before execution has started.
+  if (execution_failed) *execution_failed = false;
   for (int attempt = 1; attempt <= tuning.retries; ++attempt) {
     auto state = combined.getCurrentState(10.0);
     if (!state) {
@@ -459,6 +473,7 @@ bool planAndExecuteBoth(
 
     const auto executed = combined.execute(plan);
     if (executed != moveit::core::MoveItErrorCode::SUCCESS) {
+      if (execution_failed) *execution_failed = true;
       RCLCPP_ERROR(logger, "[%s] combined trajectory execution failed (code %d).",
         stage.c_str(), executed.val);
       return false;
@@ -549,6 +564,8 @@ struct FlangeProgram
   int arc_points{8};
   MotionTuning tuning;
   std::vector<ConfiguredPlannerStep> steps;
+  bool skip_home{false};
+  bool is_3d_4d{false};
 };
 
 std::array<double, 3> requiredVector3(
@@ -767,6 +784,8 @@ MotionTuning readMotionTuning(const YAML::Node & config)
   t.ik_timeout = config["ik_timeout"].as<double>();
   t.movej_velocity = config["movej_velocity"].as<double>();
   t.movej_acceleration = config["movej_acceleration"].as<double>();
+  t.reverse_ptp_velocity = config["reverse_ptp_velocity"].as<double>(t.movej_velocity);
+  t.reverse_ptp_acceleration = config["reverse_ptp_acceleration"].as<double>(t.movej_acceleration);
   t.movel_velocity = config["movel_velocity"].as<double>();
   t.movel_acceleration = config["movel_acceleration"].as<double>();
   if (!std::isfinite(t.planning_time) || t.planning_time <= 0.0 ||
@@ -775,6 +794,7 @@ MotionTuning readMotionTuning(const YAML::Node & config)
     throw std::runtime_error("Invalid flange planning time/attempts/retries/IK timeout");
   }
   for (double value : {t.movej_velocity, t.movej_acceleration,
+                       t.reverse_ptp_velocity, t.reverse_ptp_acceleration,
                        t.movel_velocity, t.movel_acceleration}) {
     if (!std::isfinite(value) || value <= 0.0 || value > 1.0) {
       throw std::runtime_error("All flange scaling factors must be in (0, 1]");
@@ -950,6 +970,10 @@ bool executeConfiguredPlannerSteps(
     if (!run_actions(step.before_actions, label)) return false;
 
     if (step.home) {
+      if (program.skip_home) {
+        RCLCPP_INFO(logger, "[%s] Skipping intermediate home: skip_home=true.", label.c_str());
+        continue;
+      }
       if (!moveCombinedHome(logger, program.tuning, program.combined_group, combined)) return false;
     } else {
       const std::size_t count = step.repeat_arc ? arc3.size() : 1;
@@ -972,10 +996,61 @@ bool executeConfiguredPlannerSteps(
           "movePTP (combined Pilz PTP)" : "moveL (paired Pilz LIN)";
         RCLCPP_INFO(logger, "[%s] YAML motion=%s", waypoint_label.c_str(), kind);
         bool succeeded = false;
-        if (step.motion == MotionType::kMoveJ ||
-            step.motion == MotionType::kMovePTP) {
+        // Configured 3D/4D P1 and every T2 transfer: paired LIN first,
+        // combined MoveJ only if LIN PLANNING fails.  Never fall back
+        // once execution is requested, because the start state may change.
+        const bool lin_first =
+          (step.id == "P1" && program.is_3d_4d) || step.id == "T2";
+        if (lin_first) {
+          bool lin_execution_requested = false;
+          RCLCPP_INFO(logger,
+            "[%s] paired Pilz MoveL first; combined MoveJ on planning failure only.",
+            waypoint_label.c_str());
+          succeeded = movel_combined(
+            logger, program.tuning, program.robot3, program.robot4,
+            robot3, robot4, combined, goal3, goal4,
+            waypoint_label + " [MoveL primary]", &lin_execution_requested);
+          if (!succeeded && !lin_execution_requested) {
+            RCLCPP_WARN(logger,
+              "[%s] MoveL planning failed; attempting combined OMPL MoveJ.",
+              waypoint_label.c_str());
+            bool movej_exec_failed = false;
+            succeeded = planAndExecuteBoth(
+              logger, program.tuning, program.robot3, program.robot4,
+              combined, goal3, goal4, waypoint_label + " [MoveJ fallback]",
+              false, &movej_exec_failed);
+          }
+        // Preserve the existing G1 MoveJ-first behavior for 3C/4C and 3D/4D.
+        } else if (step.id == "G1" &&
+                   (step.motion == MotionType::kMoveJ || step.motion == MotionType::kMoveL) &&
+                   !step.repeat_arc) {
+          bool movej_execution_failed = false;
           succeeded = planAndExecuteBoth(
             logger, program.tuning, program.robot3, program.robot4,
+            combined, goal3, goal4, waypoint_label + " [MoveJ primary]",
+            false, &movej_execution_failed);
+          if (!succeeded && !movej_execution_failed) {
+            RCLCPP_WARN(logger, "[%s] G1 MoveJ planning failed; trying paired Pilz LIN.",
+                        waypoint_label.c_str());
+            succeeded = movel_combined(
+              logger, program.tuning, program.robot3, program.robot4,
+              robot3, robot4, combined, goal3, goal4,
+              waypoint_label + " [MoveL fallback]");
+          }
+        } else if (step.motion == MotionType::kMoveJ ||
+                   step.motion == MotionType::kMovePTP) {
+          MotionTuning selected_tuning = program.tuning;
+          // B2 is the reverse transfer from r3/r4_ptp_end to ptp_start.
+          // Do not change B1, P1, any contact moves, or regular MoveJ.
+          if (program.is_3d_4d && step.id == "B2" &&
+              step.motion == MotionType::kMovePTP) {
+            selected_tuning.movej_velocity = program.tuning.reverse_ptp_velocity;
+            selected_tuning.movej_acceleration = program.tuning.reverse_ptp_acceleration;
+            RCLCPP_INFO(logger, "[B2] Reverse Pilz PTP scale: velocity %.2f, acceleration %.2f",
+                        selected_tuning.movej_velocity, selected_tuning.movej_acceleration);
+          }
+          succeeded = planAndExecuteBoth(
+            logger, selected_tuning, program.robot3, program.robot4,
             combined, goal3, goal4, waypoint_label,
             step.motion == MotionType::kMovePTP);
         } else {
@@ -1105,11 +1180,65 @@ bool runConfiguredProgram(
       refs3, refs4, arc3, arc4, action)) {
     return false;
   }
-  RCLCPP_INFO(logger, "Robot3 + Robot4 YAML flange pick/place and combined home completed");
+  RCLCPP_INFO(logger, "Robot3 + Robot4 YAML flange pick/place completed (home %s).",
+    program.skip_home ? "skipped" : "executed");
   return true;
 }
 
 }  // namespace
+
+// Optional safety barrier for a later flange cycle. The gantry node owns the
+// G4 hold and reports whether it has reached its configured horizontal target,
+// is raised, and still carries rebar 1A. No auxiliary Python process is needed.
+bool waitForGantryG4(
+  const rclcpp::Node::SharedPtr & node,
+  const std::string & service_name, double timeout_sec)
+{
+  if (!std::isfinite(timeout_sec) || timeout_sec <= 0.0) {
+    RCLCPP_ERROR(node->get_logger(), "Gantry checkpoint timeout must be positive");
+    return false;
+  }
+  using Checkpoint = std_srvs::srv::Trigger;
+  auto client = node->create_client<Checkpoint>(service_name);
+  const auto deadline = std::chrono::steady_clock::now() +
+    std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+      std::chrono::duration<double>(timeout_sec));
+  RCLCPP_INFO(node->get_logger(),
+    "Waiting for verified gantry G4 hold at configured horizontal target via %s",
+    service_name.c_str());
+  std::size_t attempts = 0;
+  while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
+    if (!client->wait_for_service(std::chrono::seconds(1))) {
+      continue;
+    }
+    auto request = std::make_shared<Checkpoint::Request>();
+    auto future = client->async_send_request(request);
+    if (future.wait_for(std::chrono::seconds(3)) != std::future_status::ready) {
+      client->remove_pending_request(future);
+      RCLCPP_WARN(node->get_logger(), "G4 status request timed out; retrying");
+      continue;
+    }
+    const auto response = future.get();
+    if (response && response->success &&
+        response->message.find("G4_HOLD_VERIFIED") != std::string::npos) {
+      RCLCPP_INFO(node->get_logger(),
+        "Verified gantry G4 hold. Starting flange motion; gantry stays paused.");
+      return true;
+    }
+    if (response && response->message.find("G4_HOLD_INVALID") != std::string::npos) {
+      RCLCPP_ERROR(node->get_logger(),
+        "Gantry checkpoint is unsafe: %s", response->message.c_str());
+      return false;
+    }
+    if (++attempts % 10 == 0) {
+      RCLCPP_INFO(node->get_logger(), "G4 not yet reached; continuing to wait");
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  }
+  RCLCPP_ERROR(node->get_logger(),
+    "Timed out after %.1f seconds waiting for verified gantry G4", timeout_sec);
+  return false;
+}
 
 int main(int argc, char ** argv)
 {
@@ -1143,7 +1272,21 @@ int main(int argc, char ** argv)
     RCLCPP_INFO(node->get_logger(), "Fixed workcell: %s; motion recipe: %s; task: %s",
       config_path.c_str(), motion_path.c_str(), task_id.c_str());
     auto program = loadFlangeProgram(config_path, motion_path, task_id);
+    program.is_3d_4d = (task_id == "flange_3d_4d");
     applyRosOverrides(node, program);
+    program.skip_home = node->declare_parameter<bool>("skip_home", false);
+    RCLCPP_INFO(node->get_logger(), "Flange intermediate H1: %s",
+      program.skip_home ? "SKIPPED" : "ENABLED");
+    const bool wait_gantry_g4 = node->declare_parameter<bool>(
+      "wait_for_gantry_g4", false);
+    const double gantry_timeout_sec = node->declare_parameter<double>(
+      "gantry_checkpoint_timeout_sec", 180.0);
+    const std::string gantry_checkpoint_service = node->declare_parameter<std::string>(
+      "gantry_checkpoint_service", "/gantry_checkpoint_status");
+    if (wait_gantry_g4 &&
+        !waitForGantryG4(node, gantry_checkpoint_service, gantry_timeout_sec)) {
+      throw std::runtime_error("Gantry G4 checkpoint was not verified; flange motion blocked");
+    }
     tf2_ros::Buffer tf_buffer(node->get_clock());
     tf_buffer.setUsingDedicatedThread(true);
     tf2_ros::TransformListener tf_listener(tf_buffer, node, false);

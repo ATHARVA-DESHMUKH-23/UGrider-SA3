@@ -887,6 +887,39 @@ bool moveCombinedHome(const rclcpp::Logger & logger, MGI & combined)
   return false;
 }
 
+// Start after a synchronized 24-joint H1 + first P1 motion.  No P1 is
+// replayed.  Both live TCP poses must still match their configured first
+// approach targets, otherwise abort instead of blindly moving to the pick.
+bool acceptPrepositionedP1(const rclcpp::Logger & logger, tf2_ros::Buffer & tf,
+                           PlanningSceneObjects & scene, Arm & arm)
+{
+  if (arm.done()) return true;
+  if (arm.idx != 0 || arm.stage != Stage::kPickApproach) return false;
+  if (!beginPair(logger, tf, scene, arm)) return false;
+  const auto live = arm.mg->getCurrentPose(arm.link).pose;
+  const auto & target = arm.pick_approach;
+  const double dx = live.position.x - target.position.x;
+  const double dy = live.position.y - target.position.y;
+  const double dz = live.position.z - target.position.z;
+  const double translation = std::sqrt(dx*dx + dy*dy + dz*dz);
+  const double dot = std::abs(live.orientation.x * target.orientation.x +
+                              live.orientation.y * target.orientation.y +
+                              live.orientation.z * target.orientation.z +
+                              live.orientation.w * target.orientation.w);
+  const double rotation = 2.0 * std::acos(std::min(1.0, std::max(0.0, dot)));
+  if (translation > 0.015 || rotation > 0.08) {
+    RCLCPP_ERROR(logger,
+      "[%s] first P1 not verified: position error %.4f m, orientation error %.4f rad; "
+      "refusing to skip approach.", arm.name.c_str(), translation, rotation);
+    return false;
+  }
+  // Reuse the original P1 after_actions, including contact allowances, then
+  // advance to the normal P2 pickup. No new pick/place motion is invented.
+  if (!finishStage(logger, scene, arm)) return false;
+  RCLCPP_INFO(logger, "[%s] Prepositioned P1 verified; proceeding to P2.", arm.name.c_str());
+  return true;
+}
+
 // ===========================================================================
 // main loop
 // ===========================================================================
@@ -1155,6 +1188,20 @@ int main(int argc, char ** argv)
           node->get_logger(), "Loaded %zu pairs for robot1 and %zu pairs for robot2.",
           a1.pairs.size(), a2.pairs.size());
 
+        const bool first_p1_done = node->has_parameter("first_p1_prepositioned") ?
+          node->get_parameter("first_p1_prepositioned").as_bool() :
+          node->declare_parameter<bool>("first_p1_prepositioned", false);
+        if (first_p1_done) {
+          // Verify both robots before changing any contact allowances.
+          if (!acceptPrepositionedP1(node->get_logger(), tf_buffer, scene, a1) ||
+              !acceptPrepositionedP1(node->get_logger(), tf_buffer, scene, a2)) {
+            RCLCPP_ERROR(node->get_logger(), "Prepositioned P1 verification failed; no shear motion started.");
+            return false;
+          }
+          // Original P1 scene operations and next-stage progression.
+          if (!a1.done() && !finishStage(node->get_logger(), scene, a1)) return false;
+          if (!a2.done() && !finishStage(node->get_logger(), scene, a2)) return false;
+        }
         const bool success = runSequence(node, combined, tf_buffer, scene, a1, a2);
         if (!success) {
           recover(scene, a1);

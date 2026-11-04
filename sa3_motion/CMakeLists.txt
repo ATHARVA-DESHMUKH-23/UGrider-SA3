@@ -486,6 +486,7 @@ ament_target_dependencies(flange_pp
   rclcpp_action
   control_msgs
   trajectory_msgs
+  std_srvs
   moveit_ros_planning_interface
   moveit_msgs
   geometry_msgs
@@ -559,6 +560,29 @@ target_link_libraries(tying_rebars
 
 
 # ============================================================
+# SA3 combined multi-robot motion node (SRDF: sa3_all_robots)
+# ============================================================
+
+add_executable(sa3_combined_motion
+  src/sa3_combined_motion.cpp
+)
+
+ament_target_dependencies(sa3_combined_motion
+  rclcpp
+  moveit_ros_planning_interface
+  moveit_core
+  moveit_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  std_srvs
+)
+
+target_link_libraries(sa3_combined_motion
+  yaml-cpp
+)
+
+# ============================================================
 # Link Planning Scene Objects to robot motion nodes
 # ============================================================
 
@@ -612,6 +636,7 @@ install(
     shear_links_pp
     gantry_move
     tying_rebars
+    sa3_combined_motion
 
   DESTINATION lib/${PROJECT_NAME}
 )
