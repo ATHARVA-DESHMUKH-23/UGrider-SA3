@@ -788,15 +788,15 @@ environment:
     parent: world
     xyz: [-0.2, -2.7, 0.0]
     rpy: [0.0, 0.0, 1.57]
-    mesh: package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL
-    scale: [0.001, 0.001, 0.001]
+    mesh: package://sa2_description/meshes/sa3_env/SA3_INTRY_04_11.STL
+    scale: [1,1,1]
 
   inventory_3a_4a_2:
     parent: world
     xyz: [6.49, -2.7, 0.0]
     rpy: [0.0, 0.0, 1.57]
-    mesh: package://sa2_description/meshes/sa3_env/3A_4A_INVENTORY.STL
-    scale: [0.001, 0.001, 0.001]
+    mesh: package://sa2_description/meshes/sa3_env/SA3_INTRY_04_11.STL
+    scale: [1,1,1]
 
   # flange_inv:
   #   parent: world

@@ -7,6 +7,10 @@
 
 #include <algorithm>
 #include <array>
+#include <unordered_map>
+#include <unordered_set>
+#include <control_msgs/action/follow_joint_trajectory.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -59,6 +63,13 @@ int kMoveJPlanRetries = 3, kOmplAttempts = 10;
 double kIkTimeout = 1.0;
 double kMoveJVelocity = 0.30, kMoveJAcceleration = 0.20;
 double kMoveLVelocity = 0.20, kMoveLAcceleration = 0.10;
+// Execution mode is independent of MoveIt planning (OMPL / Pilz are unchanged).
+std::string kExecutionBackend = "moveit";
+std::string kRobot1ControllerAction = "/robot1_controller/follow_joint_trajectory";
+std::string kRobot2ControllerAction = "/robot2_controller/follow_joint_trajectory";
+double kControllerStartDelaySec = 0.5;
+double kControllerResultTimeoutMarginSec = 30.0;
+double kControllerStartToleranceRad = 0.05;
 std::vector<sa3_yaml::Step> kGripperSteps;
 std::string kSourceTool, kTargetTool;
 
@@ -153,6 +164,25 @@ void loadGripperProgram(const rclcpp::Node::SharedPtr & node) {
   };
   arm("robot1", gRobot1Config);
   arm("robot2", gRobot2Config);
+  // An optional per-recipe execution switch. The default preserves existing behavior.
+  const auto execution = config["execution"];
+  if (execution) {
+    if (!execution.IsMap()) throw std::runtime_error("gripper config.execution must be a map");
+    kExecutionBackend = execution["executer"].as<std::string>("moveit");
+    kRobot1ControllerAction = execution["robot1_action"].as<std::string>(kRobot1ControllerAction);
+    kRobot2ControllerAction = execution["robot2_action"].as<std::string>(kRobot2ControllerAction);
+    kControllerStartDelaySec = execution["start_delay_sec"].as<double>(kControllerStartDelaySec);
+    kControllerResultTimeoutMarginSec = execution["result_timeout_margin_sec"].as<double>(kControllerResultTimeoutMarginSec);
+    kControllerStartToleranceRad = execution["start_tolerance_rad"].as<double>(kControllerStartToleranceRad);
+  }
+  if ((kExecutionBackend != "moveit" && kExecutionBackend != "follow_joint_trajectory") ||
+      kRobot1ControllerAction.empty() || kRobot2ControllerAction.empty() ||
+      kRobot1ControllerAction == kRobot2ControllerAction ||
+      !std::isfinite(kControllerStartDelaySec) || kControllerStartDelaySec < 0.2 || kControllerStartDelaySec > 10.0 ||
+      !std::isfinite(kControllerResultTimeoutMarginSec) || kControllerResultTimeoutMarginSec < 1.0 ||
+      !std::isfinite(kControllerStartToleranceRad) ||
+      kControllerStartToleranceRad <= 0.0 || kControllerStartToleranceRad > 0.2)
+    throw std::runtime_error("Invalid gripper config.execution settings");
   kGripperSteps = sa3_yaml::steps(task["steps"], "motion task.gripper.steps");
   // Mandatory and audited scene-action ordering is independent of the direction.
   // Operators can change target tools and approach distances but not silently
@@ -406,6 +436,14 @@ public:
     }
 
     phase5_gate_enabled_ = sa3_phase5::enabledParam(node_);
+    if (kExecutionBackend == "follow_joint_trajectory") {
+      robot1_action_client_ = rclcpp_action::create_client<FollowTrajectory>(node_, kRobot1ControllerAction);
+      robot2_action_client_ = rclcpp_action::create_client<FollowTrajectory>(node_, kRobot2ControllerAction);
+      logI("DIRECT FJT excuter enabled: R1=" + kRobot1ControllerAction +
+        ", R2=" + kRobot2ControllerAction + "; MoveIt is still used for planning");
+    } else {
+      logI("MoveIt execution excuter enabled (original behavior)");
+    }
     get_scene_ = node_->create_client<moveit_msgs::srv::GetPlanningScene>("get_planning_scene");
     apply_scene_ =
       node_->create_client<moveit_msgs::srv::ApplyPlanningScene>("apply_planning_scene");
@@ -461,7 +499,14 @@ public:
       logI("YAML step " + label + " [" + step.motion + "]");
       const bool moved = step.motion == "moveJ" ?
         movejBoth(targets[0], targets[1], label) : movelBoth(targets[0], targets[1], label);
-      if (!moved) {restore(); return false;}
+      if (!moved) {
+        if (direct_motion_unresolved_) {
+          logE("Controller motion status unresolved: NOT changing tool collision state. "
+            "Stop controllers and inspect the physical cell before recovery.");
+          return false;
+        }
+        restore(); return false;
+      }
       for (const auto & action : step.after_actions) {
         bool ok = true;
         if (action == "detach_source") {
@@ -689,9 +734,221 @@ private:
   }
 
   // ---- execution ------------------------------------------------------------
+  using FollowTrajectory = control_msgs::action::FollowJointTrajectory;
+  using FjtGoalHandle = rclcpp_action::ClientGoalHandle<FollowTrajectory>;
+
+  // Extract exactly the joints owned by one controller. Do not silently send
+  // a combined 12-joint command to a 6-joint trajectory controller.
+  bool splitForControllers(
+    const JT & merged, JT & r1, JT & r2, const std::string & label)
+  {
+    if (merged.points.size() < 2 || merged.joint_names.empty()) {
+      logE(label + ": empty/short planned trajectory"); return false;
+    }
+    std::array<JT *, 2> outputs{{&r1, &r2}};
+    std::array<std::vector<std::size_t>, 2> indices;
+    std::unordered_map<std::string, std::size_t> index_by_name;
+    for (std::size_t j = 0; j < merged.joint_names.size(); ++j) {
+      if (!index_by_name.emplace(merged.joint_names[j], j).second) {
+        logE(label + ": duplicate trajectory joint: " + merged.joint_names[j]); return false;
+      }
+    }
+    for (std::size_t arm = 0; arm < 2; ++arm) {
+      auto & output = *outputs[arm];
+      output.header = merged.header;
+      const auto expected = arms_[arm].mg->getActiveJoints();
+      if (expected.empty()) {logE("Empty active joints for " + arms_[arm].cfg.name); return false;}
+      std::unordered_set<std::string> unique_expected;
+      for (const auto & joint : expected) {
+        if (!unique_expected.insert(joint).second) return false;
+        const auto it = index_by_name.find(joint);
+        if (it == index_by_name.end()) {
+          logE(label + ": missing joint " + joint); return false;
+        }
+        output.joint_names.push_back(joint);
+        indices[arm].push_back(it->second);
+      }
+    }
+    if (indices[0].size() + indices[1].size() != merged.joint_names.size()) {
+      logE(label + ": trajectory contains unexpected joints or overlap between controllers");
+      return false;
+    }
+    for (const auto & point : merged.points) {
+      const auto n = merged.joint_names.size();
+      if (point.positions.size() != n ||
+          (!point.velocities.empty() && point.velocities.size() != n) ||
+          (!point.accelerations.empty() && point.accelerations.size() != n) ||
+          (!point.effort.empty() && point.effort.size() != n)) {
+        logE(label + ": incomplete trajectory point fields"); return false;
+      }
+      for (std::size_t arm = 0; arm < 2; ++arm) {
+        JTP p;
+        p.time_from_start = point.time_from_start;
+        for (const auto i : indices[arm]) {
+          if (!std::isfinite(point.positions[i]) ||
+              (!point.velocities.empty() && !std::isfinite(point.velocities[i])) ||
+              (!point.accelerations.empty() && !std::isfinite(point.accelerations[i])) ||
+              (!point.effort.empty() && !std::isfinite(point.effort[i]))) {
+            logE(label + ": nonfinite trajectory value"); return false;
+          }
+          p.positions.push_back(point.positions[i]);
+          if (!point.velocities.empty()) p.velocities.push_back(point.velocities[i]);
+          if (!point.accelerations.empty()) p.accelerations.push_back(point.accelerations[i]);
+          if (!point.effort.empty()) p.effort.push_back(point.effort[i]);
+        }
+        outputs[arm]->points.push_back(std::move(p));
+      }
+    }
+    double last = -1.0;
+    for (const auto & p : merged.points) {
+      const double t = rclcpp::Duration(p.time_from_start).seconds();
+      if (!std::isfinite(t) || t <= last || t < 0.0) {
+        logE(label + ": invalid or nonincreasing trajectory timestamps"); return false;
+      }
+      last = t;
+    }
+    return true;
+  }
+
+  // Compare both controller start states before dispatch, using the same live
+  // MoveIt robot state that planning relies on. No direct command if it drifted.
+  bool verifyDirectStart(const JT & t1, const JT & t2, const std::string & label)
+  {
+    const auto state = combined_->getCurrentState(5.0);
+    if (!state) return false;
+    for (const auto * traj : {&t1, &t2}) {
+      for (std::size_t i = 0; i < traj->joint_names.size(); ++i) {
+        const double actual = state->getVariablePosition(traj->joint_names[i]);
+        const double expected = traj->points.front().positions[i];
+        if (!std::isfinite(actual) || std::abs(actual - expected) > kControllerStartToleranceRad) {
+          logE(label + ": start joint drift at " + traj->joint_names[i] +
+            " current=" + std::to_string(actual) + " planned=" + std::to_string(expected));
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  bool executeDirectControllers(const MGI::Plan & plan, const std::string & label)
+  {
+    if (!robot1_action_client_ || !robot2_action_client_) return false;
+    if (!plan.trajectory_.multi_dof_joint_trajectory.joint_names.empty()) {
+      logE(label + ": multi-DOF trajectory not supported by direct controllers"); return false;
+    }
+    JT t1, t2;
+    if (!splitForControllers(plan.trajectory_.joint_trajectory, t1, t2, label)) return false;
+    if (!robot1_action_client_->wait_for_action_server(5s) ||
+        !robot2_action_client_->wait_for_action_server(5s)) {
+      logE(label + ": Robot 1/2 FollowJointTrajectory action server unavailable"); return false;
+    }
+    if (!verifyDirectStart(t1, t2, label)) return false;
+
+    // Both controllers receive an identical future timestamp, so transport
+    // latency between the two send requests does not skew their start times.
+    const auto start_stamp = node_->now() + rclcpp::Duration::from_seconds(kControllerStartDelaySec);
+    t1.header.stamp = start_stamp;
+    t2.header.stamp = start_stamp;
+    FollowTrajectory::Goal goal1, goal2;
+    goal1.trajectory = t1;
+    goal2.trajectory = t2;
+    auto start = std::chrono::steady_clock::now();
+    direct_motion_unresolved_ = true;
+    auto f1 = robot1_action_client_->async_send_goal(goal1);
+    auto f2 = robot2_action_client_->async_send_goal(goal2);
+    using namespace std::chrono_literals;
+    const auto accept_deadline = std::chrono::steady_clock::now() + 10s;
+    while (rclcpp::ok() && std::chrono::steady_clock::now() < accept_deadline &&
+           (f1.wait_for(0ms) != std::future_status::ready ||
+            f2.wait_for(0ms) != std::future_status::ready)) {
+      std::this_thread::sleep_for(20ms);
+    }
+    const bool a1_ready = f1.wait_for(0ms) == std::future_status::ready;
+    const bool a2_ready = f2.wait_for(0ms) == std::future_status::ready;
+    auto h1 = a1_ready ? f1.get() : nullptr;
+    auto h2 = a2_ready ? f2.get() : nullptr;
+    auto cancel_both = [&]() {
+      if (h1) robot1_action_client_->async_cancel_goal(h1);
+      if (h2) robot2_action_client_->async_cancel_goal(h2);
+    };
+    if (!h1 || !h2) {
+      cancel_both();
+      // If only one goal was accepted, wait for its cancel result. Otherwise
+      // remain in the unresolved state and do not mutate the scene on failure.
+      const auto stop_deadline = std::chrono::steady_clock::now() + 5s;
+      if (h1 && !h2) {
+        auto stopped = robot1_action_client_->async_get_result(h1);
+        while (rclcpp::ok() && stopped.wait_for(20ms) != std::future_status::ready &&
+               std::chrono::steady_clock::now() < stop_deadline) {}
+        if (stopped.wait_for(0ms) == std::future_status::ready && a2_ready)
+          direct_motion_unresolved_ = false;
+      } else if (h2 && !h1) {
+        auto stopped = robot2_action_client_->async_get_result(h2);
+        while (rclcpp::ok() && stopped.wait_for(20ms) != std::future_status::ready &&
+               std::chrono::steady_clock::now() < stop_deadline) {}
+        if (stopped.wait_for(0ms) == std::future_status::ready && a1_ready)
+          direct_motion_unresolved_ = false;
+      } else if (a1_ready && a2_ready) {
+        direct_motion_unresolved_ = false;
+      }
+      logE(label + ": controller goal was rejected or timed out; cancel requested for accepted goals");
+      return false;
+    }
+
+    auto r1 = robot1_action_client_->async_get_result(h1);
+    auto r2 = robot2_action_client_->async_get_result(h2);
+    const double duration = std::max(
+      rclcpp::Duration(t1.points.back().time_from_start).seconds(),
+      rclcpp::Duration(t2.points.back().time_from_start).seconds());
+    const auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::duration<double>(duration + kControllerStartDelaySec + kControllerResultTimeoutMarginSec);
+    while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
+      const bool d1 = r1.wait_for(0ms) == std::future_status::ready;
+      const bool d2 = r2.wait_for(0ms) == std::future_status::ready;
+      if (d1 && d2) break;
+      auto succeeded = [](const FjtGoalHandle::WrappedResult & w) {
+        return w.code == rclcpp_action::ResultCode::SUCCEEDED && w.result &&
+          w.result->error_code == FollowTrajectory::Result::SUCCESSFUL;
+      };
+      if ((d1 && !succeeded(r1.get())) || (d2 && !succeeded(r2.get()))) break;
+      std::this_thread::sleep_for(20ms);
+    }
+    const bool d1 = r1.wait_for(0ms) == std::future_status::ready;
+    const bool d2 = r2.wait_for(0ms) == std::future_status::ready;
+    if (!d1 || !d2) {
+      cancel_both();
+      const auto stop_deadline = std::chrono::steady_clock::now() + 5s;
+      while (rclcpp::ok() && std::chrono::steady_clock::now() < stop_deadline &&
+             (r1.wait_for(0ms) != std::future_status::ready ||
+              r2.wait_for(0ms) != std::future_status::ready)) {
+        std::this_thread::sleep_for(20ms);
+      }
+      if (r1.wait_for(0ms) == std::future_status::ready &&
+          r2.wait_for(0ms) == std::future_status::ready) direct_motion_unresolved_ = false;
+      logE(label + ": controller result timeout or peer abort; requested both goal cancellations");
+      return false;
+    }
+    direct_motion_unresolved_ = false;
+    const auto w1 = r1.get();
+    const auto w2 = r2.get();
+    const bool ok1 = w1.code == rclcpp_action::ResultCode::SUCCEEDED && w1.result &&
+      w1.result->error_code == FollowTrajectory::Result::SUCCESSFUL;
+    const bool ok2 = w2.code == rclcpp_action::ResultCode::SUCCEEDED && w2.result &&
+      w2.result->error_code == FollowTrajectory::Result::SUCCESSFUL;
+    if (!ok1 || !ok2) {
+      cancel_both();
+      logE(label + ": controller failure (robot1=" + std::to_string(static_cast<int>(w1.code)) +
+        ", robot2=" + std::to_string(static_cast<int>(w2.code)) + ")");
+      return false;
+    }
+    logI(label + ": both FollowJointTrajectory controllers succeeded in " +
+      std::to_string(std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count()) + " s");
+    return true;
+  }
+
   bool executeCombined(MGI::Plan & plan, const std::string & label)
   {
-    if (phase5_gate_enabled_) {
+    if (phase5_gate_enabled_ || kExecutionBackend == "follow_joint_trajectory") {
       auto state = combined_->getCurrentState(5.0);
       if (!state || !sa3_phase5::validateFullArmTrajectory(
           node_, plan.trajectory_, *state, label)) {
@@ -707,19 +964,29 @@ private:
     }
     // Wall-clock time of the blocking execution call only (no planning / TF / scene updates).
     const auto started = std::chrono::steady_clock::now();
-    const auto r = combined_->execute(plan);
+    bool success = false;
+    int moveit_result_code = 0;
+    if (kExecutionBackend == "follow_joint_trajectory") {
+      success = executeDirectControllers(plan, label);
+    } else {
+      const auto r = combined_->execute(plan);
+      moveit_result_code = r.val;
+      success = (r == moveit::core::MoveItErrorCode::SUCCESS);
+    }
     const double elapsed = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - started).count();
     auto & timing = execution_times_.at(active_step_index_);
     timing.seconds = elapsed;
     timing.attempted = true;
-    timing.succeeded = (r == moveit::core::MoveItErrorCode::SUCCESS);
+    timing.succeeded = success;
     if (!timing.succeeded) {
-      logE("combined execution failed for " + label + " (code " + std::to_string(r.val) +
+      logE("combined execution failed for " + label + " (excuter " + kExecutionBackend +
+        ", MoveIt code " + std::to_string(moveit_result_code) +
         ", execute wall time " + std::to_string(elapsed) + " s).");
       return false;
     }
-    logI("[EXEC ONLY] " + label + ": " + std::to_string(elapsed) + " s (both arms combined)");
+    logI("[EXEC ONLY] " + label + ": " + std::to_string(elapsed) +
+      " s (Robot1+Robot2, excuter=" + kExecutionBackend + ")");
     return true;
   }
 
@@ -862,6 +1129,9 @@ private:
   rclcpp::Node::SharedPtr node_;
   tf2_ros::Buffer & tf_;
   bool phase5_gate_enabled_{false};
+  bool direct_motion_unresolved_{false};
+  rclcpp_action::Client<FollowTrajectory>::SharedPtr robot1_action_client_;
+  rclcpp_action::Client<FollowTrajectory>::SharedPtr robot2_action_client_;
 
   std::unique_ptr<MGI> combined_;
   std::array<Arm, 2> arms_;

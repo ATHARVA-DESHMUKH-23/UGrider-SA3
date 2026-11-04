@@ -61,19 +61,19 @@ motion_sequence:
     retries: 1
     on_failure: abort
   
-  - name: PHASE 3B - complete shear links from verified P1
-    mode: sequential
-    executables:
-    - name: shear_links_pp
-      parameters:
-        workcell_config_package: sa2_description
-        workcell_config_file: config/workcell.yaml
-        motion_config_package: sa3_motion
-        motion_config_file: config/ms_2_re.yaml
-        motion_task: shear_links_2_re
-        first_p1_prepositioned: true
-    retries: 1
-    on_failure: abort
+  # - name: PHASE 3B - complete shear links from verified P1
+  #   mode: sequential
+  #   executables:
+  #   - name: shear_links_pp
+  #     parameters:
+  #       workcell_config_package: sa2_description
+  #       workcell_config_file: config/workcell.yaml
+  #       motion_config_package: sa3_motion
+  #       motion_config_file: config/ms_2_re.yaml
+  #       motion_task: shear_links_2_re
+  #       first_p1_prepositioned: true
+  #   retries: 1
+  #   on_failure: abort
   
   - name: PHASE 5 - Robot3 1A pick and MoveL place interlocked with tying gun change
     mode: parallel
@@ -283,24 +283,12 @@ motion_sequence:
         place_frame: place_frame_10_l
         object_id: rebar_3c
         inventory_id: inventory_3a_4a
-        pick_offset:
-        - 0.0
-        - 0.0
-        - 0.0
+        pick_offset: [0.0, 0.0, 0.0]
         pick_offset_frame: local
-        pick_offset_rpy:
-        - 0.627
-        - -1.57
-        - 0.627
+        pick_offset_rpy: [0.627, -1.57, 0.627]
         pick_offset_rpy_frame: local
-        place_offset:
-        - 0.0
-        - 0.01
-        - 0.0
-        place_offset_rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        place_offset: [0.0, 0.01, 0.0]
+        place_offset_rpy: [0.0, 0.0, 0.0]
         arc_frames:
         - r3_arc_start
         - r3_arc_mid
@@ -310,24 +298,12 @@ motion_sequence:
         place_frame: place_frame_10
         object_id: rebar_4c
         inventory_id: inventory_3a_4a_2
-        pick_offset:
-        - 0.0
-        - 0.0
-        - 0.0
+        pick_offset: [0.0, 0.0, 0.0]
         pick_offset_frame: local
-        pick_offset_rpy:
-        - 0.943
-        - -1.57
-        - 0.943
+        pick_offset_rpy: [0.943, -1.57, 0.943]
         pick_offset_rpy_frame: local
-        place_offset:
-        - 0.0
-        - 0.01
-        - 0.0
-        place_offset_rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        place_offset: [0.0, 0.01, 0.0]
+        place_offset_rpy: [0.0, 0.0, 0.0]
         arc_frames:
         - r4_arc_start
         - r4_arc_mid
@@ -350,50 +326,26 @@ motion_sequence:
         robot3:
           reference: inventory_3a_4a_frame
           offset_frame: world
-          xyz:
-          - 0.0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0.0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: inventory_3a_4a_frame_2
           offset_frame: world
-          xyz:
-          - 0
-          - 0.0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0.0, 0]
+          rpy: [0.0, 0.0, 0.0]
       - id: P2
         motion: moveL
         description: Pick and attach
         robot3:
           reference: pick_frame
           offset_frame: world
-          xyz:
-          - -0.0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [-0.0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: pick_frame
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         before_actions:
         - prepare_pick
         after_actions:
@@ -405,25 +357,13 @@ motion_sequence:
         robot3:
           reference: pick_frame
           offset_frame: world
-          xyz:
-          - 0
-          - 0.3
-          - 0.3
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0.3, 0.3]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: pick_frame
           offset_frame: world
-          xyz:
-          - 0
-          - 0.3
-          - 0.3
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0.3, 0.3]
+          rpy: [0.0, 0.0, 0.0]
         after_actions:
         - restore_inventory_contact
       - id: T1
@@ -432,75 +372,39 @@ motion_sequence:
         robot3:
           reference: r3_ptp_start
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: r4_ptp_start
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
       - id: T2
         motion: moveL
         description: Paired Pilz LIN transfer from PTP start to end; combined MoveJ fallback
         robot3:
           reference: r3_ptp_end
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: r4_ptp_end
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
       - id: G1
         motion: moveL
         description: Place approach
         robot3:
           reference: place_frame
           offset_frame: world
-          xyz:
-          - 0
-          - -0.25
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, -0.25, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: place_frame
           offset_frame: world
-          xyz:
-          - 0
-          - -0.25
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, -0.25, 0]
+          rpy: [0.0, 0.0, 0.0]
         before_actions:
         - allow_place_contact
       - id: G2
@@ -509,25 +413,13 @@ motion_sequence:
         robot3:
           reference: place_frame
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: place_frame
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         after_actions:
         - detach_objects
       - id: G3
@@ -536,25 +428,13 @@ motion_sequence:
         robot3:
           reference: place_frame
           offset_frame: world
-          xyz:
-          - 0
-          - -0.25
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, -0.25, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: place_frame
           offset_frame: world
-          xyz:
-          - 0
-          - -0.25
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, -0.25, 0]
+          rpy: [0.0, 0.0, 0.0]
         after_actions:
         - restore_gripper_contact
       - id: H1
@@ -568,24 +448,12 @@ motion_sequence:
         place_frame: place_frame_10_l
         object_id: rebar_3d
         inventory_id: inventory_3a_4a
-        pick_offset:
-        - 0.0
-        - 0.0
-        - 0.0
+        pick_offset: [0.127, -0.045, 0.008]
         pick_offset_frame: local
-        pick_offset_rpy:
-        - 0.627
-        - -1.57
-        - 0.627
+        pick_offset_rpy: [0.631, -1.570, 0.520]
         pick_offset_rpy_frame: local
-        place_offset:
-        - 0.0
-        - -0.02
-        - 0.0
-        place_offset_rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        place_offset: [0.0, -0.02, 0.0]
+        place_offset_rpy: [0.0, 0.0, 0.0]
         arc_frames:
         - r3_arc_start
         - r3_arc_mid
@@ -595,24 +463,12 @@ motion_sequence:
         place_frame: place_frame_10
         object_id: rebar_4d
         inventory_id: inventory_3a_4a_2
-        pick_offset:
-        - 0.0
-        - 0.0
-        - 0.0
+        pick_offset: [-0.155, -0.057, -0.010]
         pick_offset_frame: local
-        pick_offset_rpy:
-        - 0.943
-        - -1.57
-        - 0.943
+        pick_offset_rpy: [0.955, -1.570, 1.081]
         pick_offset_rpy_frame: local
-        place_offset:
-        - 0.0
-        - -0.02
-        - 0.0
-        place_offset_rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        place_offset: [0.0, -0.02, 0.0]
+        place_offset_rpy: [0.0, 0.0, 0.0]
         arc_frames:
         - r4_arc_start
         - r4_arc_mid
@@ -637,100 +493,52 @@ motion_sequence:
         robot3:
           reference: r3_ptp_end
           offset_frame: world
-          xyz:
-          - 0.0
-          - 0.0
-          - 0.0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0.0, 0.0, 0.0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: r4_ptp_end
           offset_frame: world
-          xyz:
-          - 0.0
-          - 0.0
-          - 0.0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0.0, 0.0, 0.0]
+          rpy: [0.0, 0.0, 0.0]
       - id: B2
         motion: movePTP
         description: Pilz PTP reverse transfer via original transfer start frames
         robot3:
           reference: r3_ptp_start
           offset_frame: world
-          xyz:
-          - 0.0
-          - 0.0
-          - 0.0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0.0, 0.0, 0.0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: r4_ptp_start
           offset_frame: world
-          xyz:
-          - 0.0
-          - 0.0
-          - 0.0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0.0, 0.0, 0.0]
+          rpy: [0.0, 0.0, 0.0]
       - id: P1
         motion: moveL
         description: Pick approach
         robot3:
           reference: inventory_3a_4a_frame
           offset_frame: world
-          xyz:
-          - 0.0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0.0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: inventory_3a_4a_frame_2
           offset_frame: world
-          xyz:
-          - 0
-          - 0.0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0.0, 0]
+          rpy: [0.0, 0.0, 0.0]
       - id: P2
         motion: moveL
         description: Pick and attach
         robot3:
           reference: pick_frame
           offset_frame: world
-          xyz:
-          - 0.0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0.0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: pick_frame
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         before_actions:
         - prepare_pick
         after_actions:
@@ -742,25 +550,13 @@ motion_sequence:
         robot3:
           reference: pick_frame
           offset_frame: world
-          xyz:
-          - 0
-          - 0.3
-          - 0.3
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0.3, 0.3]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: pick_frame
           offset_frame: world
-          xyz:
-          - 0
-          - 0.3
-          - 0.3
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0.3, 0.3]
+          rpy: [0.0, 0.0, 0.0]
         after_actions:
         - restore_inventory_contact
       - id: T1
@@ -769,75 +565,39 @@ motion_sequence:
         robot3:
           reference: r3_ptp_start
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: r4_ptp_start
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
       - id: T2
         motion: moveL
         description: Paired Pilz LIN transfer from PTP start to end; combined MoveJ fallback
         robot3:
           reference: r3_ptp_end
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: r4_ptp_end
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
       - id: G1
         motion: moveL
         description: Place approach
         robot3:
           reference: place_frame
           offset_frame: world
-          xyz:
-          - 0
-          - -0.25
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, -0.25, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: place_frame
           offset_frame: world
-          xyz:
-          - 0
-          - -0.25
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, -0.25, 0]
+          rpy: [0.0, 0.0, 0.0]
         before_actions:
         - allow_place_contact
       - id: G2
@@ -846,25 +606,13 @@ motion_sequence:
         robot3:
           reference: place_frame
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: place_frame
           offset_frame: world
-          xyz:
-          - 0
-          - 0
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, 0, 0]
+          rpy: [0.0, 0.0, 0.0]
         after_actions:
         - detach_objects
       - id: G3
@@ -873,25 +621,13 @@ motion_sequence:
         robot3:
           reference: place_frame
           offset_frame: world
-          xyz:
-          - 0
-          - -0.25
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, -0.25, 0]
+          rpy: [0.0, 0.0, 0.0]
         robot4:
           reference: place_frame
           offset_frame: world
-          xyz:
-          - 0
-          - -0.25
-          - 0
-          rpy:
-          - 0.0
-          - 0.0
-          - 0.0
+          xyz: [0, -0.25, 0]
+          rpy: [0.0, 0.0, 0.0]
         after_actions:
         - restore_gripper_contact
       - id: H1
@@ -907,131 +643,77 @@ motion_sequence:
           - pick_frame: 5pf
             place_frame: 5_placef_l
             object_id: rebar_5a
-            pick_offset:
-            - 0
-            - 0.0
-            - 0.0
+            pick_offset: [0, 0.0, 0.0]
           - pick_frame: 13pf
             place_frame: 13_placef1_l
             object_id: rebar_13_1
-            pick_offset:
-            - 0
-            - 0.0
-            - 0.0
+            pick_offset: [0, 0.0, 0.0]
           - pick_frame: 13pf
             place_frame: 13_placef2_l
             object_id: rebar_13_2
-            pick_offset:
-            - 0.1
-            - 0.0
-            - 0.0
+            pick_offset: [0.1, 0.0, 0.0]
           - pick_frame: 13pf
             place_frame: 13_placef3_l
             object_id: rebar_13_3
-            pick_offset:
-            - 0.2
-            - 0.0
-            - 0.0
+            pick_offset: [0.2, 0.0, 0.0]
           - pick_frame: 13pf
             place_frame: 13_placef4_l
             object_id: rebar_13_4
-            pick_offset:
-            - 0.3
-            - 0.0
-            - 0.0
+            pick_offset: [0.3, 0.0, 0.0]
           - pick_frame: 14pf
             place_frame: 14_placef1_l
             object_id: rebar_14_1
-            pick_offset:
-            - 0
-            - 0.0
-            - 0.0
+            pick_offset: [0, 0.0, 0.0]
           - pick_frame: 14pf
             place_frame: 14_placef2_l
             object_id: rebar_14_2
-            pick_offset:
-            - 0.2
-            - 0.0
-            - 0.0
+            pick_offset: [0.2, 0.0, 0.0]
           - pick_frame: 14pf
             place_frame: 14_placef3_l
             object_id: rebar_14_3
-            pick_offset:
-            - 0.4
-            - 0.0
-            - 0.0
+            pick_offset: [0.4, 0.0, 0.0]
           - pick_frame: 14pf
             place_frame: 14_placef4_l
             object_id: rebar_14_4
-            pick_offset:
-            - 0.6
-            - 0.0
-            - 0.0
+            pick_offset: [0.6, 0.0, 0.0]
         robot2:
           via_world_x: 5.22
           pairs:
           - pick_frame: 6pf
             place_frame: 6_placef_r
             object_id: rebar_6
-            pick_offset:
-            - 0
-            - 0.0
-            - 0.0
+            pick_offset: [0, 0.0, 0.0]
           - pick_frame: 13_1pf
             place_frame: 13_placef1_r
             object_id: rebar_13_1_R
-            pick_offset:
-            - 0
-            - 0.0
-            - 0.0
+            pick_offset: [0, 0.0, 0.0]
           - pick_frame: 13_1pf
             place_frame: 13_placef2_r
             object_id: rebar_13_2_R
-            pick_offset:
-            - 0.118
-            - 0.0
-            - 0.0
+            pick_offset: [0.118, 0.0, 0.0]
           - pick_frame: 13_2pf
             place_frame: 13_placef3_r
             object_id: rebar_13_3_R
-            pick_offset:
-            - 0
-            - 0.0
-            - 0.0
+            pick_offset: [0, 0.0, 0.0]
           - pick_frame: 14_4pf
             place_frame: 14_placef4_r
             object_id: rebar_14_1_R
-            pick_offset:
-            - 0
-            - 0.0
-            - 0.0
+            pick_offset: [0, 0.0, 0.0]
           - pick_frame: 14_4pf
             place_frame: 14_placef3_r
             object_id: rebar_14_2_R
-            pick_offset:
-            - 0.112
-            - 0.0
-            - 0.0
+            pick_offset: [0.112, 0.0, 0.0]
           - pick_frame: 14_4pf
             place_frame: 14_placef2_r
             object_id: rebar_14_3_R
-            pick_offset:
-            - 0.224
-            - 0.0
-            - 0.0
+            pick_offset: [0.224, 0.0, 0.0]
           - pick_frame: 14_4pf
             place_frame: 14_placef1_r
             object_id: rebar_14_4_R
-            pick_offset:
-            - 0.336
-            - 0.0
-            - 0.0
+            pick_offset: [0.336, 0.0, 0.0]
         approach:
           offset_frame: world
-          xyz:
-          - 0.0
-          - -0.25
-          - 0.0
+          xyz: [0.0, -0.25, 0.0]
         planning:
           planning_time: 15.0
           ompl_attempts: 10
@@ -1104,6 +786,14 @@ motion_sequence:
     change_to_tying_guns:
       type: robot1_gripper_change
       config:
+        execution:
+          # "moveit" (original) or "follow_joint_trajectory" (direct controller actions)
+          executer: follow_joint_trajectory
+          robot1_action: /robot1_arm_controller/follow_joint_trajectory
+          robot2_action: /robot2_arm_controller/follow_joint_trajectory
+          start_delay_sec: 0.5
+          result_timeout_margin_sec: 30.0
+          start_tolerance_rad: 0.05
         planning:
           planning_time: 15.0
           movej_plan_retries: 3
@@ -1119,28 +809,16 @@ motion_sequence:
         reference: source_dock
         motion: moveJ
         offset_frame: world
-        xyz:
-        - 0
-        - 0
-        - 0.5
-        rpy:
-        - 0
-        - 0
-        - 0
+        xyz: [0, 0, 0.5]
+        rpy: [0, 0, 0]
         after_actions: []
       - id: D2
         description: dock and detach source tool
         reference: source_dock
         motion: moveL
         offset_frame: world
-        xyz:
-        - 0
-        - 0
-        - 0
-        rpy:
-        - 0
-        - 0
-        - 0
+        xyz: [0, 0, 0]
+        rpy: [0, 0, 0]
         after_actions:
         - detach_source
         - allow_source_contacts
@@ -1149,14 +827,8 @@ motion_sequence:
         reference: source_dock
         motion: moveL
         offset_frame: world
-        xyz:
-        - 0
-        - 0
-        - 0.5
-        rpy:
-        - 0
-        - 0
-        - 0
+        xyz: [0, 0, 0.5]
+        rpy: [0, 0, 0]
         after_actions:
         - restore_source_contacts
         - allow_target_contacts
@@ -1165,28 +837,16 @@ motion_sequence:
         reference: target_dock
         motion: moveJ
         offset_frame: world
-        xyz:
-        - 0
-        - 0
-        - 0.5
-        rpy:
-        - 0
-        - 0
-        - 0
+        xyz: [0, 0, 0.5]
+        rpy: [0, 0, 0]
         after_actions: []
       - id: D5
         description: dock and attach target tool
         reference: target_dock
         motion: moveL
         offset_frame: world
-        xyz:
-        - 0
-        - 0
-        - 0
-        rpy:
-        - 0
-        - 0
-        - 0
+        xyz: [0, 0, 0]
+        rpy: [0, 0, 0]
         after_actions:
         - attach_target
       - id: D6
@@ -1194,14 +854,8 @@ motion_sequence:
         reference: target_dock
         motion: moveL
         offset_frame: world
-        xyz:
-        - 0
-        - 0
-        - 0.5
-        rpy:
-        - 0
-        - 0
-        - 0
+        xyz: [0, 0, 0.5]
+        rpy: [0, 0, 0]
         after_actions:
         - restore_target_contacts
       source_tool: schunk
@@ -1251,10 +905,7 @@ motion_sequence:
             tie_count: 2
         approach:
           offset_frame: local
-          xyz:
-          - -0.2
-          - 0.0
-          - 0.0
+          xyz: [-0.2, 0.0, 0.0]
         stop_on_first_failure: false
         planning:
           planning_time: 15.0
@@ -1281,10 +932,7 @@ motion_sequence:
           transit_strategies:
           - moveL
           - moveJ
-          circ_via_offset_world:
-          - 0.0
-          - 0.0
-          - 0.1
+          circ_via_offset_world: [0.0, 0.0, 0.1]
       point_steps: &id001
       - id: T1
         reference: tie_approach
@@ -1389,14 +1037,8 @@ motion_sequence:
         motion: moveJ
         planner: ompl
         offset_frame: local
-        xyz:
-        - -0.05
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        xyz: [-0.05, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
         ik_check: true
         before_actions:
         - prepare_robot3_pick
@@ -1406,14 +1048,8 @@ motion_sequence:
         motion: moveL
         planner: pilz
         offset_frame: world
-        xyz:
-        - 0.0
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        xyz: [0.0, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
         after_actions:
         - attach_robot3
       - id: R3
@@ -1422,14 +1058,8 @@ motion_sequence:
         motion: moveL
         planner: cartesian
         offset_frame: local
-        xyz:
-        - -0.05
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        xyz: [-0.05, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
         ik_check: true
         after_actions:
         - lift_gantry_start_parallel_return
@@ -1439,14 +1069,8 @@ motion_sequence:
         motion: moveL
         planner: cartesian
         offset_frame: local
-        xyz:
-        - -0.1
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        xyz: [-0.1, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
         ik_check: true
         before_actions:
         - allow_jig_contact
@@ -1456,14 +1080,8 @@ motion_sequence:
         motion: moveL
         planner: cartesian
         offset_frame: world
-        xyz:
-        - 0.0
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        xyz: [0.0, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
         after_actions:
         - detach_robot3
       - id: R6
@@ -1472,14 +1090,8 @@ motion_sequence:
         motion: moveL
         planner: cartesian
         offset_frame: local
-        xyz:
-        - -0.1
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        xyz: [-0.1, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
         ik_check: true
         after_actions:
         - wait_gantry_parallel_return
@@ -1494,14 +1106,8 @@ motion_sequence:
         motion: moveJ
         planner: ompl
         offset_frame: local
-        xyz:
-        - -0.05
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        xyz: [-0.05, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
         ik_check: true
       - id: R2
         description: Robot4 move to right pick frame (no attach)
@@ -1509,42 +1115,24 @@ motion_sequence:
         motion: moveL
         planner: pilz
         offset_frame: world
-        xyz:
-        - 0.0
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        xyz: [0.0, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
       - id: R3
         description: Robot4 pick retract
         reference: pick_frame
         motion: moveL
         planner: cartesian
         offset_frame: local
-        xyz:
-        - -0.05
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        xyz: [-0.05, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
       - id: R4
         description: Robot4 place approach (right side)
         reference: place_frame
         motion: moveL
         planner: cartesian
         offset_frame: local
-        xyz:
-        - -0.1
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        xyz: [-0.1, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
         ik_check: true
       - id: R5
         description: Robot4 moves to right place frame (no detach)
@@ -1552,28 +1140,16 @@ motion_sequence:
         motion: moveL
         planner: cartesian
         offset_frame: world
-        xyz:
-        - 0.0
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        xyz: [0.0, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
       - id: R6
         description: Robot4 place retract
         reference: place_frame
         motion: moveL
         planner: cartesian
         offset_frame: local
-        xyz:
-        - -0.1
-        - 0.0
-        - 0.0
-        rpy:
-        - 0.0
-        - 0.0
-        - 0.0
+        xyz: [-0.1, 0.0, 0.0]
+        rpy: [0.0, 0.0, 0.0]
       - id: R7
         description: Both arms return to captured startup joint state
         reference: home
@@ -1593,10 +1169,7 @@ motion_sequence:
             tie_count: 3
         approach:
           offset_frame: local
-          xyz:
-          - -0.2
-          - 0.0
-          - 0.0
+          xyz: [-0.2, 0.0, 0.0]
         stop_on_first_failure: false
         planning:
           planning_time: 15.0
@@ -1623,15 +1196,20 @@ motion_sequence:
           transit_strategies:
           - moveL
           - moveJ
-          circ_via_offset_world:
-          - 0.0
-          - 0.0
-          - 0.1
+          circ_via_offset_world: [0.0, 0.0, 0.1]
       point_steps: *id001
       finish: *id002
     change_to_schunk:
       type: robot1_gripper_change
       config:
+        execution:
+          # "moveit" (original) or "follow_joint_trajectory" (direct controller actions)
+          excuter: moveit
+          robot1_action: /robot1_controller/follow_joint_trajectory
+          robot2_action: /robot2_controller/follow_joint_trajectory
+          start_delay_sec: 0.5
+          result_timeout_margin_sec: 30.0
+          start_tolerance_rad: 0.05
         planning:
           planning_time: 15.0
           movej_plan_retries: 3
@@ -1647,28 +1225,16 @@ motion_sequence:
         reference: source_dock
         motion: moveJ
         offset_frame: world
-        xyz:
-        - 0
-        - 0
-        - 0.5
-        rpy:
-        - 0
-        - 0
-        - 0
+        xyz: [0, 0, 0.5]
+        rpy: [0, 0, 0]
         after_actions: []
       - id: D2
         description: dock and detach source tool
         reference: source_dock
         motion: moveL
         offset_frame: world
-        xyz:
-        - 0
-        - 0
-        - 0
-        rpy:
-        - 0
-        - 0
-        - 0
+        xyz: [0, 0, 0]
+        rpy: [0, 0, 0]
         after_actions:
         - detach_source
         - allow_source_contacts
@@ -1677,14 +1243,8 @@ motion_sequence:
         reference: source_dock
         motion: moveL
         offset_frame: world
-        xyz:
-        - 0
-        - 0
-        - 0.5
-        rpy:
-        - 0
-        - 0
-        - 0
+        xyz: [0, 0, 0.5]
+        rpy: [0, 0, 0]
         after_actions:
         - restore_source_contacts
         - allow_target_contacts
@@ -1693,28 +1253,16 @@ motion_sequence:
         reference: target_dock
         motion: moveJ
         offset_frame: world
-        xyz:
-        - 0
-        - 0
-        - 0.5
-        rpy:
-        - 0
-        - 0
-        - 0
+        xyz: [0, 0, 0.5]
+        rpy: [0, 0, 0]
         after_actions: []
       - id: D5
         description: dock and attach target tool
         reference: target_dock
         motion: moveL
         offset_frame: world
-        xyz:
-        - 0
-        - 0
-        - 0
-        rpy:
-        - 0
-        - 0
-        - 0
+        xyz: [0, 0, 0]
+        rpy: [0, 0, 0]
         after_actions:
         - attach_target
       - id: D6
@@ -1722,14 +1270,8 @@ motion_sequence:
         reference: target_dock
         motion: moveL
         offset_frame: world
-        xyz:
-        - 0
-        - 0
-        - 0.5
-        rpy:
-        - 0
-        - 0
-        - 0
+        xyz: [0, 0, 0.5]
+        rpy: [0, 0, 0]
         after_actions:
         - restore_target_contacts
       source_tool: tying_gun
