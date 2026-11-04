@@ -65,11 +65,12 @@ workcell:
       child: bm_pkL
       xyz: [0.420, 1.864, 4.116]
       rpy: [-0.571, -0.007, 1.573]
-    bm_pkr:
-      parent: inventory_3a_4a_2
-      child: bm_pkr
-      xyz: [2.097, 2.612, 1.772]
-      rpy: [0.64, -0.029, 1.582]
+    bm_pkR:
+      parent: world
+      child: bm_pkR
+      xyz: [5.2, 1.864, 4.116] # 5.178, 1.921, 4.138
+      rpy: [0.571, -0.007, 1.573]
+ 
   place_frames:
     5_placef_l:
       parent: jig_clamp
@@ -174,8 +175,9 @@ workcell:
     bm_pfr:
       parent: jig_clamp
       child: bm_pfr
-      xyz: [2.188, 4.997, 1.772]
-      rpy: [0.64, -0.029, -3.13]
+      xyz: [0.824, 5.176, 2.135]
+      rpy: [0.577, 0.317, -3.141]
+  
   tying_frames:
     5_placef_l_t1:
       parent: 5_placef_l
@@ -387,16 +389,29 @@ workcell:
       child: 1A_r_t3
       xyz: [0.7052541971, 4.9698433876, 2.4777035713]
       rpy: [-1.0, 0.34121187, 3.14]
-    sa3_place:
+    
+    sa3_place_l:
       parent: world
-      child: sa3_place
-      xyz: [0.076, 1.816, 1.281]
+      child: sa3_place_l
+      xyz: [0.076, 1.716, 1.281]
       rpy: [-0.206, 0.107, 1.558]
-    sa3_pick_point:
+    sa3_pick_point_l:
       parent: jig_clamp
-      child: sa3_pick_point
+      child: sa3_pick_point_l
       xyz: [0.332, 0.009, 3.044]
       rpy: [-0.207, 0.37, 3.13]
+
+    sa3_place_r:
+      parent: world
+      child: sa3_place_r
+      xyz: [5.578, 1.716, 1.281]
+      rpy: [0.206, 0.107, 1.558]
+    sa3_pick_point_r:
+      parent: jig_clamp
+      child: sa3_pick_point_r
+      xyz: [0.332, 5.511, 3.044]
+      rpy: [0.207, 0.37, 3.13]
+
   arc_frames:
     r3_arc_start:
       parent: robot3_base_link

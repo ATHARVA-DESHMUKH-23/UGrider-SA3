@@ -37,6 +37,7 @@
 #include "moveit_msgs/msg/robot_trajectory.hpp"
 #include "geometry_msgs/msg/pose.hpp"
 #include "moveit_msgs/srv/get_position_ik.hpp"
+#include "moveit_msgs/srv/get_state_validity.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/LinearMath/Vector3.h"
 #include "tf2/exceptions.h"
@@ -156,7 +157,7 @@ static std::vector<ConfiguredGantryStep> readConfiguredGantrySteps(
         step.rpy = configuredVector3(item, "rpy", step.id);
       }
       step.ik_check = item["ik_check"].as<bool>(false);
-      // Direct R4 transfer only: MoveJ/OMPL or MoveL/Cartesian, no route anchors.
+      // Direct R4 transfer: MoveJ/OMPL or MoveL/Pilz/Cartesian, no route anchors.
       if (item["waypoints"] || item["min_samples"] || item["max_samples"]) {
         throw std::runtime_error(step.id + ": intermediate waypoints and sample counts are not supported.");
       }
@@ -216,7 +217,8 @@ static std::vector<ConfiguredGantryStep> readConfiguredGantrySteps(
              result[0].reference != "pick_frame" || !result[0].candidates.empty() ||
              result[1].motion != "moveL" || result[1].planner != "pilz" || result[1].reference != "pick_frame" ||
              result[2].motion != "moveL" || result[2].planner != "cartesian" || result[2].reference != "pick_frame" ||
-             !((result[3].motion == "moveL" && result[3].planner == "pilz") ||
+             !((result[3].motion == "moveL" &&
+                (result[3].planner == "pilz" || result[3].planner == "cartesian")) ||
                (result[3].motion == "moveJ" && result[3].planner == "ompl")) ||
              result[3].reference != "place_frame" ||
              !result[3].candidates.empty() || !result[3].ik_check ||
@@ -300,6 +302,12 @@ public:
     rebar_id_ = configuredParameterOrDeclare<std::string>("robot_rebar_object_id", "rebar_1A");
     pick3_frame_ = configuredParameterOrDeclare<std::string>("robot3_pick_frame", "bm_pkL");
     place3_frame_ = configuredParameterOrDeclare<std::string>("robot3_place_frame", "bm_pfl");
+    use_robot4_ = configuredParameterOrDeclare<bool>("use_robot4", false);
+    robot4_group_name_ = configuredParameterOrDeclare<std::string>("robot4_group", "robot4_arm");
+    combined_group_name_ = configuredParameterOrDeclare<std::string>("combined_group", "robot3_robot4_arms");
+    robot4_link_ = configuredParameterOrDeclare<std::string>("robot4_planning_link", "robot4_end_effactor");
+    pick4_frame_ = configuredParameterOrDeclare<std::string>("robot4_pick_frame", "bm_pkR");
+    place4_frame_ = configuredParameterOrDeclare<std::string>("robot4_place_frame", "bm_pfr");
     // Collision object / link the carried rebar is allowed to touch while it is
     // being placed. Set to an empty string to disable the allowance.
     jig_clamp_name_ = configuredParameterOrDeclare<std::string>("jig_clamp_name", "jig_clamp");
@@ -370,6 +378,7 @@ public:
         this, controller_action_);
 
     ik_client_ = create_client<moveit_msgs::srv::GetPositionIK>("/compute_ik");
+    validity_client_ = create_client<moveit_msgs::srv::GetStateValidity>("/check_state_validity");
 
     start_service_ = create_service<std_srvs::srv::Trigger>(
       "/start_gantry_motion",
@@ -450,6 +459,8 @@ public:
   void initializeMoveIt(
     moveit::planning_interface::MoveGroupInterface * move_group,
     moveit::planning_interface::MoveGroupInterface * robot3_group,
+    moveit::planning_interface::MoveGroupInterface * robot4_group,
+    moveit::planning_interface::MoveGroupInterface * combined_group,
     PlanningSceneObjects * scene_objects,
     tf2_ros::Buffer * tf_buffer)
   {
@@ -457,12 +468,26 @@ public:
         scene_objects == nullptr || tf_buffer == nullptr) {
       throw std::invalid_argument("Both MoveGroup interfaces, planning scene and TF buffer are required.");
     }
+    if (use_robot4_ && (!robot4_group || !combined_group)) {
+      throw std::invalid_argument("Robot4 enabled but Robot4 / combined MoveGroup unavailable");
+    }
     move_group_ = move_group;
     robot3_group_ = robot3_group;
+    robot4_group_ = robot4_group;
+    combined_group_ = combined_group;
     scene_objects_ = scene_objects;
     tf_buffer_ = tf_buffer;
     robot3_group_->setPoseReferenceFrame("world");
     robot3_group_->setEndEffectorLink(robot3_link_);
+    if (use_robot4_) {
+      robot4_group_->setPoseReferenceFrame("world");
+      robot4_group_->setEndEffectorLink(robot4_link_);
+      RCLCPP_INFO(get_logger(), "Gantry TCP links: Robot3=%s, Robot4=%s",
+        robot3_link_.c_str(), robot4_link_.c_str());
+      if (!captureHomeState(*combined_group_, combined_home_)) {
+        throw std::runtime_error("Could not capture combined Robot3/Robot4 startup state");
+      }
+    }
     if (!captureHomeState(*robot3_group_, robot3_home_)) {
       throw std::runtime_error("Could not capture initial Robot 3 home state. Start Robot 3 in its intended home position.");
     }
@@ -477,12 +502,18 @@ private:
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr start_service_;
 
   rclcpp::Client<moveit_msgs::srv::GetPositionIK>::SharedPtr ik_client_;
+  rclcpp::Client<moveit_msgs::srv::GetStateValidity>::SharedPtr validity_client_;
 
   moveit::planning_interface::MoveGroupInterface * move_group_{nullptr};
   moveit::planning_interface::MoveGroupInterface * robot3_group_{nullptr};
+  moveit::planning_interface::MoveGroupInterface * robot4_group_{nullptr};
+  moveit::planning_interface::MoveGroupInterface * combined_group_{nullptr};
   PlanningSceneObjects * scene_objects_{nullptr};
   tf2_ros::Buffer * tf_buffer_{nullptr};
-  std::vector<double> robot3_home_;
+  std::vector<double> robot3_home_, combined_home_;
+  bool use_robot4_{false};
+  std::string robot4_group_name_, combined_group_name_, robot4_link_;
+  std::string pick4_frame_, place4_frame_;
 
   std::mutex joint_state_mutex_;
   std::unordered_map<std::string, double> joint_positions_;
@@ -530,9 +561,10 @@ private:
   std::thread worker_;
 
   YAML::Node yaml_parameters_;
-  std::vector<ConfiguredGantryStep> gantry_planner_steps_, robot3_planner_steps_;
+  std::vector<ConfiguredGantryStep> gantry_planner_steps_, robot3_planner_steps_, robot4_planner_steps_;
   std::vector<std::string> robot3_touch_links_;
   double planning_time_{15.0};
+  int ompl_attempts_{10}, plan_retries_{3};
   double home_velocity_{0.50}, home_acceleration_{0.40};
   double cartesian_velocity_{0.15}, cartesian_acceleration_{0.10};
   double cartesian_translation_step_{0.01}, cartesian_rotation_step_{0.03};
@@ -568,8 +600,51 @@ private:
     if (!yaml_parameters_ || !yaml_parameters_.IsMap()) {
       throw std::runtime_error("motion task.gantry_move.ros_parameters must be a mapping.");
     }
+    // Robot4 static hardware configuration is taken from the workcell.
+    const auto robots = sa3_yaml::require(workcell, "robots", "workcell");
+    yaml_parameters_["robot4_group"] = robots["robot4"]["group"];
+    // Per-task Robot4 TCP takes precedence over the generic workcell Robot4 link.
+    // This matches Robot3's gantry-specific TCP selection without changing workcell.yaml.
+    if (!yaml_parameters_["robot4_planning_link"]) {
+      yaml_parameters_["robot4_planning_link"] = "robot4_end_effactor";
+    }
+    yaml_parameters_["combined_group"] = robots["combined_groups"]["flange_pair"];
     gantry_planner_steps_ = readConfiguredGantrySteps(task["gantry_steps"], false);
     robot3_planner_steps_ = readConfiguredGantrySteps(task["robot3_steps"], true);
+    // Robot4 follows the same step IDs and planner types but has its own offsets.
+    // Never accept attach/detach/collision actions on Robot4.
+    const auto r4steps = task["robot4_steps"];
+    if (r4steps) {
+      if (!r4steps.IsSequence() || r4steps.size() != robot3_planner_steps_.size())
+        throw std::runtime_error("robot4_steps must contain exactly R1..R7");
+      for (std::size_t i = 0; i < r4steps.size(); ++i) {
+        const auto & item = r4steps[i];
+        const auto & r3 = robot3_planner_steps_[i];
+        if (item["id"].as<std::string>() != r3.id || item["before_actions"] || item["after_actions"])
+          throw std::runtime_error("robot4_steps: IDs must match R1..R7; no scene actions allowed");
+        ConfiguredGantryStep r4 = r3;
+        r4.before_actions.clear(); r4.after_actions.clear(); r4.candidates.clear();
+        r4.description = item["description"].as<std::string>(r3.description);
+        r4.reference = item["reference"].as<std::string>(r3.reference);
+        r4.motion = item["motion"].as<std::string>(r3.motion);
+        r4.planner = item["planner"].as<std::string>(r3.planner);
+        r4.offset_frame = item["offset_frame"].as<std::string>(r3.offset_frame);
+        r4.rpy_frame = item["rpy_frame"].as<std::string>(r3.rpy_frame);
+        r4.ik_check = item["ik_check"].as<bool>(r3.ik_check);
+        if (item["xyz"]) r4.xyz = configuredVector3(item, "xyz", r4.id);
+        if (item["rpy"]) r4.rpy = configuredVector3(item, "rpy", r4.id);
+        if (r4.reference != r3.reference || r4.motion != r3.motion || r4.planner != r3.planner ||
+            (r4.offset_frame != "local" && r4.offset_frame != "world") ||
+            (r4.rpy_frame != "local" && r4.rpy_frame != "world"))
+          throw std::runtime_error("robot4_steps: invalid reference/motion/planner/frame at " + r4.id);
+        robot4_planner_steps_.push_back(std::move(r4));
+      }
+    } else {
+      for (auto r4 : robot3_planner_steps_) {
+        r4.before_actions.clear(); r4.after_actions.clear(); r4.candidates.clear();
+        robot4_planner_steps_.push_back(std::move(r4));
+      }
+    }
     const auto links = workcell["robots"]["robot3"]["gantry_touch_links"];
     if (!links || !links.IsSequence() || links.size() == 0) {
       throw std::runtime_error("workcell.robots.robot3.gantry_touch_links required.");
@@ -589,6 +664,10 @@ private:
       return value;
     };
     planning_time_ = planningValue("planning_time", 0.1, 600.0);
+    ompl_attempts_ = planning["ompl_attempts"].as<int>(10);
+    plan_retries_ = planning["plan_retries"].as<int>(3);
+    if (ompl_attempts_ < 1 || ompl_attempts_ > 100 || plan_retries_ < 1 || plan_retries_ > 20)
+      throw std::runtime_error("gantry_move.planning OMPL attempts/retries out of range");
     home_velocity_ = planningValue("joint_movej_velocity", 0.001, 1.0);
     home_acceleration_ = planningValue("joint_movej_acceleration", 0.001, 1.0);
     cartesian_velocity_ = planningValue("cartesian_velocity", 0.001, 1.0);
@@ -640,7 +719,9 @@ private:
         move_group_name_.empty() || robot3_group_name_.empty() ||
         robot3_link_.empty() ||
         rebar_id_.empty() || pick3_frame_.empty() ||
-        place3_frame_.empty()) {
+        place3_frame_.empty() || (use_robot4_ &&
+        (robot4_group_name_.empty() || combined_group_name_.empty() ||
+         robot4_link_.empty() || pick4_frame_.empty() || place4_frame_.empty()))) {
       throw std::invalid_argument(
         "Joint, controller, object, link and group names must not be empty.");
     }
@@ -867,10 +948,13 @@ private:
       return nullptr;
     };
 
-    const double robot3_home = sumFor("robot3", true);
-    const double robot3_pair = sumFor("robot3") - robot3_home;  // R1..R6
+    const bool paired = use_robot4_;
+    const double robot3_home = paired ? 0.0 : sumFor("robot3", true);
+    const double paired_home = [&]() {const auto * r = findStep("robot3+robot4", "R7"); return r ? r->seconds() : 0.0;}();
+    const double robot3_pair = paired ? (sumFor("robot3+robot4") - paired_home) :
+      (sumFor("robot3") - robot3_home);  // R1..R6
     const double gantry_total = sumFor("gantry");
-    const ExecutionRecord * transfer = findStep("robot3", "R4");
+    const ExecutionRecord * transfer = findStep(paired ? "robot3+robot4" : "robot3", "R4");
 
     // Wall time actually inside motion execution intervals. Gantry horizontal
     // return and Robot 3 can run concurrently; count their overlap only once.
@@ -895,7 +979,7 @@ private:
     }
 
     std::printf("\n========== GANTRY / ROBOT3 EXECUTION SUMMARY ==========\n");
-    std::printf("\nrobot3\n");
+    std::printf("\n%s\n", paired ? "robot3 + robot4 (combined)" : "robot3");
     std::printf("%-18s %-16s %-15s %s\n", "REBAR", "R4 PLANNER", "VEL SCALE", "EXEC TIME");
     if (transfer) {
       std::printf("%-18s %-16s %5.3f (%4.1f%%)   %8.2f s%s\n",
@@ -908,10 +992,10 @@ private:
         success ? "" : " [PARTIAL]");
     }
 
-    std::printf("\nRobot 3 motion details (successful execute calls only)\n");
+    std::printf("\n%s motion details (successful execute calls only)\n", paired ? "Robot 3 + Robot 4" : "Robot 3");
     std::printf("%-13s %-19s %-12s %s\n", "STEP", "PLANNER", "VEL SCALE", "EXEC TIME");
     for (const auto & step : {"R1","R2","R3","R4","R5","R6","R7"}) {
-      if (const auto * r = findStep("robot3", step)) {
+      if (const auto * r = findStep(paired ? "robot3+robot4" : "robot3", step)) {
         std::printf("%-13s %-19s %-12.3f %8.2f s\n",
           step, r->planner.c_str(), r->speed_setting, r->seconds());
       }
@@ -926,8 +1010,8 @@ private:
       }
     }
 
-    std::printf("\nROBOT3 PICK/PLACE EXEC (R1..R6) : %8.2f s\n", robot3_pair);
-    std::printf("ROBOT3 HOME EXEC       (R7)    : %8.2f s\n", robot3_home);
+    std::printf("\nROBOT3%s PICK/PLACE EXEC (R1..R6) : %8.2f s\n", paired ? "+4" : "", robot3_pair);
+    std::printf("ROBOT3%s HOME EXEC (R7) : %8.2f s\n", paired ? "+4" : "", paired ? paired_home : robot3_home);
     std::printf("GANTRY JOINT EXEC      (all)   : %8.2f s\n", gantry_total);
     std::printf("TOTAL ACTIVE EXEC TIME (overlap removed): %.2f s\n", active_seconds);
     std::printf("RESULT: %s\n", success ? "COMPLETE" : "FAILED / PARTIAL");
@@ -1659,6 +1743,266 @@ private:
     return planAndExecuteCartesianMoveL(*robot3_group_, base_target, label);
   }
 
+  // Plan two LIN paths independently from the SAME robot state; execute ONE
+  // 12-joint timeline through the combined execution manager.
+  // Cartesian-labelled steps remain Cartesian (not silently changed to Pilz).
+  bool executePairedStep(const ConfiguredGantryStep & r3,
+                         const ConfiguredGantryStep & r4,
+                         const geometry_msgs::msg::Pose & pick3,
+                         const geometry_msgs::msg::Pose & place3,
+                         const geometry_msgs::msg::Pose & pick4,
+                         const geometry_msgs::msg::Pose & place4)
+  {
+    const std::string label = r3.id + " " + r3.description;
+    auto current = combined_group_->getCurrentState(10.0);
+    if (!current) return false;
+    moveit_msgs::msg::RobotState start_msg;
+    moveit::core::robotStateToRobotStateMsg(*current, start_msg);
+
+    // Retry full OMPL planning requests, not trajectory execution. Each
+    // failed/invalid plan gets a fresh planning call with the same start/goal.
+    auto planCombinedOmpl = [&](MoveGroup::Plan & output) -> bool {
+      combined_group_->setNumPlanningAttempts(ompl_attempts_);
+      for (int attempt = 1; attempt <= plan_retries_; ++attempt) {
+        RCLCPP_INFO(get_logger(), "[%s] Combined OMPL plan attempt %d/%d (internal attempts %d)",
+          r3.id.c_str(), attempt, plan_retries_, ompl_attempts_);
+        MoveGroup::Plan candidate;
+        const auto result = combined_group_->plan(candidate);
+        if (result == moveit::core::MoveItErrorCode::SUCCESS) {
+          output = std::move(candidate);
+          return true;
+        }
+        RCLCPP_WARN(get_logger(), "[%s] Combined OMPL attempt %d/%d failed (code %d)",
+          r3.id.c_str(), attempt, plan_retries_, result.val);
+      }
+      RCLCPP_ERROR(get_logger(), "[%s] Combined OMPL exhausted %d planning retries; no motion executed",
+        r3.id.c_str(), plan_retries_);
+      return false;
+    };
+
+    if (r3.reference == "home") {
+      combined_group_->setStartState(start_msg);
+      combined_group_->setPlanningPipelineId("ompl");
+      combined_group_->setPlannerId("RRTConnectkConfigDefault");
+      combined_group_->setMaxVelocityScalingFactor(home_velocity_);
+      combined_group_->setMaxAccelerationScalingFactor(home_acceleration_);
+      combined_group_->setPlanningTime(planning_time_);
+      combined_group_->clearPoseTargets();
+      if (!combined_group_->setJointValueTarget(combined_home_)) return false;
+      MoveGroup::Plan plan;
+      if (!planCombinedOmpl(plan)) return false;
+      return executeCombinedTimed(plan, r3.id, "Combined MoveJ", home_velocity_);
+    }
+
+    const auto goal3 = offsetConfiguredPose(r3.reference == "pick_frame" ? pick3 : place3,
+      r3.xyz, r3.offset_frame, r3.rpy, r3.rpy_frame);
+    const auto goal4 = offsetConfiguredPose(r4.reference == "pick_frame" ? pick4 : place4,
+      r4.xyz, r4.offset_frame, r4.rpy, r4.rpy_frame);
+
+    if (r3.motion == "moveJ") {
+      const auto * j3 = current->getJointModelGroup(robot3_group_name_);
+      const auto * j4 = current->getJointModelGroup(robot4_group_name_);
+      if (!j3 || !j4 || !current->setFromIK(j3, goal3, robot3_link_, 3.0) ||
+          !current->setFromIK(j4, goal4, robot4_link_, 3.0)) {
+        RCLCPP_ERROR(get_logger(), "%s: paired IK failed", label.c_str());
+        return false;
+      }
+      combined_group_->setStartState(start_msg);
+      combined_group_->setPlanningPipelineId("ompl");
+      combined_group_->setPlannerId("RRTConnectkConfigDefault");
+      combined_group_->setPlanningTime(planning_time_);
+      combined_group_->setMaxVelocityScalingFactor(home_velocity_);
+      combined_group_->setMaxAccelerationScalingFactor(home_acceleration_);
+      combined_group_->clearPoseTargets();
+      if (!combined_group_->setJointValueTarget(*current)) return false;
+      MoveGroup::Plan plan;
+      if (!planCombinedOmpl(plan)) return false;
+      return executeCombinedTimed(plan, r3.id, "Combined MoveJ", home_velocity_);
+    }
+
+    auto planArm = [&](MoveGroup & group, const ConfiguredGantryStep & cfg,
+                       const geometry_msgs::msg::Pose & goal,
+                       const std::string & tip) -> MoveGroup::Plan {
+      group.setStartState(start_msg);
+      group.setPoseReferenceFrame("world");
+      group.clearPoseTargets();
+      group.clearPathConstraints();
+      group.setPlanningTime(planning_time_);
+      MoveGroup::Plan plan;
+      if (cfg.planner == "pilz") {
+        group.setPlanningPipelineId("pilz_industrial_motion_planner");
+        group.setPlannerId("LIN");
+        group.setMaxVelocityScalingFactor(pilz_velocity_);
+        group.setMaxAccelerationScalingFactor(pilz_acceleration_);
+        if (!group.setPoseTarget(goal, tip) ||
+            group.plan(plan) != moveit::core::MoveItErrorCode::SUCCESS)
+          throw std::runtime_error("Pilz LIN planning failed");
+        group.clearPoseTargets();
+      } else {
+        const auto pose = group.getCurrentPose(tip).pose;
+        const double dx = goal.position.x - pose.position.x;
+        const double dy = goal.position.y - pose.position.y;
+        const double dz = goal.position.z - pose.position.z;
+        tf2::Quaternion qa(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w);
+        tf2::Quaternion qb(goal.orientation.x, goal.orientation.y, goal.orientation.z, goal.orientation.w);
+        qa.normalize(); qb.normalize();
+        const double dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+        const int count = std::clamp(std::max({1,
+          static_cast<int>(std::ceil(dist / cartesian_translation_step_)),
+          static_cast<int>(std::ceil(qa.angleShortestPath(qb) / cartesian_rotation_step_))}), 1, 2000);
+        std::vector<geometry_msgs::msg::Pose> waypoints;
+        for (int i = 1; i <= count; ++i) {
+          const double t = static_cast<double>(i) / count;
+          auto p = pose;
+          p.position.x += t*dx; p.position.y += t*dy; p.position.z += t*dz;
+          const auto q = qa.slerp(qb, t);
+          p.orientation.x=q.x(); p.orientation.y=q.y(); p.orientation.z=q.z(); p.orientation.w=q.w();
+          waypoints.push_back(p);
+        }
+        group.setMaxVelocityScalingFactor(cartesian_velocity_);
+        group.setMaxAccelerationScalingFactor(cartesian_acceleration_);
+        moveit_msgs::msg::MoveItErrorCodes error;
+        const double fraction = group.computeCartesianPath(
+          waypoints, cartesian_eef_step_, 0.0, plan.trajectory_, true, &error);
+        if (fraction < cartesian_min_fraction_ || plan.trajectory_.joint_trajectory.points.empty())
+          throw std::runtime_error("Cartesian path incomplete: fraction=" + std::to_string(fraction));
+      }
+      return plan;
+    };
+
+    MoveGroup::Plan p3, p4;
+    try {
+      // Separate group interfaces permit concurrent planning; same start state.
+      auto f3 = std::async(std::launch::async, [&]() {
+        return planArm(*robot3_group_, r3, goal3, robot3_link_);
+      });
+      auto f4 = std::async(std::launch::async, [&]() {
+        return planArm(*robot4_group_, r4, goal4, robot4_link_);
+      });
+      p3 = f3.get(); p4 = f4.get();
+    } catch (const std::exception & ex) {
+      RCLCPP_ERROR(get_logger(), "%s: paired MoveL planning failed: %s", label.c_str(), ex.what());
+      return false;
+    }
+    const auto & a = p3.trajectory_.joint_trajectory;
+    const auto & b = p4.trajectory_.joint_trajectory;
+    if (a.points.empty() || b.points.empty() || a.joint_names.empty() || b.joint_names.empty()) return false;
+    const double ta = rclcpp::Duration(a.points.back().time_from_start).seconds();
+    const double tb = rclcpp::Duration(b.points.back().time_from_start).seconds();
+    if (ta <= 0.0 || tb <= 0.0) return false;
+    const double total = std::max(ta, tb), fa = total/ta, fb = total/tb;
+    std::vector<double> times{0.0, total};
+    for (const auto & p : a.points) times.push_back(rclcpp::Duration(p.time_from_start).seconds()*fa);
+    for (const auto & p : b.points) times.push_back(rclcpp::Duration(p.time_from_start).seconds()*fb);
+    std::sort(times.begin(), times.end());
+    times.erase(std::unique(times.begin(), times.end(),
+      [](double x, double y) {return std::abs(x-y)<1e-9;}), times.end());
+
+    auto sample = [](const trajectory_msgs::msg::JointTrajectory & tr, double t, double factor) {
+      const auto & pts = tr.points;
+      const double source = t/factor;
+      auto sec=[](const trajectory_msgs::msg::JointTrajectoryPoint & p) {
+        return rclcpp::Duration(p.time_from_start).seconds();
+      };
+      std::size_t left=pts.size()-1, right=left;
+      double alpha=0.0;
+      if (source < sec(pts.back())) {
+        for (std::size_t i=1; i<pts.size(); ++i) {
+          if (sec(pts[i]) >= source) {
+            left=i-1; right=i;
+            if (sec(pts[i])>sec(pts[left]))
+              alpha=std::clamp((source-sec(pts[left]))/(sec(pts[i])-sec(pts[left])),0.0,1.0);
+            break;
+          }
+        }
+      }
+      trajectory_msgs::msg::JointTrajectoryPoint out;
+      auto interp=[&](const std::vector<double>& a, const std::vector<double>& b,
+                      std::vector<double>& dest, double scale) {
+        if (a.empty() || a.size()!=b.size()) return;
+        dest.resize(a.size());
+        for (std::size_t i=0;i<a.size();++i) dest[i]=(a[i]+alpha*(b[i]-a[i]))*scale;
+      };
+      interp(pts[left].positions,pts[right].positions,out.positions,1.0);
+      interp(pts[left].velocities,pts[right].velocities,out.velocities,1.0/factor);
+      interp(pts[left].accelerations,pts[right].accelerations,out.accelerations,1.0/(factor*factor));
+      return out;
+    };
+    MoveGroup::Plan merged_plan;
+    merged_plan.start_state_=start_msg;
+    auto & merged=merged_plan.trajectory_.joint_trajectory;
+    merged.joint_names=a.joint_names;
+    merged.joint_names.insert(merged.joint_names.end(),b.joint_names.begin(),b.joint_names.end());
+    std::set<std::string> unique(merged.joint_names.begin(),merged.joint_names.end());
+    if (unique.size()!=merged.joint_names.size()) {
+      RCLCPP_ERROR(get_logger(), "%s: duplicate joint in paired trajectory", label.c_str());
+      return false;
+    }
+    for (double t : times) {
+      const auto x=sample(a,t,fa), y=sample(b,t,fb);
+      if (x.positions.size()!=a.joint_names.size() || y.positions.size()!=b.joint_names.size()) return false;
+      trajectory_msgs::msg::JointTrajectoryPoint p;
+      p.positions=x.positions; p.positions.insert(p.positions.end(),y.positions.begin(),y.positions.end());
+      if (x.velocities.size()==a.joint_names.size() && y.velocities.size()==b.joint_names.size()) {
+        p.velocities=x.velocities; p.velocities.insert(p.velocities.end(),y.velocities.begin(),y.velocities.end());
+      }
+      if (x.accelerations.size()==a.joint_names.size() && y.accelerations.size()==b.joint_names.size()) {
+        p.accelerations=x.accelerations;
+        p.accelerations.insert(p.accelerations.end(),y.accelerations.begin(),y.accelerations.end());
+      }
+      const auto nanos=static_cast<int64_t>(std::llround(t*1e9));
+      p.time_from_start.sec=static_cast<int32_t>(nanos/1000000000LL);
+      p.time_from_start.nanosec=static_cast<uint32_t>(nanos%1000000000LL);
+      merged.points.push_back(std::move(p));
+    }
+    // Individual paths are collision-checked separately. The MERGED trajectory
+    // must also be checked against the full workcell, including both robots and
+    // Robot3's attached rebar. Never execute if the validation service is absent.
+    if (!validity_client_->wait_for_service(5s)) {
+      RCLCPP_ERROR(get_logger(), "[%s] /check_state_validity unavailable; refusing paired execution", r3.id.c_str());
+      return false;
+    }
+    for (std::size_t sample_index=0; sample_index<merged.points.size(); ++sample_index) {
+      auto request=std::make_shared<moveit_msgs::srv::GetStateValidity::Request>();
+      request->group_name=combined_group_name_;
+      request->robot_state=start_msg;
+      auto & js=request->robot_state.joint_state;
+      for (std::size_t j=0;j<merged.joint_names.size();++j) {
+        auto it=std::find(js.name.begin(),js.name.end(),merged.joint_names[j]);
+        if (it==js.name.end()) {
+          RCLCPP_ERROR(get_logger(), "[%s] merged joint '%s' missing in validation state",
+            r3.id.c_str(), merged.joint_names[j].c_str());
+          return false;
+        }
+        js.position[static_cast<std::size_t>(std::distance(js.name.begin(),it))] =
+          merged.points[sample_index].positions[j];
+      }
+      auto future=validity_client_->async_send_request(request);
+      if (future.wait_for(3s)!=std::future_status::ready || !future.get()->valid) {
+        RCLCPP_ERROR(get_logger(), "[%s] merged motion invalid/unchecked at sample %zu/%zu; abort",
+          r3.id.c_str(), sample_index+1, merged.points.size());
+        return false;
+      }
+    }
+    RCLCPP_INFO(get_logger(), "[%s] Collision-checked combined %zu-joint MoveL (%zu samples), duration %.3f s",
+      r3.id.c_str(), merged.joint_names.size(), merged.points.size(), total);
+    return executeCombinedTimed(merged_plan, r3.id, "Combined MoveL", r3.planner == "pilz" ? pilz_velocity_ : cartesian_velocity_);
+  }
+
+  bool executeCombinedTimed(const MoveGroup::Plan & plan, const std::string & id,
+                            const std::string & planner, double scale)
+  {
+    const auto start=std::chrono::steady_clock::now();
+    const auto status=combined_group_->execute(plan);
+    const auto finish=std::chrono::steady_clock::now();
+    if (status != moveit::core::MoveItErrorCode::SUCCESS) {
+      RCLCPP_ERROR(get_logger(), "[%s] combined execution failed (%d)", id.c_str(), status.val);
+      return false;
+    }
+    recordSuccessfulExecution("robot3+robot4", id, planner, scale, start, finish);
+    return true;
+  }
+
   // Executes the safety-gated sequence with per-step offsets and actions
   // read from the selected motion-task YAML.
   bool performSequence()
@@ -1739,10 +2083,10 @@ private:
         rebar_id_.c_str());
       return false;
     }
-    geometry_msgs::msg::Pose pick, place;
-    if (!lookupPose(pick3_frame_, pick) || !lookupPose(place3_frame_, place)) {
-      return false;
-    }
+    geometry_msgs::msg::Pose pick, place, pick4, place4;
+    if (!lookupPose(pick3_frame_, pick) || !lookupPose(place3_frame_, place)) return false;
+    if (use_robot4_ && (!lookupPose(pick4_frame_, pick4) ||
+                        !lookupPose(place4_frame_, place4))) return false;
 
     bool horizontal_return_success = false;
     bool horizontal_return_started = false;
@@ -1813,7 +2157,11 @@ private:
           return false;
         }
       }
-      if (!executeRobot3ConfiguredMotion(step, pick, place)) {
+      const auto index = static_cast<std::size_t>(&step - robot3_planner_steps_.data());
+      const bool motion_ok = use_robot4_ ?
+        executePairedStep(step, robot4_planner_steps_.at(index), pick, place, pick4, place4) :
+        executeRobot3ConfiguredMotion(step, pick, place);
+      if (!motion_ok) {
         RCLCPP_ERROR(get_logger(), "[%s] motion failed; stopping safely. Inspect attachment state.",
           step.id.c_str());
         return false;
@@ -1826,7 +2174,7 @@ private:
         }
       }
     }
-    RCLCPP_INFO(get_logger(), "Gantry + Robot 3 YAML planner sequence completed.");
+    RCLCPP_INFO(get_logger(), "Gantry + Robot 3%s YAML planner sequence completed.", use_robot4_ ? " + Robot 4" : "");
     return true;
   }
 
@@ -1992,6 +2340,8 @@ int main(int argc, char ** argv)
 
     std::unique_ptr<PlanningSceneObjects> scene_objects;
     std::unique_ptr<moveit::planning_interface::MoveGroupInterface> robot3_group;
+    std::unique_ptr<moveit::planning_interface::MoveGroupInterface> robot4_group;
+    std::unique_ptr<moveit::planning_interface::MoveGroupInterface> combined_group;
     tf2_ros::Buffer tf_buffer(node->get_clock());
     tf_buffer.setUsingDedicatedThread(true);
     tf2_ros::TransformListener tf_listener(tf_buffer, node, false);
@@ -2007,10 +2357,16 @@ int main(int argc, char ** argv)
       move_group->setPoseReferenceFrame("world");
 
       robot3_group = std::make_unique<moveit::planning_interface::MoveGroupInterface>(node, node->get_parameter("robot3_group").as_string());
+      if (node->get_parameter("use_robot4").as_bool()) {
+        robot4_group = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
+          node, node->get_parameter("robot4_group").as_string());
+        combined_group = std::make_unique<moveit::planning_interface::MoveGroupInterface>(
+          node, node->get_parameter("combined_group").as_string());
+      }
       scene_objects = std::make_unique<PlanningSceneObjects>(node);
 
-      node->initializeMoveIt(
-        move_group.get(), robot3_group.get(), scene_objects.get(), &tf_buffer);
+      node->initializeMoveIt(move_group.get(), robot3_group.get(), robot4_group.get(),
+                             combined_group.get(), scene_objects.get(), &tf_buffer);
 
       RCLCPP_INFO(
         node->get_logger(),
