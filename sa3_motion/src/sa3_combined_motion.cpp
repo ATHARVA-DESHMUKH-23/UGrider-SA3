@@ -551,91 +551,62 @@ int executePhase3Handoff(const rclcpp::Node::SharedPtr & node)
 }
 
 
-// Phase 5: central cell-motion token. Robot3 and Robot1/2 task executors
-// are independent programs. Without synchronized future plans they must NOT
-// command joints simultaneously. Both clients validate EVERY planned motion
-// against the full 24-joint robot state while holding the exclusive token.
-// The token is held through scene edits and cannot be released on step failure.
-int executePhase5Interlocked(const rclcpp::Node::SharedPtr & node, bool start_from_g4 = false)
+// Phase 5 coordinator: checkpoint ordering + completion reporting ONLY.
+// It never grants exclusive ownership of arm motion.
+int executePhase5Parallel(const rclcpp::Node::SharedPtr & node, bool start_from_g4 = false)
 {
   if (!start_from_g4) {
     waitForCheckpoint(node, "/gantry_robot3_pick_checkpoint_status",
                       doubleParam(node, "phase5_checkpoint_timeout_sec", 240.0),
                       "R3_HOLD_VERIFIED");
   }
-  struct Gate {
+  struct Progress {
     std::mutex mutex;
-    std::string owner;
     bool done_robot3{false};
     bool done_robot12{false};
     bool aborted{false};
   };
-  auto gate = std::make_shared<Gate>();
+  auto progress = std::make_shared<Progress>();
   using Trigger = std_srvs::srv::Trigger;
   std::vector<rclcpp::Service<Trigger>::SharedPtr> services;
   for (const std::string owner : {std::string("robot3"), std::string("robot12")}) {
     services.push_back(node->create_service<Trigger>(
-      "/sa3_phase5/" + owner + "_acquire",
-      [gate, owner](const Trigger::Request::SharedPtr,
-                    Trigger::Response::SharedPtr reply) {
-        std::lock_guard<std::mutex> lock(gate->mutex);
-        const bool already_done = owner == "robot3" ? gate->done_robot3 : gate->done_robot12;
-        reply->success = !gate->aborted && !already_done &&
-          (gate->owner.empty() || gate->owner == owner);
-        if (reply->success) gate->owner = owner;
-        reply->message = reply->success ? "ACQUIRED" : "BUSY_OR_FINISHED";
-      }));
-    services.push_back(node->create_service<Trigger>(
-      "/sa3_phase5/" + owner + "_release",
-      [gate, owner](const Trigger::Request::SharedPtr,
-                    Trigger::Response::SharedPtr reply) {
-        std::lock_guard<std::mutex> lock(gate->mutex);
-        reply->success = gate->owner == owner;
-        if (reply->success) gate->owner.clear();
-        reply->message = reply->success ? "RELEASED" : "NOT_OWNER";
-      }));
-    services.push_back(node->create_service<Trigger>(
       "/sa3_phase5/" + owner + "_abort",
-      [gate, owner](const Trigger::Request::SharedPtr,
-                    Trigger::Response::SharedPtr reply) {
-        std::lock_guard<std::mutex> lock(gate->mutex);
-        gate->aborted = true;
+      [progress, owner](const Trigger::Request::SharedPtr,
+                        Trigger::Response::SharedPtr reply) {
+        std::lock_guard<std::mutex> lock(progress->mutex);
+        progress->aborted = true;
         reply->success = true;
-        reply->message = owner + " task aborted: Phase5 gate remains closed";
+        reply->message = owner + " reported failure";
       }));
     services.push_back(node->create_service<Trigger>(
       "/sa3_phase5/" + owner + "_done",
-      [gate, owner](const Trigger::Request::SharedPtr,
-                    Trigger::Response::SharedPtr reply) {
-        std::lock_guard<std::mutex> lock(gate->mutex);
-        // Completion means THIS owner has already relinquished its token.
-        // The other arm program is allowed to be executing when this one
-        // reports done; otherwise an ordinary interleaving creates a false
-        // failure and can abort a fully successful tool change.
-        reply->success = !gate->aborted && gate->owner != owner;
+      [progress, owner](const Trigger::Request::SharedPtr,
+                        Trigger::Response::SharedPtr reply) {
+        std::lock_guard<std::mutex> lock(progress->mutex);
+        reply->success = !progress->aborted;
         if (reply->success) {
-          if (owner == "robot3") gate->done_robot3 = true;
-          else gate->done_robot12 = true;
+          if (owner == "robot3") progress->done_robot3 = true;
+          else progress->done_robot12 = true;
         }
-        reply->message = reply->success ? "DONE_CONFIRMED" : "MOTION_STILL_OWNED_OR_ABORTED";
+        reply->message = reply->success ? "DONE_CONFIRMED" : "ABORTED";
       }));
   }
-  RCLCPP_INFO(node->get_logger(), "[PHASE5] Exclusive full-arm validation gate is active");
+  RCLCPP_INFO(node->get_logger(),
+    "[PHASE5] Parallel Robot3/4 and Robot1/2 execution enabled; NO exclusive motion gate. "
+    "Independent trajectory collision checks do not guarantee synchronized separation.");
 
   if (start_from_g4) {
-    // Gate services are alive while the gripper changer waits for G5.
-    // Gantry R1-R3 also acquires this same exclusive arm-motion gate.
-    // Robot4 must already be home; the phase3 helper rejects otherwise.
     if (executePhase3Handoff(node) != 0)
-      throw std::runtime_error("Early Phase5: gantry handoff / Robot3 pickup failed");
+      throw std::runtime_error("Early Phase5: gantry handoff / Robot3+4 pickup failed");
   }
 
-  // Resume is a state-changing one-shot command. A timeout is an ambiguous
-  // outcome: do NOT blindly reissue it.
+  // Handoff remains mandatory: R4 must never start before successful R3 pick.
   const auto response = checkpointRequest(node, "/resume_robot3_place", 5s);
   if (!response->success)
-    throw std::runtime_error("Phase5 Robot3 placement resume refused: " + response->message);
-  RCLCPP_INFO(node->get_logger(), "[PHASE5] Robot3 R4-R7 resumed; gripper changer may interleave safely");
+    throw std::runtime_error("Phase5 Robot3+4 placement resume refused: " + response->message);
+  RCLCPP_INFO(node->get_logger(),
+    "[PHASE5] Robot3+4 placement resumed; Robot1/2 gripper change can execute concurrently");
 
   const double budget = doubleParam(node, "phase5_timeout_sec", 1800.0);
   if (!(budget > 0.0 && budget <= 7200.0))
@@ -643,17 +614,17 @@ int executePhase5Interlocked(const rclcpp::Node::SharedPtr & node, bool start_fr
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::duration<double>(budget);
   while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
     {
-      std::lock_guard<std::mutex> lock(gate->mutex);
-      if (gate->aborted)
-        throw std::runtime_error("Phase5 task failure reported: gate closed");
-      if (gate->done_robot3 && gate->done_robot12 && gate->owner.empty()) {
-        RCLCPP_INFO(node->get_logger(), "[PHASE5] Both programs completed; all motion segments were full-arm validated");
+      std::lock_guard<std::mutex> lock(progress->mutex);
+      if (progress->aborted)
+        throw std::runtime_error("Phase5 arm program reported failure");
+      if (progress->done_robot3 && progress->done_robot12) {
+        RCLCPP_INFO(node->get_logger(), "[PHASE5] Both concurrent workstreams completed");
         return 0;
       }
     }
-    std::this_thread::sleep_for(250ms);
+    std::this_thread::sleep_for(100ms);
   }
-  throw std::runtime_error("Phase5 completion timeout: do not resume or home without inspecting cell state");
+  throw std::runtime_error("Phase5 completion timeout; inspect physical cell before recovery");
 }
 
 // Phase 6 end: plan any remaining home motions within a single 24-joint
@@ -725,8 +696,8 @@ int execute(const rclcpp::Node::SharedPtr & node)
 {
   const auto workflow_mode = stringParam(node, "workflow_mode", "");
   if (workflow_mode == "phase3_handoff") return executePhase3Handoff(node);
-  if (workflow_mode == "phase5_interlocked") return executePhase5Interlocked(node);
-  if (workflow_mode == "phase3_phase5_interlocked") return executePhase5Interlocked(node, true);
+  if (workflow_mode == "phase5_parallel") return executePhase5Parallel(node);
+  if (workflow_mode == "phase3_phase5_parallel") return executePhase5Parallel(node, true);
   if (workflow_mode == "all_four_home") return executeAllFourHome(node);
   if (!workflow_mode.empty() && workflow_mode != "combined_goal")
     throw std::runtime_error("Unknown combined workflow_mode: " + workflow_mode);

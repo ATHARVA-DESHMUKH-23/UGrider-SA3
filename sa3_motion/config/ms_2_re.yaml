@@ -24,8 +24,6 @@ motion_sequence:
         pause_after_g4: true
         pause_after_r3: true
         checkpoint_tolerance_m: 0.01
-        phase5_gate_enabled: true
-        phase5_gate_pick_steps: true
     - name: flange_pp
       background: false
       parameters:
@@ -75,12 +73,15 @@ motion_sequence:
   #   retries: 1
   #   on_failure: abort
   
-  - name: PHASE 5 - Robot3 1A pick and MoveL place interlocked with tying gun change
+  # Phase 5: no custom cell-safety gate or sampled /check_state_validity requests.
+  # Both motion nodes execute concurrently; retain G5/R3 handoff and done/abort handshake.
+  # WARNING: independent MoveIt plans are not synchronized inter-robot collision validation.
+  - name: PHASE 5 - Robot3+4 pick place and Robot1+2 gripper change concurrently
     mode: parallel
     executables:
     - name: sa3_combined_motion
       parameters:
-        workflow_mode: phase3_phase5_interlocked
+        workflow_mode: phase3_phase5_parallel
         execute_motion: true
         require_robot4_already_home: true
         phase3_combined_group: robot3_robot4_arms
@@ -97,7 +98,6 @@ motion_sequence:
         motion_config_package: sa3_motion
         motion_config_file: config/ms_2_re.yaml
         motion_task: change_to_tying_guns
-        phase5_gate_enabled: true
         wait_for_gantry_g5: true
         gantry_g5_wait_timeout_sec: 240.0
     retries: 1
@@ -132,15 +132,13 @@ motion_sequence:
     executables:
       - name: robot3_sa3pp
         parameters:
-          pick_frame: sa3_pick_point
-          place_frame: sa3_place
+          pick_frame: sa3_pick_point_l
+          place_frame: sa3_place_l
           robot3_group: robot3_arm
           robot4_group: robot4_arm
           combined_group: robot3_robot4_arms
           robot3_planning_link: robot3_end_effactor
           robot4_planning_link: robot4_end_effactor
-          pick_frame: sa3_pick_point_l
-          place_frame: sa3_place_l
           robot4_pick_frame: sa3_pick_point_r
           robot4_place_frame: sa3_place_r
           object_id: rebar_1A

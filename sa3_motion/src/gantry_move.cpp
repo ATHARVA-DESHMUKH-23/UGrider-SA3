@@ -37,7 +37,6 @@
 #include "moveit_msgs/msg/robot_trajectory.hpp"
 #include "geometry_msgs/msg/pose.hpp"
 #include "moveit_msgs/srv/get_position_ik.hpp"
-#include "moveit_msgs/srv/get_state_validity.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/LinearMath/Vector3.h"
 #include "tf2/exceptions.h"
@@ -46,7 +45,7 @@
 #include "tf2_ros/transform_listener.h"
 #include "sa3_motion/planning_scene_objects.hpp"
 #include "sa3_motion/motion_task.hpp"
-#include "sa3_motion/phase5_cell_safety.hpp"
+#include "sa3_motion/phase5_completion.hpp"
 
 // The SA1-style declarative planner record. The schema is validated before
 // any motion starts; pose offsets and collision actions come from the selected motion recipe.
@@ -362,10 +361,6 @@ public:
     // Phase 3/4 checkpoint: after verified Robot 3 pick/retract and gantry return,
     // hold the attached rebar until an explicit later placement command.
     pause_after_r3_ = parameterOrDeclare<bool>("pause_after_r3", false);
-    phase5_gate_enabled_ = parameterOrDeclare<bool>("phase5_gate_enabled", false);
-    phase5_gate_pick_steps_ = parameterOrDeclare<bool>("phase5_gate_pick_steps", false);
-    if (phase5_gate_pick_steps_ && !phase5_gate_enabled_)
-      throw std::invalid_argument("phase5_gate_pick_steps requires phase5_gate_enabled");
     checkpoint_tolerance_m_ = parameterOrDeclare<double>("checkpoint_tolerance_m", 0.01);
     if (!std::isfinite(checkpoint_tolerance_m_) ||
         checkpoint_tolerance_m_ <= 0.0 || checkpoint_tolerance_m_ > 0.05) {
@@ -393,7 +388,7 @@ public:
         this, controller_action_);
 
     ik_client_ = create_client<moveit_msgs::srv::GetPositionIK>("/compute_ik");
-    validity_client_ = create_client<moveit_msgs::srv::GetStateValidity>("/check_state_validity");
+
 
     start_service_ = create_service<std_srvs::srv::Trigger>(
       "/start_gantry_motion",
@@ -550,7 +545,7 @@ private:
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr handoff_ready_service_;
 
   rclcpp::Client<moveit_msgs::srv::GetPositionIK>::SharedPtr ik_client_;
-  rclcpp::Client<moveit_msgs::srv::GetStateValidity>::SharedPtr validity_client_;
+
 
   moveit::planning_interface::MoveGroupInterface * move_group_{nullptr};
   moveit::planning_interface::MoveGroupInterface * robot3_group_{nullptr};
@@ -605,9 +600,6 @@ private:
   bool auto_start_{true};
   bool pause_after_g4_{false};
   bool pause_after_r3_{false};
-  bool phase5_gate_enabled_{false};
-  bool phase5_gate_pick_steps_{false};
-  bool phase5_motion_active_{false};
   bool g5_completed_{false};
   double checkpoint_tolerance_m_{0.01};
   std::mutex checkpoint_mutex_;
@@ -977,21 +969,7 @@ private:
     MoveGroup & group, const PlannedMotion & motion,
     const std::string & label, const std::string & planner, double velocity_scale)
   {
-    // Phase 5: the other two arms cannot move while our exclusive token is held.
-    // Validate the complete four-arm state for every joint-space sample before
-    // executing a planned Robot3 motion, including attached rebar geometry.
-    if (phase5_gate_enabled_ && phase5_motion_active_) {
-      const auto current = group.getCurrentState(5.0);
-      if (!current || !sa3_phase5::validateFullArmTrajectory(
-          shared_from_this(), sa3_phase5::trajectoryOf(motion), *current, label)) {
-        throw std::runtime_error("Phase5 Robot3 full-arm trajectory validation failed: " + label);
-      }
-      const auto fresh = group.getCurrentState(5.0);
-      if (!fresh || !sa3_phase5::fullArmStartStillCurrent(
-          shared_from_this(), *current, *fresh, label)) {
-        throw std::runtime_error("Phase5 Robot3 state changed before execute: " + label);
-      }
-    }
+    // Run the successfully planned motion via MoveIt execute() directly.
     const auto started = std::chrono::steady_clock::now();
     const auto result = group.execute(motion);
     const auto finished = std::chrono::steady_clock::now();
@@ -1872,7 +1850,18 @@ private:
       if (!combined_group_->setJointValueTarget(combined_home_)) return false;
       MoveGroup::Plan plan;
       if (!planCombinedOmpl(plan)) return false;
-      return executeCombinedTimed(plan, r3.id, "Combined MoveJ", home_velocity_);
+      // Execute the MoveIt-planned combined MoveJ trajectory directly.
+      const auto started = std::chrono::steady_clock::now();
+      const auto result = combined_group_->execute(plan);
+      const auto finished = std::chrono::steady_clock::now();
+      if (result != moveit::core::MoveItErrorCode::SUCCESS) {
+        RCLCPP_ERROR(get_logger(), "[%s] Combined MoveJ execution failed (code %d)",
+          r3.id.c_str(), result.val);
+        return false;
+      }
+      recordSuccessfulExecution("robot3+robot4", r3.id, "Combined MoveJ",
+        home_velocity_, started, finished);
+      return true;
     }
 
     const auto goal3 = offsetConfiguredPose(r3.reference == "pick_frame" ? pick3 : place3,
@@ -1898,7 +1887,18 @@ private:
       if (!combined_group_->setJointValueTarget(*current)) return false;
       MoveGroup::Plan plan;
       if (!planCombinedOmpl(plan)) return false;
-      return executeCombinedTimed(plan, r3.id, "Combined MoveJ", home_velocity_);
+      // Execute the MoveIt-planned combined MoveJ trajectory directly.
+      const auto started = std::chrono::steady_clock::now();
+      const auto result = combined_group_->execute(plan);
+      const auto finished = std::chrono::steady_clock::now();
+      if (result != moveit::core::MoveItErrorCode::SUCCESS) {
+        RCLCPP_ERROR(get_logger(), "[%s] Combined MoveJ execution failed (code %d)",
+          r3.id.c_str(), result.val);
+        return false;
+      }
+      recordSuccessfulExecution("robot3+robot4", r3.id, "Combined MoveJ",
+        home_velocity_, started, finished);
+      return true;
     }
 
     auto planArm = [&](MoveGroup & group, const ConfiguredGantryStep & cfg,
@@ -2036,36 +2036,10 @@ private:
       p.time_from_start.nanosec=static_cast<uint32_t>(nanos%1000000000LL);
       merged.points.push_back(std::move(p));
     }
-    // Individual paths are collision-checked separately. The MERGED trajectory
-    // must also be checked against the full workcell, including both robots and
-    // Robot3's attached rebar. Never execute if the validation service is absent.
-    if (!validity_client_->wait_for_service(5s)) {
-      RCLCPP_ERROR(get_logger(), "[%s] /check_state_validity unavailable; refusing paired execution", r3.id.c_str());
-      return false;
-    }
-    for (std::size_t sample_index=0; sample_index<merged.points.size(); ++sample_index) {
-      auto request=std::make_shared<moveit_msgs::srv::GetStateValidity::Request>();
-      request->group_name=combined_group_name_;
-      request->robot_state=start_msg;
-      auto & js=request->robot_state.joint_state;
-      for (std::size_t j=0;j<merged.joint_names.size();++j) {
-        auto it=std::find(js.name.begin(),js.name.end(),merged.joint_names[j]);
-        if (it==js.name.end()) {
-          RCLCPP_ERROR(get_logger(), "[%s] merged joint '%s' missing in validation state",
-            r3.id.c_str(), merged.joint_names[j].c_str());
-          return false;
-        }
-        js.position[static_cast<std::size_t>(std::distance(js.name.begin(),it))] =
-          merged.points[sample_index].positions[j];
-      }
-      auto future=validity_client_->async_send_request(request);
-      if (future.wait_for(3s)!=std::future_status::ready || !future.get()->valid) {
-        RCLCPP_ERROR(get_logger(), "[%s] merged motion invalid/unchecked at sample %zu/%zu; abort",
-          r3.id.c_str(), sample_index+1, merged.points.size());
-        return false;
-      }
-    }
-    RCLCPP_INFO(get_logger(), "[%s] Collision-checked combined %zu-joint MoveL (%zu samples), duration %.3f s",
+    // Both per-arm MoveL plans were produced by MoveIt, then time-merged.
+    // No additional sampled /check_state_validity service requests are performed.
+    // The merged 12-joint trajectory is not a jointly replanned collision-checked path.
+    RCLCPP_INFO(get_logger(), "[%s] Executing merged %zu-joint MoveL directly (%zu points, %.3f s)",
       r3.id.c_str(), merged.joint_names.size(), merged.points.size(), total);
     return executeCombinedTimed(merged_plan, r3.id, "Combined MoveL", r3.planner == "pilz" ? pilz_velocity_ : cartesian_velocity_);
   }
@@ -2073,20 +2047,7 @@ private:
   bool executeCombinedTimed(const MoveGroup::Plan & plan, const std::string & id,
                             const std::string & planner, double scale)
   {
-    if (phase5_gate_enabled_ && phase5_motion_active_) {
-      const auto snapshot = combined_group_->getCurrentState(5.0);
-      if (!snapshot || !sa3_phase5::validateFullArmTrajectory(
-            shared_from_this(), plan.trajectory_, *snapshot, id)) {
-        RCLCPP_ERROR(get_logger(), "[%s] 24-arm-state validity failed", id.c_str());
-        return false;
-      }
-      const auto live = combined_group_->getCurrentState(5.0);
-      if (!live || !sa3_phase5::fullArmStartStillCurrent(
-            shared_from_this(), *snapshot, *live, id)) {
-        RCLCPP_ERROR(get_logger(), "[%s] robot state changed before combined execution", id.c_str());
-        return false;
-      }
-    }
+    // Rely on MoveIt execute() and controller result; no custom Phase5 validation.
     const auto start=std::chrono::steady_clock::now();
     const auto status=combined_group_->execute(plan);
     const auto finish=std::chrono::steady_clock::now();
@@ -2289,7 +2250,7 @@ private:
     response->message = "Robot3 placement resume accepted; R3 state will be verified";
   }
 
-  // Executes the safety-gated sequence with per-step offsets and actions
+  // Executes the configured dual-arm sequence without an exclusive motion gate; actions
   // read from the selected motion-task YAML.
   bool performSequence()
   {
@@ -2430,14 +2391,8 @@ private:
       return false;
     };
 
-    sa3_phase5::GateClient phase5_gate(shared_from_this(), "robot3", phase5_gate_enabled_);
+    sa3_phase5::CompletionClient phase5_completion(shared_from_this(), "robot3");
     for (const auto & step : robot3_planner_steps_) {
-      const bool phase5_step = phase5_gate_enabled_ &&
-        ((step.id == "R4" || step.id == "R5" || step.id == "R6" || step.id == "R7") ||
-         (phase5_gate_pick_steps_ &&
-          (step.id == "R1" || step.id == "R2" || step.id == "R3")));
-      if (phase5_step && !phase5_gate.acquire()) return false;
-      phase5_motion_active_ = phase5_step;
       RCLCPP_INFO(get_logger(), "[%s] %s", step.id.c_str(), step.description.c_str());
       for (const auto & action : step.before_actions) {
         if (!executeAction(action)) {
@@ -2462,10 +2417,6 @@ private:
           return false;
         }
       }
-      if (phase5_step) {
-        phase5_motion_active_ = false;
-        if (!phase5_gate.release()) return false;
-      }
       if (pause_after_r3_ && step.id == "R3") {
         if (!gantry_raised_at_handoff || !verifyGantryRaisedAtHandoff() ||
             !holdAfterRobot3PickUntilResumed()) {
@@ -2474,7 +2425,7 @@ private:
         }
       }
     }
-    if (!phase5_gate.done()) return false;
+    if (!phase5_completion.done()) return false;
     RCLCPP_INFO(get_logger(), "Gantry + Robot 3%s YAML planner sequence completed.", use_robot4_ ? " + Robot 4" : "");
     return true;
   }

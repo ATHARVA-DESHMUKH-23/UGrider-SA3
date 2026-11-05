@@ -47,7 +47,7 @@
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
 #include "sa3_motion/workcell_program.hpp"
 #include "sa3_motion/motion_task.hpp"
-#include "sa3_motion/phase5_cell_safety.hpp"
+#include "sa3_motion/phase5_completion.hpp"
 
 using namespace std::chrono_literals;
 using MGI = moveit::planning_interface::MoveGroupInterface;
@@ -435,7 +435,6 @@ public:
       arms_[i].mg->setPlanningTime(kPlanningTime);
     }
 
-    phase5_gate_enabled_ = sa3_phase5::enabledParam(node_);
     if (kExecutionBackend == "follow_joint_trajectory") {
       robot1_action_client_ = rclcpp_action::create_client<FollowTrajectory>(node_, kRobot1ControllerAction);
       robot2_action_client_ = rclcpp_action::create_client<FollowTrajectory>(node_, kRobot2ControllerAction);
@@ -484,9 +483,8 @@ public:
       }
       return ok;
     };
-    sa3_phase5::GateClient phase5_gate(node_, "robot12", phase5_gate_enabled_);
+    sa3_phase5::CompletionClient phase5_completion(node_, "robot12");
     for (std::size_t step_index = 0; step_index < kGripperSteps.size(); ++step_index) {
-      if (!phase5_gate.acquire()) return false;
       const auto & step = kGripperSteps[step_index];
       active_step_index_ = step_index;
       std::array<geometry_msgs::msg::Pose, 2> targets;
@@ -534,11 +532,10 @@ public:
           return false;
         }
       }
-      // Keep the cell locked through the final scene restoration, too.
+      // Restore the tool scene after the final change step.
       if (step_index + 1 == kGripperSteps.size() && !restore()) return false;
-      if (!phase5_gate.release()) return false;
     }
-    if (!phase5_gate.done()) return false;
+    if (!phase5_completion.done()) return false;
     logI("combined gripper change completed: " + kSourceTool + " -> " + kTargetTool);
     return true;
   }
@@ -948,20 +945,8 @@ private:
 
   bool executeCombined(MGI::Plan & plan, const std::string & label)
   {
-    if (phase5_gate_enabled_ || kExecutionBackend == "follow_joint_trajectory") {
-      auto state = combined_->getCurrentState(5.0);
-      if (!state || !sa3_phase5::validateFullArmTrajectory(
-          node_, plan.trajectory_, *state, label)) {
-        logE("Full-arm sampled collision validation failed for " + label);
-        return false;
-      }
-      const auto fresh = combined_->getCurrentState(5.0);
-      if (!fresh || !sa3_phase5::fullArmStartStillCurrent(
-          node_, *state, *fresh, label)) {
-        logE("Cell arm state changed before gripper execute for " + label);
-        return false;
-      }
-    }
+    // Execute the planned trajectory using the YAML-selected backend.
+    // No extra Phase5 cell-safety service checks or motion lock.
     // Wall-clock time of the blocking execution call only (no planning / TF / scene updates).
     const auto started = std::chrono::steady_clock::now();
     bool success = false;
@@ -1128,7 +1113,6 @@ private:
 
   rclcpp::Node::SharedPtr node_;
   tf2_ros::Buffer & tf_;
-  bool phase5_gate_enabled_{false};
   bool direct_motion_unresolved_{false};
   rclcpp_action::Client<FollowTrajectory>::SharedPtr robot1_action_client_;
   rclcpp_action::Client<FollowTrajectory>::SharedPtr robot2_action_client_;
@@ -1160,7 +1144,7 @@ bool waitForG5BeforeToolChange(const rclcpp::Node::SharedPtr & node)
     }
     const auto result = future.get();
     if (result && result->success && result->message == "G5_COMPLETE") {
-      RCLCPP_INFO(node->get_logger(), "G5 complete: gripper change may begin with phase5 gate");
+      RCLCPP_INFO(node->get_logger(), "G5 complete: gripper change may begin in parallel with Robot3+4");
       return true;
     }
     rclcpp::sleep_for(200ms);
