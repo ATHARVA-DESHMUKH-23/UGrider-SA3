@@ -59,19 +59,19 @@ motion_sequence:
     retries: 1
     on_failure: abort
   
-  # - name: PHASE 3B - complete shear links from verified P1
-  #   mode: sequential
-  #   executables:
-  #   - name: shear_links_pp
-  #     parameters:
-  #       workcell_config_package: sa2_description
-  #       workcell_config_file: config/workcell.yaml
-  #       motion_config_package: sa3_motion
-  #       motion_config_file: config/ms_2_re.yaml
-  #       motion_task: shear_links_2_re
-  #       first_p1_prepositioned: true
-  #   retries: 1
-  #   on_failure: abort
+  - name: PHASE 4 - complete shear links from verified P1
+    mode: sequential
+    executables:
+    - name: shear_links_pp
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_config_package: sa3_motion
+        motion_config_file: config/ms_2_re.yaml
+        motion_task: shear_links_2_re
+        first_p1_prepositioned: true
+    retries: 1
+    on_failure: abort
   
   # Phase 5: no custom cell-safety gate or sampled /check_state_validity requests.
   # Both motion nodes execute concurrently; retain G5/R3 handoff and done/abort handshake.
@@ -145,52 +145,52 @@ motion_sequence:
           children:
           - rebar_3c
           - rebar_4c
-          # - rebar_5a
-          # - rebar_6
-          # - rebar_13_1
-          # - rebar_13_2
-          # - rebar_13_3
-          # - rebar_13_4
-          # - rebar_14_1
-          # - rebar_14_2
-          # - rebar_14_3
-          # - rebar_14_4
-          # - rebar_13_1_R
-          # - rebar_13_2_R
-          # - rebar_13_3_R
-          # - rebar_14_4_R
-          # - rebar_14_3_R
-          # - rebar_14_2_R
-          # - rebar_14_1_R
-          # - rebar_3d
-          # - rebar_4d
+          - rebar_5a
+          - rebar_6
+          - rebar_13_1
+          - rebar_13_2
+          - rebar_13_3
+          - rebar_13_4
+          - rebar_14_1
+          - rebar_14_2
+          - rebar_14_3
+          - rebar_14_4
+          - rebar_13_1_R
+          - rebar_13_2_R
+          - rebar_13_3_R
+          - rebar_14_4_R
+          - rebar_14_3_R
+          - rebar_14_2_R
+          - rebar_14_1_R
+          - rebar_3d
+          - rebar_4d
 
           # Choose the owner for the main rebar and EACH child in YAML.
           # Every entry in children must be assigned exactly once.
           main_object_robot: 3
           robot3_children:
           - rebar_3c
-          # - rebar_5a
-          # - rebar_13_1
-          # - rebar_13_2
-          # - rebar_13_3
-          # - rebar_13_4
-          # - rebar_14_1
-          # - rebar_14_2
-          # - rebar_14_3
-          # - rebar_14_4
-          # - rebar_3d
+          - rebar_5a
+          - rebar_13_1
+          - rebar_13_2
+          - rebar_13_3
+          - rebar_13_4
+          - rebar_14_1
+          - rebar_14_2
+          - rebar_14_3
+          - rebar_14_4
+          - rebar_3d
           robot4_children:
           - rebar_4c
-          # - rebar_6
-          # - rebar_13_1_R
-          # - rebar_13_2_R
-          # - rebar_13_3_R
-          # - rebar_14_4_R
-          # - rebar_14_3_R
-          # - rebar_14_2_R
-          # - rebar_14_1_R
-          # - rebar_4d
+          - rebar_6
+          - rebar_13_1_R
+          - rebar_13_2_R
+          - rebar_13_3_R
+          - rebar_14_4_R
+          - rebar_14_3_R
+          - rebar_14_2_R
+          - rebar_14_1_R
+          - rebar_4d
 
           # Both arms use coordinated Cartesian IK and combined-state collision checking.
           # No separate Pilz LIN arm planning with the opposite arm fixed.
