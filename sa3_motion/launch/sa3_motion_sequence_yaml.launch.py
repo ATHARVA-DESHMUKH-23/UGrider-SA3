@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Run a configurable SA3 motion sequence from YAML.
+"""Run SA3 schema-v3 motion sequence using only sa3_generic_executor.
 
 Usage:
-  ros2 launch sa3_motion sa3_motion_sequence.launch.py
-  ros2 launch sa3_motion sa3_motion_sequence.launch.py sequence_config:=/abs/path/my_sequence.yaml
-  ros2 launch sa3_motion sa3_motion_sequence.launch.py sequence_config:=my_sequence.yaml
+  ros2 launch sa3_motion sa3_10m_motion_sequence_generic.launch.py
+  ros2 launch sa3_motion sa3_10m_motion_sequence_generic.launch.py sequence_config:=/abs/path/my_sequence.yaml
+  ros2 launch sa3_motion sa3_10m_motion_sequence_generic.launch.py sequence_config:=my_sequence.yaml
       (looked up in the current directory first, then in <sa3_motion share>/config/)
 """
 
@@ -44,7 +44,7 @@ def resolve_config_path(value, config_dir):
 
 def generate_launch_description():
     config_dir = os.path.join(get_package_share_directory(PACKAGE_NAME), "config")
-    default_config = os.path.join(config_dir, "motion_sequence.yaml")
+    default_config = os.path.join(config_dir, "ms_2_re_generic_executor.yaml")
     config_arg = DeclareLaunchArgument(
         "sequence_config",
         default_value=default_config,
@@ -52,6 +52,15 @@ def generate_launch_description():
             "YAML motion-sequence file: absolute path, path relative to the current "
             "directory, or a file name inside the sa3_motion config directory"
         ),
+    )
+
+    dry_run_arg = DeclareLaunchArgument(
+        "dry_run", default_value="true",
+        description="Safety default: plan/validate only, never execute trajectories or alter the scene",
+    )
+    sim_arg = DeclareLaunchArgument(
+        "simulation_confirmed", default_value="false",
+        description="Explicit simulation-only acknowledgement before real execution",
     )
 
     def setup_sequence(context):
@@ -69,6 +78,45 @@ def generate_launch_description():
             ) from exc
         if not isinstance(stages, list) or not stages:
             raise RuntimeError("motion_sequence.stages must be a non-empty list")
+
+        if config.get("motion_sequence", {}).get("schema_version") != 3:
+            raise RuntimeError("Expected generic schema_version: 3")
+        dry_run = LaunchConfiguration("dry_run").perform(context).lower() == "true"
+        simulation_confirmed = (
+            LaunchConfiguration("simulation_confirmed").perform(context).lower() == "true"
+        )
+        if not dry_run and not simulation_confirmed:
+            raise RuntimeError(
+                "Generic execution is simulation-only: set simulation_confirmed:=true "
+                "after confirming MoveIt and controllers are in simulation"
+            )
+        workcell_def = config["motion_sequence"].get("workcell", {})
+        workcell_path = os.path.join(
+            get_package_share_directory(workcell_def.get("package", "sa2_description")),
+            workcell_def.get("file", "config/workcell.yaml"),
+        )
+        if not os.path.isfile(workcell_path):
+            raise RuntimeError(f"Workcell YAML not found: {workcell_path}")
+
+        # A dry run is a schema preflight only. Planning an entire stateful
+        # sequence without executing earlier steps would use incorrect start
+        # states and could hang on G4/R3; do not pretend otherwise.
+        if dry_run:
+            task_map = config["motion_sequence"].get("tasks", {})
+            combined_map = config["motion_sequence"].get("combined_motions", {})
+            for stage in stages:
+                if stage.get("mode") == "combined":
+                    if stage.get("combined_step") not in combined_map:
+                        raise RuntimeError(f"Unknown combined_step in {stage.get('name')}")
+                for entry in stage.get("executables", []):
+                    params = entry.get("parameters", {}) if isinstance(entry, dict) else {}
+                    if params.get("motion_task") not in task_map:
+                        raise RuntimeError(f"Unknown motion_task in {stage.get('name')}")
+            return [
+                LogInfo(msg="[SA3 GENERIC] Schema-v3 preflight passed. NO robot execution performed. "
+                            "Use dry_run:=false simulation_confirmed:=true only in a verified simulator."),
+                EmitEvent(event=Shutdown(reason="SA3 generic static preflight completed")),
+            ]
 
         moveit_parameters = MoveItConfigsBuilder(
             "sa3_robots", package_name="sa2_moveit_config"
@@ -93,18 +141,25 @@ def generate_launch_description():
             return {"name": name.strip(), "parameters": params,
                     "background": bool(raw.get("background", False)) if isinstance(raw, dict) else False}
 
-        def make_node(entry):
+        def make_node(entry, index):
+            if entry["name"] != "sa3_generic_executor":
+                raise RuntimeError(
+                    f"Legacy executable is not permitted in generic sequence: {entry['name']}"
+                )
             params = dict(entry["parameters"])
-            # All recipe-backed C++ nodes must use the exact YAML selected at
-            # launch. Do not fall back to a stale/missing installed config copy.
-            if entry["name"] in (
-                "gantry_move", "flange_pp", "shear_links_pp",
-                "robot1_gripper_change", "tying_rebars",
-            ):
-                params["motion_config_path"] = config_path
+            params.update({
+                "motion_config_path": config_path,
+                "workcell_config_path": workcell_path,
+                "stage_id": str(stages[index].get("id", f"stage_{index + 1}")),
+                "dry_run": dry_run,
+                "simulation_confirmed": simulation_confirmed,
+            })
+            # This node is deliberately instantiated once per task, using ONE
+            # generic C++ executable. Persistent gantry services remain alive.
             return Node(
                 package=PACKAGE_NAME,
-                executable=entry["name"],
+                executable="sa3_generic_executor",
+                name=f"sa3_generic_executor_{index}_{params.get('motion_task', 'combined')}",
                 output="screen",
                 parameters=[moveit_parameters, params],
             )
@@ -128,7 +183,7 @@ def generate_launch_description():
                         not background_state["gantry_exited_successfully"]):
                     return [LogInfo(msg="[motion_sequence] All stages passed; waiting for the "
                         "gantry/Robot3 node to exit successfully")]
-                return stop("ALL SIX PHASES COMPLETED; final home stage passed")
+                return stop("ALL GENERIC STAGES COMPLETED")
             stage = stages[index]
             if not isinstance(stage, dict):
                 return stop(f"Stage {index + 1} must be a YAML mapping")
@@ -138,20 +193,15 @@ def generate_launch_description():
             # This is a six-phase recipe: the persistent gantry must remain
             # alive through G4 and the R3 hold, but it is EXPECTED to exit
             # with code 0 after completing Robot3 R4-R7 in Phase 5.
-            # Recognize the actual workflow handler, not just the label.
-            if stage_name.startswith("PHASE 5 -") or any(
-                isinstance(item, dict)
-                and item.get("name", item.get("executable")) == "sa3_combined_motion"
-                and item.get("parameters", {}).get("workflow_mode") == "phase5_interlocked"
-                for item in raw_entries
-            ):
+            # The phase5 coordinator and gripper-changing task run concurrently.
+            if bool(stage.get("marks_background_completion_phase", False)):
                 background_state["phase5_started"] = True
             mode = str(stage.get("mode", "sequential")).lower()
             retries = int(stage.get("retries", 1))
             policy = str(stage.get("on_failure", "abort")).lower()
 
             if mode == "combined":
-                # A combined stage has exactly one motion owner: sa3_combined_motion.
+                # A combined stage has one universal executor instance.
                 # It reads the SAME source recipe path this launcher was given.
                 key = stage.get("combined_step")
                 if not isinstance(key, str) or not key.strip():
@@ -168,9 +218,9 @@ def generate_launch_description():
                 if not isinstance(run_motion, bool):
                     return stop(f"Stage '{stage_name}': execute_motion must be true/false")
                 entry = {
-                    "name": "sa3_combined_motion",
+                    "name": "sa3_generic_executor",
                     "parameters": {
-                        "sequence_config_path": config_path,
+                        "motion_config_path": config_path,
                         "workcell_config_path": workcell_path,
                         "combined_step": key.strip(),
                         "execute_motion": run_motion,
@@ -182,8 +232,8 @@ def generate_launch_description():
                 return stop(f"Stage '{stage_name}': executables must be a non-empty list")
             if mode not in ("parallel", "sequential", "overlap"):
                 return stop(f"Stage '{stage_name}': invalid mode '{mode}'")
-            if retries < 1:
-                return stop(f"Stage '{stage_name}': retries must be at least 1")
+            if retries != 1:
+                return stop(f"Stage '{stage_name}': automatic stage retries are unsafe after motion may have started")
             if policy not in ("abort", "continue", "final_home", "finish"):
                 return stop(f"Stage '{stage_name}': invalid on_failure '{policy}'")
             if mode == "sequential" and len(raw_entries) != 1:
@@ -211,8 +261,8 @@ def generate_launch_description():
             """
             bg = next(e for e in entries if e["background"])
             fg = next(e for e in entries if not e["background"])
-            bg_process = make_node(bg)
-            fg_process = make_node(fg)
+            bg_process = make_node(bg, index)
+            fg_process = make_node(fg, index)
             background_state["process"] = bg_process
 
             def background_exited(event, _context):
@@ -223,7 +273,7 @@ def generate_launch_description():
                     return stop("Gantry exited before Phase 5 placement; inspect attachment and joints")
                 background_state["gantry_exited_successfully"] = True
                 if background_state["finished"]:
-                    return stop("ALL SIX PHASES COMPLETED; gantry exited successfully")
+                    return stop("ALL GENERIC STAGES COMPLETED; gantry exited successfully")
                 return [LogInfo(msg="[motion_sequence] Gantry/Robot3 R4-R7 exited "
                     "successfully; allowing Phase 5 gripper change and coordinator to finish")]
 
@@ -241,7 +291,7 @@ def generate_launch_description():
                     bg_process, fg_process]
 
         def run_single(index, stage_name, entry, retries, attempt, policy):
-            process = make_node(entry)
+            process = make_node(entry, index)
             exe = entry["name"]
 
             def on_exit(event, _context):
@@ -260,7 +310,7 @@ def generate_launch_description():
             actions = []
 
             for entry_index, entry in enumerate(entries):
-                process = make_node(entry)
+                process = make_node(entry, index)
                 exe = entry["name"]
 
                 def handler_for(idx, executable):
@@ -300,9 +350,11 @@ def generate_launch_description():
                 return [LogInfo(msg=f"[motion_sequence] Stage '{stage_name}' failed; running final stage '{final_name}'")] + run_stage(final_index)
             return stop(f"Stage '{stage_name}' finished with failure; sequence ended")
 
-        return [LogInfo(msg=f"[motion_sequence] Using config: {config_path}")] + run_stage(0)
+        return [LogInfo(msg=f"[motion_sequence] Generic executor config: {config_path}; "
+                             f"dry_run={dry_run}; simulation_confirmed={simulation_confirmed}")] + run_stage(0)
 
-    return LaunchDescription([config_arg, OpaqueFunction(function=setup_sequence)])
+    return LaunchDescription([config_arg, dry_run_arg, sim_arg,
+                              OpaqueFunction(function=setup_sequence)])
 
 
 if __name__ == "__main__":

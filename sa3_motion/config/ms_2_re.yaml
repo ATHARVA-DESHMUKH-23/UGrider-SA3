@@ -127,132 +127,132 @@ motion_sequence:
     retries: 1
     on_failure: abort
   
-  - name: PHASE 6C - Pick/place final assembly
-    mode: sequential
-    executables:
-      - name: robot3_sa3pp
-        parameters:
-          pick_frame: sa3_pick_point_l
-          place_frame: sa3_place_l
-          robot3_group: robot3_arm
-          robot4_group: robot4_arm
-          combined_group: robot3_robot4_arms
-          robot3_planning_link: robot3_end_effactor
-          robot4_planning_link: robot4_end_effactor
-          robot4_pick_frame: sa3_pick_point_r
-          robot4_place_frame: sa3_place_r
-          object_id: rebar_1A
-          children:
-          - rebar_3c
-          - rebar_4c
-          - rebar_5a
-          - rebar_6
-          - rebar_13_1
-          - rebar_13_2
-          - rebar_13_3
-          - rebar_13_4
-          - rebar_14_1
-          - rebar_14_2
-          - rebar_14_3
-          - rebar_14_4
-          - rebar_13_1_R
-          - rebar_13_2_R
-          - rebar_13_3_R
-          - rebar_14_4_R
-          - rebar_14_3_R
-          - rebar_14_2_R
-          - rebar_14_1_R
-          - rebar_3d
-          - rebar_4d
+  # - name: PHASE 6C - Pick/place final assembly
+  #   mode: sequential
+  #   executables:
+  #     - name: robot3_sa3pp
+  #       parameters:
+  #         pick_frame: sa3_pick_point_l
+  #         place_frame: sa3_place_l
+  #         robot3_group: robot3_arm
+  #         robot4_group: robot4_arm
+  #         combined_group: robot3_robot4_arms
+  #         robot3_planning_link: robot3_end_effactor
+  #         robot4_planning_link: robot4_end_effactor
+  #         robot4_pick_frame: sa3_pick_point_r
+  #         robot4_place_frame: sa3_place_r
+  #         object_id: rebar_1A
+  #         children:
+  #         - rebar_3c
+  #         - rebar_4c
+  #         - rebar_5a
+  #         - rebar_6
+  #         - rebar_13_1
+  #         - rebar_13_2
+  #         - rebar_13_3
+  #         - rebar_13_4
+  #         - rebar_14_1
+  #         - rebar_14_2
+  #         - rebar_14_3
+  #         - rebar_14_4
+  #         - rebar_13_1_R
+  #         - rebar_13_2_R
+  #         - rebar_13_3_R
+  #         - rebar_14_4_R
+  #         - rebar_14_3_R
+  #         - rebar_14_2_R
+  #         - rebar_14_1_R
+  #         - rebar_3d
+  #         - rebar_4d
 
-          # Choose the owner for the main rebar and EACH child in YAML.
-          # Every entry in children must be assigned exactly once.
-          main_object_robot: 3
-          robot3_children:
-          - rebar_3c
-          - rebar_5a
-          - rebar_13_1
-          - rebar_13_2
-          - rebar_13_3
-          - rebar_13_4
-          - rebar_14_1
-          - rebar_14_2
-          - rebar_14_3
-          - rebar_14_4
-          - rebar_3d
-          robot4_children:
-          - rebar_4c
-          - rebar_6
-          - rebar_13_1_R
-          - rebar_13_2_R
-          - rebar_13_3_R
-          - rebar_14_4_R
-          - rebar_14_3_R
-          - rebar_14_2_R
-          - rebar_14_1_R
-          - rebar_4d
+  #         # Choose the owner for the main rebar and EACH child in YAML.
+  #         # Every entry in children must be assigned exactly once.
+  #         main_object_robot: 3
+  #         robot3_children:
+  #         - rebar_3c
+  #         - rebar_5a
+  #         - rebar_13_1
+  #         - rebar_13_2
+  #         - rebar_13_3
+  #         - rebar_13_4
+  #         - rebar_14_1
+  #         - rebar_14_2
+  #         - rebar_14_3
+  #         - rebar_14_4
+  #         - rebar_3d
+  #         robot4_children:
+  #         - rebar_4c
+  #         - rebar_6
+  #         - rebar_13_1_R
+  #         - rebar_13_2_R
+  #         - rebar_13_3_R
+  #         - rebar_14_4_R
+  #         - rebar_14_3_R
+  #         - rebar_14_2_R
+  #         - rebar_14_1_R
+  #         - rebar_4d
 
-          # Both arms use coordinated Cartesian IK and combined-state collision checking.
-          # No separate Pilz LIN arm planning with the opposite arm fixed.
-          # Planning settings
-          planning_time: 15.0
-          ompl_attempts: 10
-          plan_retries: 3
+  #         # Both arms use coordinated Cartesian IK and combined-state collision checking.
+  #         # No separate Pilz LIN arm planning with the opposite arm fixed.
+  #         # Planning settings
+  #         planning_time: 15.0
+  #         ompl_attempts: 10
+  #         plan_retries: 3
 
-          # MoveJ, MoveL and MoveC acceleration
-          movej_velocity: 0.5
-          movej_acceleration: 0.5
-          movel_acceleration: 0.5
-          movec_acceleration: 0.5
+  #         # MoveJ, MoveL and MoveC acceleration
+  #         movej_velocity: 0.5
+  #         movej_acceleration: 0.5
+  #         movel_acceleration: 0.5
+  #         movec_acceleration: 0.5
 
-          # Pilz LIN descending velocity retries
-          lin_velocity_scales:
-            - 0.45
-            - 0.4
-            - 0.35
-            - 0.3
-            - 0.2
-            - 0.1
-            - 0.05
+  #         # Pilz LIN descending velocity retries
+  #         lin_velocity_scales:
+  #           - 0.45
+  #           - 0.4
+  #           - 0.35
+  #           - 0.3
+  #           - 0.2
+  #           - 0.1
+  #           - 0.05
 
-          # Pilz CIRC descending velocity retries
-          circ_velocity_scales:
-            - 0.45
-            - 0.4
-            - 0.35
-            - 0.3
-            - 0.2
-            - 0.1
+  #         # Pilz CIRC descending velocity retries
+  #         circ_velocity_scales:
+  #           - 0.45
+  #           - 0.4
+  #           - 0.35
+  #           - 0.3
+  #           - 0.2
+  #           - 0.1
 
-          # Fallback priority
-          transit_strategies:
-            - moveL
-            # - moveC
-            - moveJ
+  #         # Fallback priority
+  #         transit_strategies:
+  #           - moveL
+  #           # - moveC
+  #           - moveJ
 
-          # CIRC via-point offset in world frame
-          circ_via_offset_world: [0.0, -0.10, 0.10]
+  #         # CIRC via-point offset in world frame
+  #         circ_via_offset_world: [0.0, -0.10, 0.10]
 
-          # Motion selection for each step
-          pick_approach_motion: fallback
-          pick_motion: moveL
-          pick_retract_motion: moveL
-          place_approach_motion: fallback
-          place_motion: moveL
-          place_retract_motion: moveL
+  #         # Motion selection for each step
+  #         pick_approach_motion: fallback
+  #         pick_motion: moveL
+  #         pick_retract_motion: moveL
+  #         place_approach_motion: fallback
+  #         place_motion: moveL
+  #         place_retract_motion: moveL
 
-          # Separate Robot3 and Robot4 pick approaches in WORLD coordinates.
-          # Robot4 +X is an initial mirrored setting: verify it is clear in RViz.
-          robot3_pick_approach_offset_world: [-0.10, 0.0, 0.0]
-          robot4_pick_approach_offset_world: [0.15, 0.0, 0.0]
-          pick_retract_offset_world: [0.0, -0.20, 0.0]
-          place_approach_offset_world: [0.0, 0.0, 0.30]
-          # Independent place retract
-          robot3_place_retract_offset_world: [-0.05, 0.0, 0.0]
-          robot4_place_retract_offset_world: [0.1, 0.0, 0.0]
+  #         # Separate Robot3 and Robot4 pick approaches in WORLD coordinates.
+  #         # Robot4 +X is an initial mirrored setting: verify it is clear in RViz.
+  #         robot3_pick_approach_offset_world: [-0.10, 0.0, 0.0]
+  #         robot4_pick_approach_offset_world: [0.15, 0.0, 0.0]
+  #         pick_retract_offset_world: [0.0, -0.20, 0.0]
+  #         place_approach_offset_world: [0.0, 0.0, 0.30]
+  #         # Independent place retract
+  #         robot3_place_retract_offset_world: [-0.05, 0.0, 0.0]
+  #         robot4_place_retract_offset_world: [0.1, 0.0, 0.0]
 
-    retries: 1
-    on_failure: abort
+  #   retries: 1
+  #   on_failure: abort
 
  
   combined_motions:

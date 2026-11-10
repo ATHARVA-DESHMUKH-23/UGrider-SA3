@@ -29,6 +29,7 @@ find_package(geometric_shapes REQUIRED)
 find_package(shape_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 # ============================================================
 # Main SA3 motion node
@@ -611,6 +612,43 @@ target_link_libraries(shear_links_pp
   planning_scene_objects
 )
 # ============================================================
+# Generic YAML motion executor (additional target)
+# The existing motion nodes and launch files remain unchanged.
+# ============================================================
+
+add_executable(sa3_generic_executor
+  src/sa3_generic_executor.cpp
+)
+
+target_compile_features(sa3_generic_executor PRIVATE cxx_std_17)
+
+target_include_directories(sa3_generic_executor PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(sa3_generic_executor
+  rclcpp
+  rclcpp_action
+  ament_index_cpp
+  moveit_ros_planning_interface
+  moveit_core
+  moveit_msgs
+  control_msgs
+  sensor_msgs
+  geometry_msgs
+  trajectory_msgs
+  std_srvs
+  tf2
+  tf2_ros
+)
+
+target_link_libraries(sa3_generic_executor
+  yaml-cpp
+  Eigen3::Eigen
+)
+
+# ============================================================
 # Install executables
 # ============================================================
 
@@ -637,6 +675,7 @@ install(
     gantry_move
     tying_rebars
     sa3_combined_motion
+    sa3_generic_executor
 
   DESTINATION lib/${PROJECT_NAME}
 )

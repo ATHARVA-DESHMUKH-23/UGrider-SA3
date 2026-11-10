@@ -1,0 +1,3959 @@
+# SA3 full sequence — consolidated reviewed ACM contract (simulation only)
+motion_sequence:
+  schema_version: 3
+  workcell:
+    package: sa2_description
+    file: config/workcell.yaml
+    world_frame: world
+  defaults:
+    executor: sa3_generic_executor
+    target:
+      offset_frame: world
+      rpy_frame: local
+    planning:
+      fallback_only_before_execution: true
+      reject_unknown_planner: true
+      # Global pre-execution collision-validation replans for all motion() tasks,
+      # including D1 gripper change. Initial plan + 2 new plans; never replay execution.
+      collision_validation_max_attempts: 3
+      collision_validation_retry_delay_sec: 0.25
+      # A slow full-scene service response is NOT an accepted motion state.
+      # Wait longer for a response while other parallel SA3 tasks are active.
+      state_validity_response_timeout_sec: 20.0
+    execution:
+      verify_completed_motion: true
+      if_execution_uncertain: stop_and_reconcile
+      simulation_only_until_validated: true
+    collision_validation_group: sa3_all_robots
+    # Global planning-scene synchronization for every attach/detach operation.
+    # Shear also checks after G2 and before next P1.
+    # This verifies the canonical MoveIt scene; it cannot guarantee RViz rendering latency.
+    scene_sync:
+      attach_timeout_sec: 8.0
+      detach_timeout_sec: 8.0
+      poll_interval_sec: 0.15
+      stable_polls: 3
+      world_position_tolerance_m: 0.01
+      world_orientation_tolerance_rad: 0.05
+    scene_objects:
+      jig_clamp: jig_clamp
+      main_jig: sa3_main_jig
+    acm:
+      lock_file: /tmp/sa3_generic_executor_acm.lock
+      update_attempts: 4
+      verification_polls: 5
+      poll_interval_sec: 0.1
+      get_read_attempts: 3
+      get_response_timeout_sec: 20.0
+      get_retry_delay_sec: 1.0
+  safety:
+    require_verified_scene_actions: true
+    require_exclusive_robot_motion_ownership: true
+    reject_unvalidated_parallel_interference: true
+    validate_inter_robot_paths: true
+    abort_on_checkpoint_failure: true
+    restore_temporary_acm_permissions: true
+    restart_requires_live_state_reconciliation: true
+  reporting:
+    enabled: true
+    formats:
+    - csv
+    output_directory: logs/sa3_runs
+    clock: steady_wall
+    record_failed_attempts: true
+    record_fields:
+    - run_id
+    - phase
+    - task
+    - robot
+    - object_id
+    - pair_index
+    - point_id
+    - step_id
+    - motion
+    - planner
+    - velocity_scale
+    - attempt
+    - planning_seconds
+    - validation_seconds
+    - execution_seconds
+    - scene_seconds
+    - elapsed_seconds
+    - status
+    - error_code
+    summary_at_end: true
+  checkpoints:
+    gantry_g4:
+      owner_task: gantry_bottom_mat_2_re
+      after_step: G4
+      status_service: /gantry_checkpoint_status
+      success_contains: G4_HOLD_VERIFIED
+      resume_service: /resume_gantry_motion
+      timeout_sec: 240.0
+      position_tolerance_m: 0.01
+    robot3_r3:
+      owner_task: gantry_bottom_mat_2_re
+      after_step: R3
+      status_service: /gantry_robot3_pick_checkpoint_status
+      success_contains: R3_HOLD_VERIFIED
+      resume_service: /resume_robot3_place
+      timeout_sec: 240.0
+      object_id: rebar_1A
+  action_types:
+    motion:
+    - moveJ
+    - moveL
+    - moveC
+    - movePTP
+    - joint
+    - named_state
+    - fallback
+    scene:
+    - attach
+    - attach_at_dock
+    - detach
+    - acm_allow
+    - acm_restore
+    - settle
+    sync:
+    - wait_checkpoint
+    - resume_checkpoint
+    - wait_all_completions
+    - verify_named_state
+    - wait_completion_notifications
+  stages:
+  - id: initialize_tools
+    name: Initialize Schunk gripper attachments
+    mode: sequential
+    executables:
+    - name: sa3_generic_executor
+      parameters:
+        motion_task: initialize_schunk_grippers
+    retries: 1
+    on_failure: abort
+  - id: phase1
+    name: PHASE 1 - flange 3C 4C overlaps gantry transport to G4
+    mode: overlap
+    executables:
+    - name: sa3_generic_executor
+      background: true
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_task: gantry_bottom_mat_2_re
+        pause_after_g4: true
+        pause_after_r3: true
+        checkpoint_tolerance_m: 0.01
+    - name: sa3_generic_executor
+      background: false
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_task: flange_3c_4c
+        skip_home: true
+    retries: 1
+    on_failure: abort
+  - id: phase2
+    name: PHASE 2 - reverse Pilz PTP and flange 3D 4D without home
+    mode: sequential
+    executables:
+    - name: sa3_generic_executor
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_task: flange_3d_4d
+        skip_home: true
+        wait_for_gantry_g4: true
+        gantry_checkpoint_timeout_sec: 180.0
+    retries: 1
+    on_failure: abort
+  - id: phase3a
+    name: PHASE 3A - combined 24 joint flange home plus shear first P1
+    mode: combined
+    combined_step: flange_home_with_shear_P1
+    execute_motion: true
+    retries: 1
+    on_failure: abort
+  - id: phase4
+    name: PHASE 4 - complete shear links from verified P1
+    mode: sequential
+    executables:
+    - name: sa3_generic_executor
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_task: shear_links_2_re
+        first_p1_prepositioned: true
+    retries: 1
+    on_failure: abort
+  - id: phase5
+    name: PHASE 5 - Robot3+4 pick place and Robot1+2 gripper change concurrently
+    mode: parallel
+    executables:
+    - name: sa3_generic_executor
+      parameters:
+        motion_task: phase3_phase5_parallel
+        workflow_mode: phase3_phase5_parallel
+        execute_motion: true
+        require_robot4_already_home: true
+        phase3_combined_group: robot3_robot4_arms
+        phase3_collision_group: sa3_all_robots
+        robot3_group: robot3_arm
+        robot4_group: robot4_arm
+        phase3_checkpoint_timeout_sec: 240.0
+        phase5_timeout_sec: 1800.0
+        phase5_checkpoint_timeout_sec: 240.0
+    - name: sa3_generic_executor
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_task: change_to_tying_guns
+        wait_for_gantry_g5: true
+        gantry_g5_wait_timeout_sec: 240.0
+    retries: 1
+    on_failure: abort
+    marks_background_completion_phase: true
+  - id: phase6a
+    name: PHASE 6A - tying_2_re
+    mode: sequential
+    executables:
+    - name: sa3_generic_executor
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_task: tying_2_re
+    retries: 1
+    on_failure: abort
+  - id: phase6b
+    name: PHASE 6B - tying_bottom_mat_2_re
+    mode: sequential
+    executables:
+    - name: sa3_generic_executor
+      parameters:
+        workcell_config_package: sa2_description
+        workcell_config_file: config/workcell.yaml
+        motion_task: tying_bottom_mat_2_re
+    retries: 1
+    on_failure: abort
+  - id: phase6c
+    name: PHASE 6C - Pick/place final assembly
+    mode: sequential
+    executables:
+    - name: sa3_generic_executor
+      parameters:
+        motion_task: final_assembly
+    retries: 1
+    on_failure: abort
+  combined_motions:
+    flange_home_with_shear_P1:
+      group: sa3_all_robots
+      planner_id: RRTConnectkConfigDefault
+      velocity_scale: 0.45
+      acceleration_scale: 0.4
+      planning_time: 30.0
+      planning_attempts: 12
+      ik_timeout: 2.0
+      validation_joint_step_rad: 0.05
+      operations:
+      - task: flange_3d_4d
+        step: H1
+      - task: shear_links_2_re
+        step: P1
+        pair_index: 0
+      goals:
+      - robot: robot3
+        named_state: home
+      - robot: robot4
+        named_state: home
+      - robot: robot1
+        target:
+          reference: 5pf
+          offset_frame: world
+          xyz: &id001
+          - 0.0
+          - -0.25
+          - 0.0
+          rpy:
+          - 0
+          - 0
+          - 0
+      - robot: robot2
+        target:
+          reference: 6pf
+          offset_frame: world
+          xyz: *id001
+          rpy:
+          - 0
+          - 0
+          - 0
+  tasks:
+    flange_3c_4c:
+      type: program
+      execution:
+        robots:
+        - robot3
+        - robot4
+        combined_group: robot3_robot4_arms
+        joint_strategy: combined_group
+        linear_strategy: merged
+        merge_time_axis: union_with_slow_arm_stretched
+        planner_ownership: per_arm_lin
+      robot3:
+        pick_frame: 3c
+        place_frame: place_frame_10_l
+        object_id: rebar_3c
+        inventory_id: inventory_3a_4a
+        pick_offset:
+        - 0.0
+        - 0.0
+        - 0.0
+        pick_offset_frame: local
+        pick_offset_rpy:
+        - 0.627
+        - -1.57
+        - 0.627
+        pick_offset_rpy_frame: local
+        place_offset:
+        - 0.0
+        - 0.01
+        - 0.0
+        place_offset_rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+        arc_frames:
+        - r3_arc_start
+        - r3_arc_mid
+        - r3_arc_end
+      robot4:
+        pick_frame: 4c
+        place_frame: place_frame_10
+        object_id: rebar_4c
+        inventory_id: inventory_3a_4a_2
+        pick_offset:
+        - 0.0
+        - 0.0
+        - 0.0
+        pick_offset_frame: local
+        pick_offset_rpy:
+        - 0.943
+        - -1.57
+        - 0.943
+        pick_offset_rpy_frame: local
+        place_offset:
+        - 0.0
+        - 0.01
+        - 0.0
+        place_offset_rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+        arc_frames:
+        - r4_arc_start
+        - r4_arc_mid
+        - r4_arc_end
+      jig_object_id: jig_clamp
+      arc_points: 8
+      planning:
+        planning_time: 15.0
+        planning_attempts: 10
+        retries: 3
+        ik_timeout: 1.0
+        movej_velocity: 0.5
+        movej_acceleration: 0.5
+        movel_velocity: 0.45
+        movel_acceleration: 0.45
+      steps:
+      - id: P1
+        motion: moveJ
+        description: Pick approach
+        robot3:
+          reference: inventory_3a_4a_frame
+          offset_frame: world
+          xyz:
+          - 0.0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: inventory_3a_4a_frame_2
+          offset_frame: world
+          xyz:
+          - 0
+          - 0.0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        execution_strategy: combined_group
+      - id: P2
+        motion: moveL
+        description: Pick and attach
+        robot3:
+          reference: pick_frame
+          offset_frame: world
+          xyz:
+          - -0.0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: pick_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        before_actions: &id002
+        - prepare_pick
+        after_actions: &id003
+        - attach_objects
+        - allow_inventory_contact
+        execution_strategy: merged
+      - id: P3
+        motion: moveL
+        description: Pick retract
+        robot3:
+          reference: pick_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - 0.3
+          - 0.3
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: pick_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - 0.3
+          - 0.3
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        after_actions: &id005
+        - restore_inventory_contact
+        execution_strategy: merged
+      - id: T1
+        motion: moveL
+        description: Move both robots to PTP start frames
+        robot3:
+          reference: r3_ptp_start
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: r4_ptp_start
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        execution_strategy: merged
+      - id: T2
+        motion: moveL
+        description: Paired Pilz LIN transfer from PTP start to end; combined MoveJ fallback
+        robot3:
+          reference: r3_ptp_end
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: r4_ptp_end
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        execution_strategy: merged
+      - id: G1
+        motion: moveL
+        description: Place approach
+        robot3:
+          reference: place_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - -0.25
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: place_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - -0.25
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        before_actions: &id006
+        - allow_place_contact
+        execution_strategy: merged
+      - id: G2
+        motion: moveL
+        description: Place and detach
+        robot3:
+          reference: place_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: place_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        after_actions: &id007
+        - detach_objects
+        execution_strategy: merged
+      - id: G3
+        motion: moveL
+        description: Place retract
+        robot3:
+          reference: place_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - -0.25
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: place_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - -0.25
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        after_actions: &id008
+        - restore_gripper_contact
+        execution_strategy: merged
+      - id: H1
+        motion: moveJ
+        description: Coordinated home
+        reference: home
+        execution_strategy: combined_group
+      program:
+      - op: move
+        id: P1
+        description: Pick approach
+        motion: moveJ
+        group: robot3_robot4_arms
+        strategy: combined_group
+        goals:
+        - robot: robot3
+          target:
+            reference: inventory_3a_4a_frame
+            offset_frame: world
+            xyz:
+            - 0.0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: inventory_3a_4a_frame_2
+            offset_frame: world
+            xyz:
+            - 0
+            - 0.0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: scene_actions
+        id: P2_before
+        actions: *id002
+        contexts: &id004
+        - robot: robot3
+          object: rebar_3c
+          inventory: inventory_3a_4a
+          link: robot3_end_effactor_ff
+          touch_links:
+          - robot3_end_effactor_ff
+          - robot3_J6_link
+          - robot3_sa3_grpr01
+        - robot: robot4
+          object: rebar_4c
+          inventory: inventory_3a_4a_2
+          link: robot4_end_effactor_ff
+          touch_links:
+          - robot4_end_effactor_ff
+          - robot4_J6_link
+          - robot4_sa3_grpr01_r
+      - op: move
+        id: P2
+        description: Pick and attach
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: pick_frame
+            offset_frame: world
+            xyz:
+            - -0.0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: pick_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: scene_actions
+        id: P2_after
+        actions: *id003
+        contexts: *id004
+      - op: move
+        id: P3
+        description: Pick retract
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: pick_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - 0.3
+            - 0.3
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: pick_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - 0.3
+            - 0.3
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: scene_actions
+        id: P3_after
+        actions: *id005
+        contexts: *id004
+      - op: move
+        id: T1
+        description: Move both robots to PTP start frames
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: r3_ptp_start
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: r4_ptp_start
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: move
+        id: T2
+        description: Paired Pilz LIN transfer from PTP start to end; combined MoveJ fallback
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: r3_ptp_end
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: r4_ptp_end
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        fallback_motions:
+        - moveJ
+        fallback_joint_strategy: combined_group
+      - op: scene_actions
+        id: G1_before
+        actions: *id006
+        contexts: *id004
+      - op: move
+        id: G1
+        description: Place approach
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: place_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - -0.25
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: place_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - -0.25
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: move
+        id: G2
+        description: Place and detach
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: place_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: place_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: scene_actions
+        id: G2_after
+        actions: *id007
+        contexts: *id004
+      - op: move
+        id: G3
+        description: Place retract
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: place_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - -0.25
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: place_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - -0.25
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: scene_actions
+        id: G3_after
+        actions: *id008
+        contexts: *id004
+      - op: home
+        id: H1
+        robots:
+        - robot3
+        - robot4
+        group: robot3_robot4_arms
+        skip_if_param: skip_home
+    flange_3d_4d:
+      type: program
+      execution:
+        robots:
+        - robot3
+        - robot4
+        combined_group: robot3_robot4_arms
+        joint_strategy: combined_group
+        linear_strategy: merged
+        merge_time_axis: union_with_slow_arm_stretched
+        planner_ownership: per_arm_lin
+      robot3:
+        pick_frame: 3d
+        place_frame: place_frame_10_l
+        object_id: rebar_3d
+        inventory_id: inventory_3a_4a
+        pick_offset:
+        - 0.127
+        - -0.045
+        - 0.008
+        pick_offset_frame: local
+        pick_offset_rpy:
+        - 0.631
+        - -1.57
+        - 0.52
+        pick_offset_rpy_frame: local
+        place_offset:
+        - 0.0
+        - -0.02
+        - 0.0
+        place_offset_rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+        arc_frames:
+        - r3_arc_start
+        - r3_arc_mid
+        - r3_arc_end
+      robot4:
+        pick_frame: 4d
+        place_frame: place_frame_10
+        object_id: rebar_4d
+        inventory_id: inventory_3a_4a_2
+        pick_offset:
+        - -0.155
+        - -0.057
+        - -0.01
+        pick_offset_frame: local
+        pick_offset_rpy:
+        - 0.955
+        - -1.57
+        - 1.081
+        pick_offset_rpy_frame: local
+        place_offset:
+        - 0.0
+        - -0.02
+        - 0.0
+        place_offset_rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+        arc_frames:
+        - r4_arc_start
+        - r4_arc_mid
+        - r4_arc_end
+      jig_object_id: jig_clamp
+      arc_points: 8
+      planning:
+        planning_time: 15.0
+        planning_attempts: 10
+        retries: 3
+        ik_timeout: 1.0
+        movej_velocity: 0.5
+        reverse_ptp_velocity: 0.75
+        reverse_ptp_acceleration: 0.65
+        movej_acceleration: 0.5
+        movel_velocity: 0.45
+        movel_acceleration: 0.45
+      steps:
+      - id: B1
+        motion: movePTP
+        description: Pilz PTP reverse transfer via original transfer end frames
+        robot3:
+          reference: r3_ptp_end
+          offset_frame: world
+          xyz:
+          - 0.0
+          - 0.0
+          - 0.0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: r4_ptp_end
+          offset_frame: world
+          xyz:
+          - 0.0
+          - 0.0
+          - 0.0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        execution_strategy: combined_group
+      - id: B2
+        motion: movePTP
+        description: Pilz PTP reverse transfer via original transfer start frames
+        robot3:
+          reference: r3_ptp_start
+          offset_frame: world
+          xyz:
+          - 0.0
+          - 0.0
+          - 0.0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: r4_ptp_start
+          offset_frame: world
+          xyz:
+          - 0.0
+          - 0.0
+          - 0.0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        execution_strategy: combined_group
+      - id: P1
+        motion: moveL
+        description: Pick approach
+        robot3:
+          reference: inventory_3a_4a_frame
+          offset_frame: world
+          xyz:
+          - 0.0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: inventory_3a_4a_frame_2
+          offset_frame: world
+          xyz:
+          - 0
+          - 0.0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        execution_strategy: merged
+      - id: P2
+        motion: moveL
+        description: Pick and attach
+        robot3:
+          reference: pick_frame
+          offset_frame: world
+          xyz:
+          - 0.0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: pick_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        before_actions: &id009
+        - prepare_pick
+        after_actions: &id010
+        - attach_objects
+        - allow_inventory_contact
+        execution_strategy: merged
+      - id: P3
+        motion: moveL
+        description: Pick retract
+        robot3:
+          reference: pick_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - 0.3
+          - 0.3
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: pick_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - 0.3
+          - 0.3
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        after_actions: &id012
+        - restore_inventory_contact
+        execution_strategy: merged
+      - id: T1
+        motion: moveL
+        description: Move both robots to PTP start frames
+        robot3:
+          reference: r3_ptp_start
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: r4_ptp_start
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        execution_strategy: merged
+      - id: T2
+        motion: moveL
+        description: Paired Pilz LIN transfer from PTP start to end; combined MoveJ fallback
+        robot3:
+          reference: r3_ptp_end
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: r4_ptp_end
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        execution_strategy: merged
+      - id: G1
+        motion: moveL
+        description: Place approach
+        robot3:
+          reference: place_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - -0.25
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: place_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - -0.25
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        before_actions: &id013
+        - allow_place_contact
+        execution_strategy: merged
+      - id: G2
+        motion: moveL
+        description: Place and detach
+        robot3:
+          reference: place_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: place_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - 0
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        after_actions: &id014
+        - detach_objects
+        execution_strategy: merged
+      - id: G3
+        motion: moveL
+        description: Place retract
+        robot3:
+          reference: place_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - -0.25
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        robot4:
+          reference: place_frame
+          offset_frame: world
+          xyz:
+          - 0
+          - -0.25
+          - 0
+          rpy:
+          - 0.0
+          - 0.0
+          - 0.0
+        after_actions: &id015
+        - restore_gripper_contact
+        execution_strategy: merged
+      - id: H1
+        motion: moveJ
+        description: Coordinated home
+        reference: home
+        execution_strategy: combined_group
+      program:
+      - op: move
+        id: B1
+        description: Pilz PTP reverse transfer via original transfer end frames
+        motion: movePTP
+        group: robot3_robot4_arms
+        strategy: combined_group
+        goals:
+        - robot: robot3
+          target:
+            reference: r3_ptp_end
+            offset_frame: world
+            xyz:
+            - 0.0
+            - 0.0
+            - 0.0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: r4_ptp_end
+            offset_frame: world
+            xyz:
+            - 0.0
+            - 0.0
+            - 0.0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: move
+        id: B2
+        description: Pilz PTP reverse transfer via original transfer start frames
+        motion: movePTP
+        group: robot3_robot4_arms
+        strategy: combined_group
+        goals:
+        - robot: robot3
+          target:
+            reference: r3_ptp_start
+            offset_frame: world
+            xyz:
+            - 0.0
+            - 0.0
+            - 0.0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: r4_ptp_start
+            offset_frame: world
+            xyz:
+            - 0.0
+            - 0.0
+            - 0.0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        planning_override:
+          movej_velocity: 0.75
+          movej_acceleration: 0.65
+      - op: move
+        id: P1
+        description: Pick approach
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: inventory_3a_4a_frame
+            offset_frame: world
+            xyz:
+            - 0.0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: inventory_3a_4a_frame_2
+            offset_frame: world
+            xyz:
+            - 0
+            - 0.0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        fallback_motions:
+        - moveJ
+        fallback_joint_strategy: combined_group
+      - op: scene_actions
+        id: P2_before
+        actions: *id009
+        contexts: &id011
+        - robot: robot3
+          object: rebar_3d
+          inventory: inventory_3a_4a
+          link: robot3_end_effactor_ff
+          touch_links:
+          - robot3_end_effactor_ff
+          - robot3_J6_link
+          - robot3_sa3_grpr01
+        - robot: robot4
+          object: rebar_4d
+          inventory: inventory_3a_4a_2
+          link: robot4_end_effactor_ff
+          touch_links:
+          - robot4_end_effactor_ff
+          - robot4_J6_link
+          - robot4_sa3_grpr01_r
+      - op: move
+        id: P2
+        description: Pick and attach
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: pick_frame
+            offset_frame: world
+            xyz:
+            - 0.0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: pick_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: scene_actions
+        id: P2_after
+        actions: *id010
+        contexts: *id011
+      - op: move
+        id: P3
+        description: Pick retract
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: pick_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - 0.3
+            - 0.3
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: pick_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - 0.3
+            - 0.3
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: scene_actions
+        id: P3_after
+        actions: *id012
+        contexts: *id011
+      - op: move
+        id: T1
+        description: Move both robots to PTP start frames
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: r3_ptp_start
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: r4_ptp_start
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: acm
+        id: T2_allow_inventory_3d_contact
+        object: rebar_3d
+        with:
+        - inventory_3a_4a
+        allow: true
+      - op: move
+        id: T2
+        description: Paired Pilz LIN transfer from PTP start to end; combined MoveJ fallback
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: r3_ptp_end
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: r4_ptp_end
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        fallback_motions:
+        - moveJ
+        fallback_joint_strategy: combined_group
+      - op: acm
+        id: T2_restore_inventory_3d_contact
+        object: rebar_3d
+        with:
+        - inventory_3a_4a
+        allow: false
+      - op: scene_actions
+        id: G1_before
+        actions: *id013
+        contexts: *id011
+      - op: move
+        id: G1
+        description: Place approach
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: place_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - -0.25
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: place_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - -0.25
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: move
+        id: G2
+        description: Place and detach
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: place_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: place_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - 0
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: scene_actions
+        id: G2_after
+        actions: *id014
+        contexts: *id011
+      - op: move
+        id: G3
+        description: Place retract
+        motion: moveL
+        group: robot3_robot4_arms
+        strategy: merged
+        goals:
+        - robot: robot3
+          target:
+            reference: place_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - -0.25
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+        - robot: robot4
+          target:
+            reference: place_frame
+            offset_frame: world
+            xyz:
+            - 0
+            - -0.25
+            - 0
+            rpy:
+            - 0.0
+            - 0.0
+            - 0.0
+      - op: scene_actions
+        id: G3_after
+        actions: *id015
+        contexts: *id011
+      - op: home
+        id: H1
+        robots:
+        - robot3
+        - robot4
+        group: robot3_robot4_arms
+        skip_if_param: skip_home
+    shear_links_2_re:
+      type: shear_links_pp
+      acm_scopes: []
+      execution:
+        robots:
+        - robot1
+        - robot2
+        combined_group: sa3_robots_1_2
+        strategy: merged
+        planner_selection: per_arm
+        allow_different_arm_planners: true
+        synchronization: per_tick
+        completed_arm_behavior: hold
+        on_any_planning_failure: execute_neither_arm
+      repeat:
+        over: config.robot1.pairs + config.robot2.pairs
+        scope: per_robot_pair
+        synchronization: per_tick
+        after_last_pair: combined_home
+      config:
+        robot1:
+          via_world_x: 0.235
+          pairs:
+          - pick_frame: 5pf
+            place_frame: 5_placef_l
+            object_id: rebar_5a
+            pick_offset:
+            - 0
+            - 0.0
+            - 0.0
+          - pick_frame: 13pf
+            place_frame: 13_placef1_l
+            object_id: rebar_13_1
+            pick_offset:
+            - 0
+            - 0.0
+            - 0.0
+          - pick_frame: 13pf
+            place_frame: 13_placef2_l
+            object_id: rebar_13_2
+            pick_offset:
+            - 0.1
+            - 0.0
+            - 0.0
+          - pick_frame: 13pf
+            place_frame: 13_placef3_l
+            object_id: rebar_13_3
+            pick_offset:
+            - 0.2
+            - 0.0
+            - 0.0
+          - pick_frame: 13pf
+            place_frame: 13_placef4_l
+            object_id: rebar_13_4
+            pick_offset:
+            - 0.3
+            - 0.0
+            - 0.0
+          - pick_frame: 14pf
+            place_frame: 14_placef1_l
+            object_id: rebar_14_1
+            pick_offset:
+            - 0
+            - 0.0
+            - 0.0
+          - pick_frame: 14pf
+            place_frame: 14_placef2_l
+            object_id: rebar_14_2
+            pick_offset:
+            - 0.2
+            - 0.0
+            - 0.0
+          - pick_frame: 14pf
+            place_frame: 14_placef3_l
+            object_id: rebar_14_3
+            pick_offset:
+            - 0.4
+            - 0.0
+            - 0.0
+          - pick_frame: 14pf
+            place_frame: 14_placef4_l
+            object_id: rebar_14_4
+            pick_offset:
+            - 0.6
+            - 0.0
+            - 0.0
+        robot2:
+          via_world_x: 5.22
+          pairs:
+          - pick_frame: 6pf
+            place_frame: 6_placef_r
+            object_id: rebar_6
+            pick_offset:
+            - 0
+            - 0.0
+            - 0.0
+          - pick_frame: 13_1pf
+            place_frame: 13_placef1_r
+            object_id: rebar_13_1_R
+            pick_offset:
+            - 0
+            - 0.0
+            - 0.0
+          - pick_frame: 13_1pf
+            place_frame: 13_placef2_r
+            object_id: rebar_13_2_R
+            pick_offset:
+            - 0.118
+            - 0.0
+            - 0.0
+          - pick_frame: 13_2pf
+            place_frame: 13_placef3_r
+            object_id: rebar_13_3_R
+            pick_offset:
+            - 0
+            - 0.0
+            - 0.0
+          - pick_frame: 14_4pf
+            place_frame: 14_placef4_r
+            object_id: rebar_14_1_R
+            pick_offset:
+            - 0
+            - 0.0
+            - 0.0
+          - pick_frame: 14_4pf
+            place_frame: 14_placef3_r
+            object_id: rebar_14_2_R
+            pick_offset:
+            - 0.112
+            - 0.0
+            - 0.0
+          - pick_frame: 14_4pf
+            place_frame: 14_placef2_r
+            object_id: rebar_14_3_R
+            pick_offset:
+            - 0.224
+            - 0.0
+            - 0.0
+          - pick_frame: 14_4pf
+            place_frame: 14_placef1_r
+            object_id: rebar_14_4_R
+            pick_offset:
+            - 0.336
+            - 0.0
+            - 0.0
+        approach:
+          offset_frame: world
+          xyz: *id001
+        planning:
+          planning_time: 15.0
+          ompl_attempts: 10
+          plan_retries: 3
+          pick_approach_goal_mode: pose
+          movej_velocity: 0.5
+          movej_acceleration: 0.5
+          movel_acceleration: 0.5
+          movec_acceleration: 0.5
+          lin_velocity_scales:
+          - 0.45
+          - 0.4
+          - 0.35
+          - 0.3
+          - 0.2
+          - 0.1
+          circ_velocity_scales:
+          - 0.45
+          - 0.4
+          - 0.35
+          - 0.3
+          - 0.2
+          - 0.1
+          transit_strategies:
+          - moveL
+          - moveC
+          - moveJ
+      stages:
+      - id: P1
+        description: pick approach
+        reference: pick_approach
+        motion: moveJ
+        after_actions:
+        - allow_pick_contact
+        on_prepositioned: run_after_actions
+      - id: P2
+        description: pick
+        reference: pick
+        motion: moveL
+        after_actions:
+        - attach_rebar
+        - allow_web_ring_contact
+      - id: P3
+        description: pick approach
+        reference: pick_approach
+        motion: moveL
+        after_actions:
+        - restore_pick_contact
+      - id: T1
+        description: place approach
+        reference: place_approach
+        motion: fallback
+        after_actions:
+        - allow_place_contact
+      - id: G1
+        description: place
+        reference: place
+        motion: moveL
+        after_actions:
+        - detach_rebar
+      - id: G2
+        description: place approach
+        reference: place_approach
+        motion: moveL
+        after_actions:
+        - restore_place_contact
+        - complete_pair
+      finish:
+      - id: H1
+        reference: home
+        motion: moveJ
+      program:
+      - op: paired_pick_place_sequence
+        id: shear_links_2_re_sequence
+      acm_task_pairs:
+      - - rebar_3c
+        - rebar_3d
+      - - rebar_3c
+        - rebar_4c
+      - - rebar_3c
+        - rebar_4d
+      - - rebar_3c
+        - rebar_5a
+      - - rebar_3c
+        - rebar_13_1
+      - - rebar_3c
+        - rebar_13_2
+      - - rebar_3c
+        - rebar_13_3
+      - - rebar_3c
+        - rebar_13_4
+      - - rebar_3c
+        - rebar_14_1
+      - - rebar_3c
+        - rebar_14_2
+      - - rebar_3c
+        - rebar_14_3
+      - - rebar_3c
+        - rebar_14_4
+      - - rebar_3c
+        - rebar_6
+      - - rebar_3c
+        - rebar_13_1_R
+      - - rebar_3c
+        - rebar_13_2_R
+      - - rebar_3c
+        - rebar_13_3_R
+      - - rebar_3c
+        - rebar_14_1_R
+      - - rebar_3c
+        - rebar_14_2_R
+      - - rebar_3c
+        - rebar_14_3_R
+      - - rebar_3c
+        - rebar_14_4_R
+      - - rebar_3d
+        - rebar_4c
+      - - rebar_3d
+        - rebar_4d
+      - - rebar_3d
+        - rebar_5a
+      - - rebar_3d
+        - rebar_13_1
+      - - rebar_3d
+        - rebar_13_2
+      - - rebar_3d
+        - rebar_13_3
+      - - rebar_3d
+        - rebar_13_4
+      - - rebar_3d
+        - rebar_14_1
+      - - rebar_3d
+        - rebar_14_2
+      - - rebar_3d
+        - rebar_14_3
+      - - rebar_3d
+        - rebar_14_4
+      - - rebar_3d
+        - rebar_6
+      - - rebar_3d
+        - rebar_13_1_R
+      - - rebar_3d
+        - rebar_13_2_R
+      - - rebar_3d
+        - rebar_13_3_R
+      - - rebar_3d
+        - rebar_14_1_R
+      - - rebar_3d
+        - rebar_14_2_R
+      - - rebar_3d
+        - rebar_14_3_R
+      - - rebar_3d
+        - rebar_14_4_R
+      - - rebar_4c
+        - rebar_4d
+      - - rebar_4c
+        - rebar_5a
+      - - rebar_4c
+        - rebar_13_1
+      - - rebar_4c
+        - rebar_13_2
+      - - rebar_4c
+        - rebar_13_3
+      - - rebar_4c
+        - rebar_13_4
+      - - rebar_4c
+        - rebar_14_1
+      - - rebar_4c
+        - rebar_14_2
+      - - rebar_4c
+        - rebar_14_3
+      - - rebar_4c
+        - rebar_14_4
+      - - rebar_4c
+        - rebar_6
+      - - rebar_4c
+        - rebar_13_1_R
+      - - rebar_4c
+        - rebar_13_2_R
+      - - rebar_4c
+        - rebar_13_3_R
+      - - rebar_4c
+        - rebar_14_1_R
+      - - rebar_4c
+        - rebar_14_2_R
+      - - rebar_4c
+        - rebar_14_3_R
+      - - rebar_4c
+        - rebar_14_4_R
+      - - rebar_4d
+        - rebar_5a
+      - - rebar_4d
+        - rebar_13_1
+      - - rebar_4d
+        - rebar_13_2
+      - - rebar_4d
+        - rebar_13_3
+      - - rebar_4d
+        - rebar_13_4
+      - - rebar_4d
+        - rebar_14_1
+      - - rebar_4d
+        - rebar_14_2
+      - - rebar_4d
+        - rebar_14_3
+      - - rebar_4d
+        - rebar_14_4
+      - - rebar_4d
+        - rebar_6
+      - - rebar_4d
+        - rebar_13_1_R
+      - - rebar_4d
+        - rebar_13_2_R
+      - - rebar_4d
+        - rebar_13_3_R
+      - - rebar_4d
+        - rebar_14_1_R
+      - - rebar_4d
+        - rebar_14_2_R
+      - - rebar_4d
+        - rebar_14_3_R
+      - - rebar_4d
+        - rebar_14_4_R
+      - - rebar_5a
+        - rebar_13_1
+      - - rebar_5a
+        - rebar_13_2
+      - - rebar_5a
+        - rebar_13_3
+      - - rebar_5a
+        - rebar_13_4
+      - - rebar_5a
+        - rebar_14_1
+      - - rebar_5a
+        - rebar_14_2
+      - - rebar_5a
+        - rebar_14_3
+      - - rebar_5a
+        - rebar_14_4
+      - - rebar_5a
+        - rebar_6
+      - - rebar_5a
+        - rebar_13_1_R
+      - - rebar_5a
+        - rebar_13_2_R
+      - - rebar_5a
+        - rebar_13_3_R
+      - - rebar_5a
+        - rebar_14_1_R
+      - - rebar_5a
+        - rebar_14_2_R
+      - - rebar_5a
+        - rebar_14_3_R
+      - - rebar_5a
+        - rebar_14_4_R
+      - - rebar_13_1
+        - rebar_13_2
+      - - rebar_13_1
+        - rebar_13_3
+      - - rebar_13_1
+        - rebar_13_4
+      - - rebar_13_1
+        - rebar_14_1
+      - - rebar_13_1
+        - rebar_14_2
+      - - rebar_13_1
+        - rebar_14_3
+      - - rebar_13_1
+        - rebar_14_4
+      - - rebar_13_1
+        - rebar_6
+      - - rebar_13_1
+        - rebar_13_1_R
+      - - rebar_13_1
+        - rebar_13_2_R
+      - - rebar_13_1
+        - rebar_13_3_R
+      - - rebar_13_1
+        - rebar_14_1_R
+      - - rebar_13_1
+        - rebar_14_2_R
+      - - rebar_13_1
+        - rebar_14_3_R
+      - - rebar_13_1
+        - rebar_14_4_R
+      - - rebar_13_2
+        - rebar_13_3
+      - - rebar_13_2
+        - rebar_13_4
+      - - rebar_13_2
+        - rebar_14_1
+      - - rebar_13_2
+        - rebar_14_2
+      - - rebar_13_2
+        - rebar_14_3
+      - - rebar_13_2
+        - rebar_14_4
+      - - rebar_13_2
+        - rebar_6
+      - - rebar_13_2
+        - rebar_13_1_R
+      - - rebar_13_2
+        - rebar_13_2_R
+      - - rebar_13_2
+        - rebar_13_3_R
+      - - rebar_13_2
+        - rebar_14_1_R
+      - - rebar_13_2
+        - rebar_14_2_R
+      - - rebar_13_2
+        - rebar_14_3_R
+      - - rebar_13_2
+        - rebar_14_4_R
+      - - rebar_13_3
+        - rebar_13_4
+      - - rebar_13_3
+        - rebar_14_1
+      - - rebar_13_3
+        - rebar_14_2
+      - - rebar_13_3
+        - rebar_14_3
+      - - rebar_13_3
+        - rebar_14_4
+      - - rebar_13_3
+        - rebar_6
+      - - rebar_13_3
+        - rebar_13_1_R
+      - - rebar_13_3
+        - rebar_13_2_R
+      - - rebar_13_3
+        - rebar_13_3_R
+      - - rebar_13_3
+        - rebar_14_1_R
+      - - rebar_13_3
+        - rebar_14_2_R
+      - - rebar_13_3
+        - rebar_14_3_R
+      - - rebar_13_3
+        - rebar_14_4_R
+      - - rebar_13_4
+        - rebar_14_1
+      - - rebar_13_4
+        - rebar_14_2
+      - - rebar_13_4
+        - rebar_14_3
+      - - rebar_13_4
+        - rebar_14_4
+      - - rebar_13_4
+        - rebar_6
+      - - rebar_13_4
+        - rebar_13_1_R
+      - - rebar_13_4
+        - rebar_13_2_R
+      - - rebar_13_4
+        - rebar_13_3_R
+      - - rebar_13_4
+        - rebar_14_1_R
+      - - rebar_13_4
+        - rebar_14_2_R
+      - - rebar_13_4
+        - rebar_14_3_R
+      - - rebar_13_4
+        - rebar_14_4_R
+      - - rebar_14_1
+        - rebar_14_2
+      - - rebar_14_1
+        - rebar_14_3
+      - - rebar_14_1
+        - rebar_14_4
+      - - rebar_14_1
+        - rebar_6
+      - - rebar_14_1
+        - rebar_13_1_R
+      - - rebar_14_1
+        - rebar_13_2_R
+      - - rebar_14_1
+        - rebar_13_3_R
+      - - rebar_14_1
+        - rebar_14_1_R
+      - - rebar_14_1
+        - rebar_14_2_R
+      - - rebar_14_1
+        - rebar_14_3_R
+      - - rebar_14_1
+        - rebar_14_4_R
+      - - rebar_14_2
+        - rebar_14_3
+      - - rebar_14_2
+        - rebar_14_4
+      - - rebar_14_2
+        - rebar_6
+      - - rebar_14_2
+        - rebar_13_1_R
+      - - rebar_14_2
+        - rebar_13_2_R
+      - - rebar_14_2
+        - rebar_13_3_R
+      - - rebar_14_2
+        - rebar_14_1_R
+      - - rebar_14_2
+        - rebar_14_2_R
+      - - rebar_14_2
+        - rebar_14_3_R
+      - - rebar_14_2
+        - rebar_14_4_R
+      - - rebar_14_3
+        - rebar_14_4
+      - - rebar_14_3
+        - rebar_6
+      - - rebar_14_3
+        - rebar_13_1_R
+      - - rebar_14_3
+        - rebar_13_2_R
+      - - rebar_14_3
+        - rebar_13_3_R
+      - - rebar_14_3
+        - rebar_14_1_R
+      - - rebar_14_3
+        - rebar_14_2_R
+      - - rebar_14_3
+        - rebar_14_3_R
+      - - rebar_14_3
+        - rebar_14_4_R
+      - - rebar_14_4
+        - rebar_6
+      - - rebar_14_4
+        - rebar_13_1_R
+      - - rebar_14_4
+        - rebar_13_2_R
+      - - rebar_14_4
+        - rebar_13_3_R
+      - - rebar_14_4
+        - rebar_14_1_R
+      - - rebar_14_4
+        - rebar_14_2_R
+      - - rebar_14_4
+        - rebar_14_3_R
+      - - rebar_14_4
+        - rebar_14_4_R
+      - - rebar_6
+        - rebar_13_1_R
+      - - rebar_6
+        - rebar_13_2_R
+      - - rebar_6
+        - rebar_13_3_R
+      - - rebar_6
+        - rebar_14_1_R
+      - - rebar_6
+        - rebar_14_2_R
+      - - rebar_6
+        - rebar_14_3_R
+      - - rebar_6
+        - rebar_14_4_R
+      - - rebar_13_1_R
+        - rebar_13_2_R
+      - - rebar_13_1_R
+        - rebar_13_3_R
+      - - rebar_13_1_R
+        - rebar_14_1_R
+      - - rebar_13_1_R
+        - rebar_14_2_R
+      - - rebar_13_1_R
+        - rebar_14_3_R
+      - - rebar_13_1_R
+        - rebar_14_4_R
+      - - rebar_13_2_R
+        - rebar_13_3_R
+      - - rebar_13_2_R
+        - rebar_14_1_R
+      - - rebar_13_2_R
+        - rebar_14_2_R
+      - - rebar_13_2_R
+        - rebar_14_3_R
+      - - rebar_13_2_R
+        - rebar_14_4_R
+      - - rebar_13_3_R
+        - rebar_14_1_R
+      - - rebar_13_3_R
+        - rebar_14_2_R
+      - - rebar_13_3_R
+        - rebar_14_3_R
+      - - rebar_13_3_R
+        - rebar_14_4_R
+      - - rebar_14_1_R
+        - rebar_14_2_R
+      - - rebar_14_1_R
+        - rebar_14_3_R
+      - - rebar_14_1_R
+        - rebar_14_4_R
+      - - rebar_14_2_R
+        - rebar_14_3_R
+      - - rebar_14_2_R
+        - rebar_14_4_R
+      - - rebar_14_3_R
+        - rebar_14_4_R
+      - - rebar_3c
+        - robot1_schunk_base
+      - - rebar_3d
+        - robot1_schunk_base
+      - - rebar_4c
+        - robot1_schunk_base
+      - - rebar_4d
+        - robot1_schunk_base
+      - - rebar_6
+        - robot1_schunk_base
+      - - rebar_13_1_R
+        - robot1_schunk_base
+      - - rebar_13_2_R
+        - robot1_schunk_base
+      - - rebar_13_3_R
+        - robot1_schunk_base
+      - - rebar_14_1_R
+        - robot1_schunk_base
+      - - rebar_14_2_R
+        - robot1_schunk_base
+      - - rebar_14_3_R
+        - robot1_schunk_base
+      - - rebar_14_4_R
+        - robot1_schunk_base
+      - - web_ring
+        - robot1_schunk_base
+      - - jig_clamp
+        - robot1_schunk_base
+      - - rebar_3c
+        - robot2_schunk_base
+      - - rebar_3d
+        - robot2_schunk_base
+      - - rebar_4c
+        - robot2_schunk_base
+      - - rebar_4d
+        - robot2_schunk_base
+      - - rebar_5a
+        - robot2_schunk_base
+      - - rebar_13_1
+        - robot2_schunk_base
+      - - rebar_13_2
+        - robot2_schunk_base
+      - - rebar_13_3
+        - robot2_schunk_base
+      - - rebar_13_4
+        - robot2_schunk_base
+      - - rebar_14_1
+        - robot2_schunk_base
+      - - rebar_14_2
+        - robot2_schunk_base
+      - - rebar_14_3
+        - robot2_schunk_base
+      - - rebar_14_4
+        - robot2_schunk_base
+      - - web_ring_2
+        - robot2_schunk_base
+      - - jig_clamp
+        - robot2_schunk_base
+      - - rebar_5a
+        - robot1_schunk_base
+      - - rebar_13_1
+        - robot1_schunk_base
+      - - rebar_13_2
+        - robot1_schunk_base
+      - - rebar_13_3
+        - robot1_schunk_base
+      - - rebar_13_4
+        - robot1_schunk_base
+      - - rebar_14_1
+        - robot1_schunk_base
+      - - rebar_14_2
+        - robot1_schunk_base
+      - - rebar_14_3
+        - robot1_schunk_base
+      - - rebar_14_4
+        - robot1_schunk_base
+      - - rebar_6
+        - robot2_schunk_base
+      - - rebar_13_1_R
+        - robot2_schunk_base
+      - - rebar_13_2_R
+        - robot2_schunk_base
+      - - rebar_13_3_R
+        - robot2_schunk_base
+      - - rebar_14_1_R
+        - robot2_schunk_base
+      - - rebar_14_2_R
+        - robot2_schunk_base
+      - - rebar_14_3_R
+        - robot2_schunk_base
+      - - rebar_14_4_R
+        - robot2_schunk_base
+      - - jig_clamp
+        - rebar_5a
+      - - jig_clamp
+        - rebar_13_1
+      - - jig_clamp
+        - rebar_13_2
+      - - jig_clamp
+        - rebar_13_3
+      - - jig_clamp
+        - rebar_13_4
+      - - jig_clamp
+        - rebar_14_1
+      - - jig_clamp
+        - rebar_14_2
+      - - jig_clamp
+        - rebar_14_3
+      - - jig_clamp
+        - rebar_14_4
+      - - jig_clamp
+        - rebar_6
+      - - jig_clamp
+        - rebar_13_1_R
+      - - jig_clamp
+        - rebar_13_2_R
+      - - jig_clamp
+        - rebar_13_3_R
+      - - jig_clamp
+        - rebar_14_1_R
+      - - jig_clamp
+        - rebar_14_2_R
+      - - jig_clamp
+        - rebar_14_3_R
+      - - jig_clamp
+        - rebar_14_4_R
+      acm_coverage:
+        all_pairs_within:
+        - rebar_13_1
+        - rebar_13_1_R
+        - rebar_13_2
+        - rebar_13_2_R
+        - rebar_13_3
+        - rebar_13_3_R
+        - rebar_13_4
+        - rebar_14_1
+        - rebar_14_1_R
+        - rebar_14_2
+        - rebar_14_2_R
+        - rebar_14_3
+        - rebar_14_3_R
+        - rebar_14_4
+        - rebar_14_4_R
+        - rebar_3c
+        - rebar_3d
+        - rebar_4c
+        - rebar_4d
+        - rebar_5a
+        - rebar_6
+        each_with:
+        - robot1_schunk_base
+        - robot2_schunk_base
+        additional_pairs:
+        - - robot1_schunk_base
+          - web_ring
+        - - robot2_schunk_base
+          - web_ring_2
+        - - robot1_schunk_base
+          - jig_clamp
+        - - robot2_schunk_base
+          - jig_clamp
+        - - jig_clamp
+          - rebar_5a
+        - - jig_clamp
+          - rebar_13_1
+        - - jig_clamp
+          - rebar_13_2
+        - - jig_clamp
+          - rebar_13_3
+        - - jig_clamp
+          - rebar_13_4
+        - - jig_clamp
+          - rebar_14_1
+        - - jig_clamp
+          - rebar_14_2
+        - - jig_clamp
+          - rebar_14_3
+        - - jig_clamp
+          - rebar_14_4
+        - - jig_clamp
+          - rebar_6
+        - - jig_clamp
+          - rebar_13_1_R
+        - - jig_clamp
+          - rebar_13_2_R
+        - - jig_clamp
+          - rebar_13_3_R
+        - - jig_clamp
+          - rebar_14_1_R
+        - - jig_clamp
+          - rebar_14_2_R
+        - - jig_clamp
+          - rebar_14_3_R
+        - - jig_clamp
+          - rebar_14_4_R
+        require_exact_match: true
+    change_to_tying_guns:
+      type: program
+      execution:
+        robots:
+        - robot1
+        - robot2
+        combined_group: sa3_robots_1_2
+        strategy: merged
+        preserve_existing_controller_backend: true
+        require_tool_lock_feedback_on_real_hardware: true
+        backend: follow_joint_trajectory
+      config:
+        execution:
+          executer: follow_joint_trajectory
+          robot1_action: /robot1_arm_controller/follow_joint_trajectory
+          robot2_action: /robot2_arm_controller/follow_joint_trajectory
+          start_delay_sec: 0.5
+          result_timeout_margin_sec: 30.0
+          start_tolerance_rad: 0.05
+        planning:
+          planning_time: 15.0
+          movej_plan_retries: 3
+          ompl_attempts: 10
+          ik_timeout: 1.0
+          movej_velocity: 0.5
+          movej_acceleration: 0.5
+          movel_velocity: 0.45
+          movel_acceleration: 0.45
+          # Replan Pilz LIN before rejecting D5: does not execute between attempts.
+          linear_plan_retries: 3
+          linear_plan_retry_delay_sec: 0.25
+      steps:
+      - id: D1
+        description: approach source dock
+        reference: source_dock
+        motion: moveJ
+        offset_frame: world
+        xyz: &id016
+        - 0
+        - 0
+        - 0.5
+        rpy: &id017
+        - 0
+        - 0
+        - 0
+        after_actions: []
+      - id: D2
+        description: dock and detach source tool
+        reference: source_dock
+        motion: moveL
+        offset_frame: world
+        xyz: &id018
+        - 0
+        - 0
+        - 0
+        rpy: &id019
+        - 0
+        - 0
+        - 0
+        after_actions:
+        - detach_source
+        - allow_source_contacts
+      - id: D3
+        description: retract from source dock
+        reference: source_dock
+        motion: moveL
+        offset_frame: world
+        xyz: &id020
+        - 0
+        - 0
+        - 0.5
+        rpy: &id021
+        - 0
+        - 0
+        - 0
+        after_actions:
+        - restore_source_contacts
+        - allow_target_contacts
+      - id: D4
+        description: approach target dock
+        reference: target_dock
+        motion: moveJ
+        offset_frame: world
+        xyz: &id024
+        - 0
+        - 0
+        - 0.5
+        rpy: &id025
+        - 0
+        - 0
+        - 0
+        after_actions: []
+      - id: D5
+        description: dock and attach target tool
+        reference: target_dock
+        motion: moveL
+        offset_frame: world
+        xyz: &id026
+        - 0
+        - 0
+        - 0
+        rpy: &id027
+        - 0
+        - 0
+        - 0
+        after_actions:
+        - attach_target
+      - id: D6
+        description: retract with target tool
+        reference: target_dock
+        motion: moveL
+        offset_frame: world
+        xyz: &id028
+        - 0
+        - 0
+        - 0.5
+        rpy: &id029
+        - 0
+        - 0
+        - 0
+        after_actions:
+        - restore_target_contacts
+      source_tool: schunk
+      target_tool: tying_gun
+      completion_owner: robot12
+      program:
+      - op: wait_service
+        id: WAIT_G5
+        service: /gantry_g5_complete_status
+        success_contains: G5_COMPLETE
+        timeout_sec: 240.0
+        only_if_param: wait_for_gantry_g5
+        timeout_param: gantry_g5_wait_timeout_sec
+      - op: move
+        id: D1
+        description: approach source dock
+        motion: moveJ
+        strategy: combined_group
+        fallback_motions:
+        - moveJ_pose_merged
+        group: sa3_robots_1_2
+        goals:
+        - robot: robot1
+          link: robot1_tool_mount
+          target:
+            reference: robot1_shuck_dock
+            offset_frame: world
+            xyz: *id016
+            rpy: *id017
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_shuck_dock
+            offset_frame: world
+            xyz: *id016
+            rpy: *id017
+      - op: move
+        id: D2
+        description: dock and detach source tool
+        motion: moveL
+        strategy: merged
+        group: sa3_robots_1_2
+        goals:
+        - robot: robot1
+          link: robot1_tool_mount
+          target:
+            reference: robot1_shuck_dock
+            offset_frame: world
+            xyz: *id018
+            rpy: *id019
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_shuck_dock
+            offset_frame: world
+            xyz: *id018
+            rpy: *id019
+      - op: detach
+        id: D2_robot1_detach_source
+        robot: robot1
+        object: robot1_schunk_base
+        link: robot1_tool_mount
+      - op: detach
+        id: D2_robot2_detach_source
+        robot: robot2
+        object: robot2_schunk_base
+        link: robot2_tool_mount
+      - op: acm
+        id: D2_robot1_allow_source_contacts
+        object: robot1_schunk_base
+        with: &id022
+        - robot1_tool_mount
+        - robot1_J4_link
+        - robot1_J5_link
+        - robot1_J6_link
+        allow: true
+      - op: acm
+        id: D2_robot2_allow_source_contacts
+        object: robot2_schunk_base
+        with: &id023
+        - robot2_tool_mount
+        - robot2_J4_link
+        - robot2_J5_link
+        - robot2_J6_link
+        allow: true
+      - op: move
+        id: D3
+        description: retract from source dock
+        motion: moveL
+        strategy: merged
+        group: sa3_robots_1_2
+        goals:
+        - robot: robot1
+          link: robot1_tool_mount
+          target:
+            reference: robot1_shuck_dock
+            offset_frame: world
+            xyz: *id020
+            rpy: *id021
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_shuck_dock
+            offset_frame: world
+            xyz: *id020
+            rpy: *id021
+      - op: acm
+        id: D3_robot1_restore_source_contacts
+        object: robot1_schunk_base
+        with: *id022
+        allow: false
+      - op: acm
+        id: D3_robot2_restore_source_contacts
+        object: robot2_schunk_base
+        with: *id023
+        allow: false
+      - op: acm
+        id: D3_robot1_allow_target_contacts
+        object: robot1_tying_gun
+        with: *id022
+        allow: true
+      - op: acm
+        id: D3_robot2_allow_target_contacts
+        object: robot2_tying_gun
+        with: *id023
+        allow: true
+      - op: move
+        id: D4
+        description: approach target dock
+        motion: moveJ
+        strategy: combined_group
+        group: sa3_robots_1_2
+        goals:
+        - robot: robot1
+          link: robot1_tool_mount
+          target:
+            reference: robot1_tyinggun_dock
+            offset_frame: world
+            xyz: *id024
+            rpy: *id025
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_tyinggun_dock
+            offset_frame: world
+            xyz: *id024
+            rpy: *id025
+      # SIMULATION ONLY. D4 has both tools at +0.50m in world Z above the dock.
+      # Move ONLY Robot2 to +0.12m above its dock via a collision-checked
+      # OMPL joint-space approach. Robot1 remains motionless at its D4 pose.
+      # This pre-dock position has not been proven collision-free.
+      # D5 then uses the existing LIN docking attempt with full-state checks.
+      - op: move
+        id: D4B_ROBOT2_PREDOCK
+        description: robot2-only pre-dock approach, 0.12m above tying gun dock
+        motion: moveJ
+        strategy: single
+        group: robot2_arm
+        goals:
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_tyinggun_dock
+            offset_frame: world
+            xyz: [0.0, 0.0, 0.12]
+            rpy: [0.0, 0.0, 0.0]
+      - op: move
+        id: D5
+        description: dock and attach target tool
+        motion: moveL
+        strategy: merged
+        group: sa3_robots_1_2
+        # When Pilz LIN rejects one arm (e.g. robot2 -2), keep Cartesian
+        # docking geometry via shared-state IK sampling, then validate the
+        # entire workcell trajectory. Never use unrestricted MoveJ here.
+        fallback_motions:
+        - moveL
+        fallback_linear_strategy: coordinated_cartesian
+        goals:
+        - robot: robot1
+          link: robot1_tool_mount
+          target:
+            reference: robot1_tyinggun_dock
+            offset_frame: world
+            xyz: *id026
+            rpy: *id027
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_tyinggun_dock
+            offset_frame: world
+            xyz: *id026
+            rpy: *id027
+      - op: attach
+        id: D5_robot1_attach_target
+        robot: robot1
+        object: robot1_tying_gun
+        link: robot1_tool_mount
+        touch_links: *id022
+      - op: attach
+        id: D5_robot2_attach_target
+        robot: robot2
+        object: robot2_tying_gun
+        link: robot2_tool_mount
+        touch_links: *id023
+      - op: move
+        id: D6
+        description: retract with target tool
+        motion: moveL
+        strategy: merged
+        group: sa3_robots_1_2
+        goals:
+        - robot: robot1
+          link: robot1_tool_mount
+          target:
+            reference: robot1_tyinggun_dock
+            offset_frame: world
+            xyz: *id028
+            rpy: *id029
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_tyinggun_dock
+            offset_frame: world
+            xyz: *id028
+            rpy: *id029
+      - op: acm
+        id: D6_robot1_restore_target_contacts
+        object: robot1_tying_gun
+        with: *id022
+        allow: false
+      - op: acm
+        id: D6_robot2_restore_target_contacts
+        object: robot2_tying_gun
+        with: *id023
+        allow: false
+      - op: notify_completion
+        owner: robot12
+        success: true
+    tying_2_re:
+      type: tying_rebars
+      execution:
+        robots:
+        - robot1
+        - robot2
+        combined_group: sa3_robots_1_2
+        strategy: merged
+        planner_selection: per_arm
+        synchronization: per_tick
+        completed_arm_behavior: hold
+        failed_point_behavior: skip_if_stop_on_first_failure_false
+      repeat:
+        over: config.robot1.jobs + config.robot2.jobs
+        point_format: '{clamp}_t{n}'
+        synchronization: per_tick
+        after_last_point: combined_home
+      config:
+        robot1:
+          enabled: true
+          jobs:
+          - clamp: 5_placef_l
+            tie_count: 3
+          - clamp: 13_placef1_l
+            tie_count: 2
+          - clamp: 13_placef2_l
+            tie_count: 2
+          - clamp: 13_placef3_l
+            tie_count: 2
+          - clamp: 13_placef4_l
+            tie_count: 2
+          - clamp: 14_placef1_l
+            tie_count: 2
+          - clamp: 14_placef2_l
+            tie_count: 2
+          - clamp: 14_placef3_l
+            tie_count: 2
+          - clamp: 14_placef4_l
+            tie_count: 2
+        robot2:
+          enabled: true
+          jobs:
+          - clamp: 6_placef_r
+            tie_count: 3
+          - clamp: 13_placef1_r
+            tie_count: 2
+          - clamp: 13_placef2_r
+            tie_count: 2
+          - clamp: 13_placef3_r
+            tie_count: 2
+          - clamp: 14_placef1_r
+            tie_count: 2
+          - clamp: 14_placef2_r
+            tie_count: 2
+          - clamp: 14_placef3_r
+            tie_count: 2
+          - clamp: 14_placef4_r
+            tie_count: 2
+        approach:
+          offset_frame: local
+          xyz:
+          - -0.2
+          - 0.0
+          - 0.0
+        stop_on_first_failure: false
+        planning:
+          planning_time: 15.0
+          ompl_attempts: 10
+          plan_retries: 3
+          movej_velocity: 0.5
+          movej_acceleration: 0.5
+          movel_acceleration: 0.45
+          movec_acceleration: 0.45
+          lin_velocity_scales:
+          - 0.45
+          - 0.4
+          - 0.35
+          - 0.3
+          - 0.2
+          - 0.1
+          circ_velocity_scales:
+          - 0.45
+          - 0.4
+          - 0.35
+          - 0.3
+          - 0.2
+          - 0.1
+          transit_strategies:
+          - moveL
+          - moveJ
+          circ_via_offset_world:
+          - 0.0
+          - 0.0
+          - 0.1
+      point_steps: &id030
+      - id: T1
+        reference: tie_approach
+        motion: fallback
+      - id: T2
+        reference: tie_frame
+        motion: moveL
+      - id: T3
+        reference: tie_approach
+        motion: moveL
+        after_actions:
+        - mark_point_complete
+      finish: &id031
+      - id: H1
+        reference: home
+        motion: moveJ
+      program:
+      - op: paired_tying_points
+        id: tying_2_re_sequence
+    gantry_bottom_mat_2_re:
+      type: gantry_move
+      execution:
+        robots:
+        - gantry
+        - robot3
+        - robot4
+        gantry_backend: follow_joint_trajectory
+        robot_backend: moveit
+        robot_joint_strategy: combined_group
+        robot_linear_strategy: per_step_pilz_or_cartesian
+        checkpoints:
+        - gantry_g4
+        - robot3_r3
+        persistent_between_phases: true
+        notify_robot3_on_failure: true
+      config:
+        ros_parameters:
+          rebar_object_id: rebar_1A
+          horizontal_home_m: 0.0
+          vertical_home_m: 0.0
+          robot_rebar_object_id: rebar_1A
+          robot3_pick_frame: bm_pkL
+          robot3_place_frame: bm_pfl
+          jig_clamp_name: jig_clamp
+          rebar_allowed_contact_objects: []
+          approach_height_m: 0.6
+          place_approach_distance_m: 0.1
+          pick_approach_dx_m: -0.05
+          pick_approach_dz_m: 0.0
+          horizontal_pick_target_m: 0.0
+          vertical_pick_target_m: 4.1
+          horizontal_target_m: -6.0
+          down_target_m: 1.2
+          speed_mps: 0.6
+          acceleration_mps2: 0.5
+          horizontal_min_m: -10.6
+          horizontal_limit_m: 10.6
+          vertical_limit_m: 6.6
+          settle_time_sec: 0.5
+          trajectory_timeout_sec: 60.0
+          auto_start: true
+          start_delay_sec: 0.0
+          ready_timeout_sec: 90.0
+          use_robot4: true
+          robot4_planning_link: robot4_end_effactor
+          robot4_pick_frame: bm_pkR
+          robot4_place_frame: bm_pfr
+          controller_action: /gantry_controller/follow_joint_trajectory
+          horizontal_joint: gantry_slide_joint
+          vertical_joint: gantry_down_joint
+          gantry_attach_link: gantry_part_link
+          controller_joints:
+          - gantry_slide_joint
+          - gantry_down_joint
+          controller_allow_partial_joints_goal: false
+        planning:
+          planning_time: 15.0
+          joint_movej_velocity: 0.7
+          joint_movej_acceleration: 0.7
+          cartesian_velocity: 0.15
+          cartesian_acceleration: 0.5
+          cartesian_max_translation_step_m: 0.05
+          cartesian_max_rotation_step_rad: 0.05
+          cartesian_eef_step_m: 0.05
+          cartesian_min_fraction: 0.99
+          pilz_velocity: 0.5
+          pilz_acceleration: 0.5
+          ompl_attempts: 10
+          # MoveIt can reject a geometrically invalid OMPL path before custom
+          # validation; retry a fresh candidate up to 3 times (not execution).
+          plan_retries: 3
+      gantry_steps:
+      - id: G1
+        description: raised gantry moves horizontally to rebar pickup
+        motion: joint
+        joint: horizontal
+        reference: pick
+      - id: G2
+        description: gantry lowers to pickup and attaches rebar
+        motion: joint
+        joint: vertical
+        reference: pick
+        after_actions:
+        - settle
+        - attach_gantry
+        - settle
+      - id: G3
+        description: gantry raises with rebar before horizontal transport
+        motion: joint
+        joint: vertical
+        reference: home
+      - id: G4
+        description: gantry transports rebar horizontally to handoff
+        motion: joint
+        joint: horizontal
+        reference: handoff
+      - id: G5
+        description: gantry lowers for handoff and releases rebar
+        motion: joint
+        joint: vertical
+        reference: handoff
+        after_actions:
+        - settle
+        - detach_gantry
+      robot3_steps:
+      - id: R1
+        description: straight Pilz LIN approach 5 cm in front of pick frame on local negative X
+        reference: pick_frame
+        motion: moveJ
+        planner: ompl
+        offset_frame: local
+        xyz:
+        - -0.05
+        - 0.0
+        - 0.0
+        rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+        ik_check: true
+        before_actions:
+        - prepare_robot3_pick
+      - id: R2
+        description: straight Pilz LIN to Robot3 pick frame and attach
+        reference: pick_frame
+        motion: moveL
+        planner: pilz
+        offset_frame: world
+        xyz:
+        - 0.0
+        - 0.0
+        - 0.0
+        rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+        after_actions:
+        - attach_robot3
+      - id: R3
+        description: retract 5 cm along local negative X after pick, raise gantry Z and hold X at handoff
+        reference: pick_frame
+        motion: moveL
+        planner: cartesian
+        offset_frame: local
+        xyz:
+        - -0.05
+        - 0.0
+        - 0.0
+        rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+        ik_check: true
+        after_actions:
+        - lift_gantry_start_parallel_return
+      - id: R4
+        description: MoveJ to place approach; paired Cartesian MoveL fallback if planning fails
+        reference: place_frame
+        motion: moveJ
+        planner: ompl
+        offset_frame: local
+        xyz:
+        - -0.1
+        - 0.0
+        - 0.0
+        rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+        ik_check: true
+        before_actions:
+        - allow_jig_contact
+        fallback_motions:
+        - moveL
+        fallback_planner: cartesian
+      - id: R5
+        description: final straight Cartesian insertion and detach to world
+        reference: place_frame
+        motion: moveL
+        planner: cartesian
+        offset_frame: world
+        xyz:
+        - 0.0
+        - 0.0
+        - 0.0
+        rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+        after_actions:
+        - detach_robot3
+      - id: R6
+        description: straight Cartesian retract 10 cm along local negative X from placed rebar
+        reference: place_frame
+        motion: moveL
+        planner: cartesian
+        offset_frame: local
+        xyz:
+        - -0.1
+        - 0.0
+        - 0.0
+        rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+        ik_check: true
+        after_actions:
+        - wait_gantry_parallel_return
+      - id: R7
+        description: Robot3 returns to SRDF named home
+        reference: home
+        motion: moveJ
+      robot4_steps:
+      - id: R1
+        description: Robot4 pick approach (right side)
+        reference: pick_frame
+        motion: moveJ
+        planner: ompl
+        offset_frame: local
+        xyz:
+        - -0.05
+        - 0.0
+        - 0.0
+        rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+        ik_check: true
+      - id: R2
+        description: Robot4 move to right pick frame (no attach)
+        reference: pick_frame
+        motion: moveL
+        planner: pilz
+        offset_frame: world
+        xyz:
+        - 0.0
+        - 0.0
+        - 0.0
+        rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+      - id: R3
+        description: Robot4 pick retract
+        reference: pick_frame
+        motion: moveL
+        planner: cartesian
+        offset_frame: local
+        xyz:
+        - -0.05
+        - 0.0
+        - 0.0
+        rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+      - id: R4
+        description: MoveJ to place approach; paired Cartesian MoveL fallback if planning fails
+        reference: place_frame
+        motion: moveJ
+        planner: ompl
+        offset_frame: local
+        xyz:
+        - -0.1
+        - 0.0
+        - 0.0
+        rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+        ik_check: true
+        fallback_motions:
+        - moveL
+        fallback_planner: cartesian
+      - id: R5
+        description: Robot4 moves to right place frame (no detach)
+        reference: place_frame
+        motion: moveL
+        planner: cartesian
+        offset_frame: world
+        xyz:
+        - 0.0
+        - 0.0
+        - 0.0
+        rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+      - id: R6
+        description: Robot4 place retract
+        reference: place_frame
+        motion: moveL
+        planner: cartesian
+        offset_frame: local
+        xyz:
+        - -0.1
+        - 0.0
+        - 0.0
+        rpy:
+        - 0.0
+        - 0.0
+        - 0.0
+      - id: R7
+        description: Both arms return to captured startup joint state
+        reference: home
+        motion: moveJ
+      program:
+      - op: gantry_handoff_sequence
+        id: gantry_bottom_mat_2_re_sequence
+    tying_bottom_mat_2_re:
+      type: tying_rebars
+      execution:
+        robots:
+        - robot1
+        - robot2
+        combined_group: sa3_robots_1_2
+        strategy: merged
+        planner_selection: per_arm
+        synchronization: per_tick
+        completed_arm_behavior: hold
+        failed_point_behavior: skip_if_stop_on_first_failure_false
+      repeat:
+        over: config.robot1.jobs + config.robot2.jobs
+        point_format: '{clamp}_t{n}'
+        synchronization: per_tick
+        after_last_point: combined_home
+      config:
+        robot1:
+          enabled: true
+          jobs:
+          - clamp: 1A_l
+            tie_count: 3
+        robot2:
+          enabled: true
+          jobs:
+          - clamp: 1A_r
+            tie_count: 3
+        approach:
+          offset_frame: local
+          xyz:
+          - -0.2
+          - 0.0
+          - 0.0
+        stop_on_first_failure: false
+        planning:
+          planning_time: 15.0
+          ompl_attempts: 10
+          plan_retries: 3
+          movej_velocity: 0.5
+          movej_acceleration: 0.5
+          movel_acceleration: 0.5
+          movec_acceleration: 0.5
+          lin_velocity_scales:
+          - 0.45
+          - 0.4
+          - 0.35
+          - 0.3
+          - 0.2
+          - 0.1
+          circ_velocity_scales:
+          - 0.45
+          - 0.4
+          - 0.35
+          - 0.3
+          - 0.2
+          - 0.1
+          transit_strategies:
+          - moveL
+          - moveJ
+          circ_via_offset_world:
+          - 0.0
+          - 0.0
+          - 0.1
+      point_steps: *id030
+      finish: *id031
+      program:
+      - op: paired_tying_points
+        id: tying_bottom_mat_2_re_sequence
+    change_to_schunk:
+      type: program
+      execution:
+        robots:
+        - robot1
+        - robot2
+        combined_group: sa3_robots_1_2
+        strategy: merged
+        preserve_existing_controller_backend: true
+        require_tool_lock_feedback_on_real_hardware: true
+        backend: moveit
+      config:
+        execution:
+          excuter: moveit
+          robot1_action: /robot1_controller/follow_joint_trajectory
+          robot2_action: /robot2_controller/follow_joint_trajectory
+          start_delay_sec: 0.5
+          result_timeout_margin_sec: 30.0
+          start_tolerance_rad: 0.05
+        planning:
+          planning_time: 15.0
+          movej_plan_retries: 3
+          ompl_attempts: 10
+          ik_timeout: 1.0
+          movej_velocity: 0.3
+          movej_acceleration: 0.2
+          movel_velocity: 0.2
+          movel_acceleration: 0.1
+      steps:
+      - id: D1
+        description: approach source dock
+        reference: source_dock
+        motion: moveJ
+        offset_frame: world
+        xyz: &id032
+        - 0
+        - 0
+        - 0.5
+        rpy: &id033
+        - 0
+        - 0
+        - 0
+        after_actions: []
+      - id: D2
+        description: dock and detach source tool
+        reference: source_dock
+        motion: moveL
+        offset_frame: world
+        xyz: &id034
+        - 0
+        - 0
+        - 0
+        rpy: &id035
+        - 0
+        - 0
+        - 0
+        after_actions:
+        - detach_source
+        - allow_source_contacts
+      - id: D3
+        description: retract from source dock
+        reference: source_dock
+        motion: moveL
+        offset_frame: world
+        xyz: &id036
+        - 0
+        - 0
+        - 0.5
+        rpy: &id037
+        - 0
+        - 0
+        - 0
+        after_actions:
+        - restore_source_contacts
+        - allow_target_contacts
+      - id: D4
+        description: approach target dock
+        reference: target_dock
+        motion: moveJ
+        offset_frame: world
+        xyz: &id038
+        - 0
+        - 0
+        - 0.5
+        rpy: &id039
+        - 0
+        - 0
+        - 0
+        after_actions: []
+      - id: D5
+        description: dock and attach target tool
+        reference: target_dock
+        motion: moveL
+        offset_frame: world
+        xyz: &id040
+        - 0
+        - 0
+        - 0
+        rpy: &id041
+        - 0
+        - 0
+        - 0
+        after_actions:
+        - attach_target
+      - id: D6
+        description: retract with target tool
+        reference: target_dock
+        motion: moveL
+        offset_frame: world
+        xyz: &id042
+        - 0
+        - 0
+        - 0.5
+        rpy: &id043
+        - 0
+        - 0
+        - 0
+        after_actions:
+        - restore_target_contacts
+      source_tool: tying_gun
+      target_tool: schunk
+      program:
+      - op: move
+        id: D1
+        description: approach source dock
+        motion: moveJ
+        strategy: combined_group
+        group: sa3_robots_1_2
+        goals:
+        - robot: robot1
+          link: robot1_tool_mount
+          target:
+            reference: robot1_tyinggun_dock
+            offset_frame: world
+            xyz: *id032
+            rpy: *id033
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_tyinggun_dock
+            offset_frame: world
+            xyz: *id032
+            rpy: *id033
+      - op: move
+        id: D2
+        description: dock and detach source tool
+        motion: moveL
+        strategy: merged
+        group: sa3_robots_1_2
+        goals:
+        - robot: robot1
+          link: robot1_tool_mount
+          target:
+            reference: robot1_tyinggun_dock
+            offset_frame: world
+            xyz: *id034
+            rpy: *id035
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_tyinggun_dock
+            offset_frame: world
+            xyz: *id034
+            rpy: *id035
+      - op: detach
+        id: D2_robot1_detach_source
+        robot: robot1
+        object: robot1_tying_gun
+        link: robot1_tool_mount
+      - op: detach
+        id: D2_robot2_detach_source
+        robot: robot2
+        object: robot2_tying_gun
+        link: robot2_tool_mount
+      - op: acm
+        id: D2_robot1_allow_source_contacts
+        object: robot1_tying_gun
+        with: *id022
+        allow: true
+      - op: acm
+        id: D2_robot2_allow_source_contacts
+        object: robot2_tying_gun
+        with: *id023
+        allow: true
+      - op: move
+        id: D3
+        description: retract from source dock
+        motion: moveL
+        strategy: merged
+        group: sa3_robots_1_2
+        goals:
+        - robot: robot1
+          link: robot1_tool_mount
+          target:
+            reference: robot1_tyinggun_dock
+            offset_frame: world
+            xyz: *id036
+            rpy: *id037
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_tyinggun_dock
+            offset_frame: world
+            xyz: *id036
+            rpy: *id037
+      - op: acm
+        id: D3_robot1_restore_source_contacts
+        object: robot1_tying_gun
+        with: *id022
+        allow: false
+      - op: acm
+        id: D3_robot2_restore_source_contacts
+        object: robot2_tying_gun
+        with: *id023
+        allow: false
+      - op: acm
+        id: D3_robot1_allow_target_contacts
+        object: robot1_schunk_base
+        with: *id022
+        allow: true
+      - op: acm
+        id: D3_robot2_allow_target_contacts
+        object: robot2_schunk_base
+        with: *id023
+        allow: true
+      - op: move
+        id: D4
+        description: approach target dock
+        motion: moveJ
+        strategy: combined_group
+        group: sa3_robots_1_2
+        goals:
+        - robot: robot1
+          link: robot1_tool_mount
+          target:
+            reference: robot1_shuck_dock
+            offset_frame: world
+            xyz: *id038
+            rpy: *id039
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_shuck_dock
+            offset_frame: world
+            xyz: *id038
+            rpy: *id039
+      - op: move
+        id: D5
+        description: dock and attach target tool
+        motion: moveL
+        strategy: merged
+        group: sa3_robots_1_2
+        goals:
+        - robot: robot1
+          link: robot1_tool_mount
+          target:
+            reference: robot1_shuck_dock
+            offset_frame: world
+            xyz: *id040
+            rpy: *id041
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_shuck_dock
+            offset_frame: world
+            xyz: *id040
+            rpy: *id041
+      - op: attach
+        id: D5_robot1_attach_target
+        robot: robot1
+        object: robot1_schunk_base
+        link: robot1_tool_mount
+        touch_links: *id022
+      - op: attach
+        id: D5_robot2_attach_target
+        robot: robot2
+        object: robot2_schunk_base
+        link: robot2_tool_mount
+        touch_links: *id023
+      - op: move
+        id: D6
+        description: retract with target tool
+        motion: moveL
+        strategy: merged
+        group: sa3_robots_1_2
+        goals:
+        - robot: robot1
+          link: robot1_tool_mount
+          target:
+            reference: robot1_shuck_dock
+            offset_frame: world
+            xyz: *id042
+            rpy: *id043
+        - robot: robot2
+          link: robot2_tool_mount
+          target:
+            reference: robot2_shuck_dock
+            offset_frame: world
+            xyz: *id042
+            rpy: *id043
+      - op: acm
+        id: D6_robot1_restore_target_contacts
+        object: robot1_schunk_base
+        with: *id022
+        allow: false
+      - op: acm
+        id: D6_robot2_restore_target_contacts
+        object: robot2_schunk_base
+        with: *id023
+        allow: false
+    initialize_schunk_grippers:
+      type: program
+      execution:
+        strategy: scene_only
+        verify_each_action: true
+      steps:
+      - id: A1
+        action: attach_at_dock
+        robot: robot1
+        object_ids:
+        - robot1_schunk_base
+        dock_frame: robot1_shuck_dock
+        attachment_link: robot1_tool_mount
+        touch_links: &id044
+        - robot1_tool_mount
+        - robot1_J4_link
+        - robot1_J5_link
+        - robot1_J6_link
+        - robot1_schunk_base
+        preserve_dock_relative_pose: true
+        verify_attachment: true
+        if_already_attached: verify_and_skip
+      - id: A2
+        action: attach_at_dock
+        robot: robot2
+        object_ids:
+        - robot2_schunk_base
+        dock_frame: robot2_shuck_dock
+        attachment_link: robot2_tool_mount
+        touch_links: &id045
+        - robot2_tool_mount
+        - robot2_J4_link
+        - robot2_J5_link
+        - robot2_J6_link
+        - robot2_schunk_base
+        preserve_dock_relative_pose: true
+        verify_attachment: true
+        if_already_attached: verify_and_skip
+      program:
+      - op: attach
+        id: A1
+        robot: robot1
+        object: robot1_schunk_base
+        link: robot1_tool_mount
+        dock_frame: robot1_shuck_dock
+        placement_mode: dock_to_mount
+        verify_pose_tolerance_m: 0.02
+        touch_links: *id044
+      - op: attach
+        id: A2
+        robot: robot2
+        object: robot2_schunk_base
+        link: robot2_tool_mount
+        dock_frame: robot2_shuck_dock
+        placement_mode: dock_to_mount
+        verify_pose_tolerance_m: 0.02
+        touch_links: *id045
+    phase3_phase5_parallel:
+      type: synchronized_workflow
+      execution:
+        strategy: checkpoint_workflow
+        parameters:
+          workflow_mode: phase3_phase5_parallel
+          execute_motion: true
+          require_robot4_already_home: true
+          phase3_combined_group: robot3_robot4_arms
+          phase3_collision_group: sa3_all_robots
+          robot3_group: robot3_arm
+          robot4_group: robot4_arm
+          phase3_checkpoint_timeout_sec: 240.0
+          phase5_timeout_sec: 1800.0
+          phase5_checkpoint_timeout_sec: 240.0
+      steps:
+      - id: WAIT_G4
+        action: wait_checkpoint
+        checkpoint: gantry_g4
+      - id: VERIFY_ROBOT4_HOME
+        action: verify_named_state
+        robot: robot4
+        named_state: home
+        tolerance_rad: 0.02
+        on_failure: abort
+      - id: REVERIFY_G4
+        action: wait_checkpoint
+        checkpoint: gantry_g4
+        timeout_sec: 45.0
+      - id: RESUME_G4
+        action: resume_checkpoint
+        checkpoint: gantry_g4
+      - id: WAIT_R3
+        action: wait_checkpoint
+        checkpoint: robot3_r3
+      - id: RESUME_R3
+        action: resume_checkpoint
+        checkpoint: robot3_r3
+      - id: WAIT_PHASE5
+        action: wait_completion_notifications
+        protocol: supervisor_hosts_trigger_services
+        completion_services:
+          robot3: /sa3_phase5/robot3_done
+          robot12: /sa3_phase5/robot12_done
+        abort_services:
+          robot3: /sa3_phase5/robot3_abort
+          robot12: /sa3_phase5/robot12_abort
+        timeout_sec: 1800.0
+      program:
+      - op: checkpoint_workflow
+        id: phase3_phase5_parallel_sequence
+    final_assembly:
+      type: final_assembly
+      execution:
+        cartesian_motion_strategy: coordinated_cartesian
+        group: robot3_robot4_arms
+        joint_goal_strategy: combined_group
+        collision_validation_group: robot3_robot4_arms
+      config:
+        pick_frame: sa3_pick_point_l
+        place_frame: sa3_place_l
+        robot3_group: robot3_arm
+        robot4_group: robot4_arm
+        combined_group: robot3_robot4_arms
+        robot3_planning_link: robot3_end_effactor
+        robot4_planning_link: robot4_end_effactor
+        robot4_pick_frame: sa3_pick_point_r
+        robot4_place_frame: sa3_place_r
+        object_id: rebar_1A
+        children:
+        - rebar_3c
+        - rebar_4c
+        main_object_robot: 3
+        robot3_children:
+        - rebar_3c
+        robot4_children:
+        - rebar_4c
+        planning_time: 15.0
+        ompl_attempts: 10
+        plan_retries: 3
+        movej_velocity: 0.5
+        movej_acceleration: 0.5
+        movel_acceleration: 0.5
+        movec_acceleration: 0.5
+        lin_velocity_scales:
+        - 0.45
+        - 0.4
+        - 0.35
+        - 0.3
+        - 0.2
+        - 0.1
+        - 0.05
+        circ_velocity_scales:
+        - 0.45
+        - 0.4
+        - 0.35
+        - 0.3
+        - 0.2
+        - 0.1
+        transit_strategies:
+        - moveL
+        - moveJ
+        circ_via_offset_world:
+        - 0.0
+        - -0.1
+        - 0.1
+        pick_approach_motion: fallback
+        pick_motion: moveL
+        pick_retract_motion: moveL
+        place_approach_motion: fallback
+        place_motion: moveL
+        place_retract_motion: moveL
+        robot3_pick_approach_offset_world:
+        - -0.1
+        - 0.0
+        - 0.0
+        robot4_pick_approach_offset_world:
+        - 0.15
+        - 0.0
+        - 0.0
+        pick_retract_offset_world:
+        - 0.0
+        - -0.2
+        - 0.0
+        place_approach_offset_world:
+        - 0.0
+        - 0.0
+        - 0.3
+        robot3_place_retract_offset_world:
+        - -0.05
+        - 0.0
+        - 0.0
+        robot4_place_retract_offset_world:
+        - 0.1
+        - 0.0
+        - 0.0
+      active_object_policy:
+        main_object_required_in_world: true
+        missing_optional_children: skip_with_warning
+        main_owner_ref: config.main_object_robot
+        robot3_children_ref: config.robot3_children
+        robot4_children_ref: config.robot4_children
+      steps:
+      - id: S0
+        motion: named_state
+        robot: robot1
+        target: robot1_sleep
+      - id: P1
+        motion: fallback
+        description: Pick approach
+        robot3:
+          reference: sa3_pick_point_l
+          offset_frame: world
+          xyz:
+          - -0.1
+          - 0.0
+          - 0.0
+        robot4:
+          reference: sa3_pick_point_r
+          offset_frame: world
+          xyz:
+          - 0.15
+          - 0.0
+          - 0.0
+      - id: P2
+        motion: moveL
+        description: Pick and attach active objects
+        robot3:
+          reference: sa3_pick_point_l
+        robot4:
+          reference: sa3_pick_point_r
+        before_actions:
+        - allow_gripper_contact
+        after_actions:
+        - attach_active_objects
+      - id: P3
+        motion: moveL
+        description: Pick retract
+        robot3:
+          reference: sa3_pick_point_l
+          offset_frame: world
+          xyz:
+          - 0.0
+          - -0.2
+          - 0.0
+        robot4:
+          reference: sa3_pick_point_r
+          offset_frame: world
+          xyz:
+          - 0.0
+          - -0.2
+          - 0.0
+      - id: G1
+        motion: fallback
+        description: Place approach
+        robot3:
+          reference: sa3_place_l
+          offset_frame: world
+          xyz:
+          - 0.0
+          - 0.0
+          - 0.3
+        robot4:
+          reference: sa3_place_r
+          offset_frame: world
+          xyz:
+          - 0.0
+          - 0.0
+          - 0.3
+      - id: G2
+        motion: moveL
+        description: Place and detach
+        robot3:
+          reference: sa3_place_l
+        robot4:
+          reference: sa3_place_r
+        after_actions:
+        - detach_active_objects
+      - id: G3
+        motion: moveL
+        description: Place retract
+        robot3:
+          reference: sa3_place_l
+          offset_frame: world
+          xyz:
+          - -0.05
+          - 0.0
+          - 0.0
+        robot4:
+          reference: sa3_place_r
+          offset_frame: world
+          xyz:
+          - 0.1
+          - 0.0
+          - 0.0
+        after_actions:
+        - restore_gripper_contact
+      - id: H1
+        motion: moveJ
+        reference: home
+        description: Coordinated Robot3/Robot4 home
+      program:
+      - op: multi_object_pick_place_sequence
+        id: final_assembly_sequence
+  implementation_status:
+    generic_cpp_version: prototype_1
+    hardware_validated: false
+    ros_build_verified: false
+    known_unimplemented:
+    - safety-certified temporal validation of independent concurrent arms
+    - real hardware tool-lock IO
+    - gripper-change exact legacy motion/controller equivalence
+    default_execution: dry_run
+    known_unverified:
+    - Pilz CIRC constraints on installed Pilz version
+    - dual-arm mixed-planner fallback parity with original shear/tying loops
+  universal_executor:
+    mode: single_cpp_multiple_instances
+    generic_program_tasks:
+    - initialize_schunk_grippers
+    - flange_3c_4c
+    - flange_3d_4d
+    - change_to_tying_guns
+    - change_to_schunk
+    compatibility_adapters:
+    - shear_links_2_re
+    - tying_2_re
+    - gantry_bottom_mat_2_re
+    - tying_bottom_mat_2_re
+    - phase3_phase5_parallel
+    - final_assembly
+    description: Tasks with program are interpreted as generic YAML operations; other complex workflows retain one-executable
+      compatibility adapters until fully migrated.
+  migration_status: All stages configured; six complex operations use transitional generic op adapters, not fully 
+    parameter-pure primitives.
