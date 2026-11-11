@@ -583,6 +583,24 @@ target_link_libraries(sa3_combined_motion
   yaml-cpp
 )
 
+# Gantry controller — direct JTC/FJT only
+add_executable(gantry_controller
+  src/gantry_controller.cpp
+)
+
+ament_target_dependencies(gantry_controller
+  rclcpp
+  rclcpp_action
+  control_msgs
+  trajectory_msgs
+  sensor_msgs
+  std_msgs
+  ament_index_cpp
+)
+
+target_link_libraries(gantry_controller yaml-cpp)
+
+
 # ============================================================
 # Link Planning Scene Objects to robot motion nodes
 # ============================================================
@@ -676,6 +694,7 @@ install(
     tying_rebars
     sa3_combined_motion
     sa3_generic_executor
+    gantry_controller
 
   DESTINATION lib/${PROJECT_NAME}
 )

@@ -1,0 +1,1817 @@
+# Phase 2: flange_reverse_pp = B1/B2/P1 only; flange_pp = pickup/place, optionally skip P1.
+action_library:
+  schema_version: 1
+  workcell_package: sa2_description
+  workcell_file: config/workcell.yaml
+  collision_group: sa3_all_robots
+  acm_lock: /tmp/sa3_action_engine_acm.lock
+  planning:
+# Debug in confirmed simulation only. Set true for full-cell safety validation.
+    full_cell_collision_check: false
+    # Diagnostic only: publish rejected merged paths to RViz, never execute them.
+    preview_rejected_trajectories: false
+
+    planning_time: 15
+    planning_attempts: 10
+    acceleration: 0.45
+    moveJ:
+      velocity: 0.5
+      retries: 3
+    moveL:
+      velocity_scales: [0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1, 0.05]
+    movePTP:
+      velocity_scales: [0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1, 0.05]
+    moveC:
+      velocity_scales: [0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1, 0.05]
+    fallbacks:
+      movePTP:
+        - moveJ
+  actions:
+    initialize_schunk_grippers:
+      defaults: {}
+      steps:
+        - op: attach
+          id: A1_attach_robot1_schunk
+          object: robot1_schunk_base
+          link: robot1_tool_mount
+          placement_mode: dock_to_mount
+          touch_links: &id002
+            - robot1_tool_mount
+            - robot1_J4_link
+            - robot1_J5_link
+            - robot1_J6_link
+          dock_frame: robot1_shuck_dock
+        - op: attach
+          id: A2_attach_robot2_schunk
+          object: robot2_schunk_base
+          link: robot2_tool_mount
+          placement_mode: dock_to_mount
+          touch_links: &id003
+            - robot2_tool_mount
+            - robot2_J4_link
+            - robot2_J5_link
+            - robot2_J6_link
+          dock_frame: robot2_shuck_dock
+
+    flange_pp:
+      defaults:
+        robot_a: robot3
+        robot_b: robot4
+        group: robot3_robot4_arms
+        do_home: true
+        pick_a_offset: [0, 0, 0]
+        pick_b_offset: [0, 0, 0]
+        place_a_offset: [0, 0, 0]
+        place_b_offset: [0, 0, 0]
+        inventory_a: inventory_3a_4a
+        inventory_b: inventory_3a_4a_2
+        tool_link_a: robot3_end_effactor_ff
+        tool_link_b: robot4_end_effactor_ff
+        pick_a_rpy: [0, 0, 0]
+        pick_b_rpy: [0, 0, 0]
+        do_approach: true
+      steps:
+        - op: move
+          id: P1
+          motion: movePTP
+          strategy: separate_merge
+          group: '{{group}}'
+          participants:
+            - '{{robot_a}}'
+            - '{{robot_b}}'
+          goals:
+            - robot: '{{robot_a}}'
+              target:
+                reference: '{{approach_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: '{{robot_b}}'
+              target:
+                reference: '{{approach_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+          enabled: '{{do_approach}}'
+        - op: move
+          id: P2
+          motion: moveL
+          strategy: separate_merge
+          group: '{{group}}'
+          participants:
+            - '{{robot_a}}'
+            - '{{robot_b}}'
+          goals:
+            - robot: '{{robot_a}}'
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: local
+                xyz: '{{pick_a_offset}}'
+                rpy: '{{pick_a_rpy}}'
+                rpy_frame: local
+            - robot: '{{robot_b}}'
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: local
+                xyz: '{{pick_b_offset}}'
+                rpy: '{{pick_b_rpy}}'
+                rpy_frame: local
+          before:
+            - op: acm_allow
+              id: P2_allow_grip
+              pairs: [['{{object_a}}', '{{tool_link_a}}'], 
+                      ['{{object_a}}', robot3_sa3_grpr01], 
+                      ['{{object_b}}', '{{tool_link_b}}'], 
+                      ['{{object_b}}',robot4_sa3_grpr01_r]]
+          after:
+            - op: attach
+              id: P2_attach_a
+              object: '{{object_a}}'
+              link: robot3_end_effactor_ff
+              placement_mode: preserve_world
+              touch_links: &id005
+                - robot3_end_effactor_ff
+                - robot3_J6_link
+                - robot3_sa3_grpr01
+            - op: attach
+              id: P2_attach_b
+              object: '{{object_b}}'
+              link: robot4_end_effactor_ff
+              placement_mode: preserve_world
+              touch_links: &id007
+                - robot4_end_effactor_ff
+                - robot4_J6_link
+                - robot4_sa3_grpr01_r
+            - op: acm_allow
+              id: P2_allow_inventory_contact
+              pairs: [['{{object_a}}', '{{inventory_a}}'], 
+                      ['{{object_b}}', '{{inventory_b}}']]
+        - op: move
+          id: P3
+          motion: moveL
+          strategy: separate_merge
+          group: '{{group}}'
+          participants:
+            - '{{robot_a}}'
+            - '{{robot_b}}'
+          goals:
+            - robot: '{{robot_a}}'
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: world
+                xyz: [0.0, 0.3, 0.3]
+                rpy: '{{pick_a_rpy}}'
+                base_xyz: '{{pick_a_offset}}'
+                base_offset_frame: local
+                rpy_frame: local
+            - robot: '{{robot_b}}'
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: world
+                xyz: [0.0, 0.3, 0.3]
+                rpy: '{{pick_b_rpy}}'
+                base_xyz: '{{pick_b_offset}}'
+                base_offset_frame: local
+                rpy_frame: local
+          after:
+            - op: acm_restore
+              id: P3_restore_inventory_contact
+              pairs: [['{{object_a}}', '{{inventory_a}}'], 
+                      ['{{object_b}}', '{{inventory_b}}']]
+        - op: move
+          id: T1
+          motion: moveL
+          strategy: separate_merge
+          group: '{{group}}'
+          participants:
+            - '{{robot_a}}'
+            - '{{robot_b}}'
+          goals:
+            - robot: '{{robot_a}}'
+              target:
+                reference: '{{transfer_start_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: '{{robot_b}}'
+              target:
+                reference: '{{transfer_start_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+        - op: move
+          id: T2
+          motion: movePTP
+          strategy: separate_merge
+          group: '{{group}}'
+          participants:
+            - '{{robot_a}}'
+            - '{{robot_b}}'
+          goals:
+            - robot: '{{robot_a}}'
+              target:
+                reference: '{{transfer_end_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: '{{robot_b}}'
+              target:
+                reference: '{{transfer_end_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+        - op: move
+          id: G1
+          motion: moveL
+          strategy: separate_merge
+          group: '{{group}}'
+          participants:
+            - '{{robot_a}}'
+            - '{{robot_b}}'
+          goals:
+            - robot: '{{robot_a}}'
+              target:
+                reference: '{{place_a}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+            - robot: '{{robot_b}}'
+              target:
+                reference: '{{place_b}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+          before:
+            - op: acm_allow
+              id: G1_allow_jig_contact
+              pairs: [['{{object_a}}', jig_clamp], 
+                      ['{{object_b}}', jig_clamp]]
+        - op: move
+          id: G2
+          motion: moveL
+          strategy: separate_merge
+          group: '{{group}}'
+          participants:
+            - '{{robot_a}}'
+            - '{{robot_b}}'
+          goals:
+            - robot: '{{robot_a}}'
+              target:
+                reference: '{{place_a}}'
+                offset_frame: world
+                xyz: '{{place_a_offset}}'
+                rpy: [0, 0, 0]
+            - robot: '{{robot_b}}'
+              target:
+                reference: '{{place_b}}'
+                offset_frame: world
+                xyz: '{{place_b_offset}}'
+                rpy: [0, 0, 0]
+          after:
+            - op: detach
+              id: G2_detach_a
+              object: '{{object_a}}'
+              link: robot3_end_effactor_ff
+            - op: detach
+              id: G2_detach_b
+              object: '{{object_b}}'
+              link: robot4_end_effactor_ff
+            - op: acm_allow
+              id: G2_reallow_grip_for_retract
+              pairs: [['{{object_a}}', '{{tool_link_a}}'], 
+                      ['{{object_a}}', robot3_sa3_grpr01], 
+                      ['{{object_b}}', '{{tool_link_b}}'], 
+                      ['{{object_b}}',robot4_sa3_grpr01_r]]
+        - op: move
+          id: G3
+          motion: moveL
+          strategy: separate_merge
+          group: '{{group}}'
+          participants:
+            - '{{robot_a}}'
+            - '{{robot_b}}'
+          goals:
+            - robot: '{{robot_a}}'
+              target:
+                reference: '{{place_a}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+            - robot: '{{robot_b}}'
+              target:
+                reference: '{{place_b}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+          after:
+            - op: acm_restore
+              id: G3_restore_jig_contact
+              pairs: [['{{object_a}}', jig_clamp], 
+                      ['{{object_b}}', jig_clamp]]
+            - op: acm_restore
+              id: P2_restore_grip
+              pairs: [['{{object_a}}', '{{tool_link_a}}'], 
+                      ['{{object_a}}', robot3_sa3_grpr01], 
+                      ['{{object_b}}', '{{tool_link_b}}'], 
+                      ['{{object_b}}', robot4_sa3_grpr01_r]]
+        - op: move
+          id: H1
+          motion: moveJ
+          strategy: combined
+          group: '{{group}}'
+          goals:
+            - robot: '{{robot_a}}'
+              named_state: home
+            - robot: '{{robot_b}}'
+              named_state: home
+          enabled: '{{do_home}}'
+    
+    gantry_pick_transfer:
+      defaults:
+        gantry_pick_x: 0.0
+        gantry_pick_z: 4.1
+        gantry_transport_x: -6.0
+        gantry_up_z: 0.0
+        gantry_link: gantry_part_link
+        rebar: rebar_1A
+      steps:
+        - op: gantry_send
+          id: G1_home
+          request_id: gantry_pick_g1
+          x: '{{gantry_pick_x}}'
+          z: '{{gantry_up_z}}'
+          velocity: 1.45
+          acceleration: 1.0
+          wait: true
+          timeout: 120
+        - op: gantry_send
+          id: G2_lower
+          request_id: gantry_pick_g2
+          x: '{{gantry_pick_x}}'
+          z: '{{gantry_pick_z}}'
+          velocity: 0.45
+          acceleration: 0.5
+          wait: true
+          timeout: 120
+        - op: attach
+          id: G2_attach_rebar
+          object: '{{rebar}}'
+          link: '{{gantry_link}}'
+          placement_mode: preserve_world
+          touch_links:
+            - '{{gantry_link}}'
+        - op: gantry_send
+          id: G3_raise
+          request_id: gantry_pick_g3
+          x: '{{gantry_pick_x}}'
+          z: '{{gantry_up_z}}'
+          velocity: 0.45
+          acceleration: 0.5
+          wait: true
+          timeout: 120
+        - op: gantry_send
+          id: G4_transport
+          request_id: gantry_pick_g4
+          x: '{{gantry_transport_x}}'
+          z: '{{gantry_up_z}}'
+          velocity: 0.45
+          acceleration: 0.5
+          wait: true
+          timeout: 120
+
+    four_arm_home_shear_approach:
+      defaults: {}
+      steps:
+        - op: move
+          id: H1_plus_P1
+          motion: moveJ
+          strategy: combined
+          group: sa3_all_robots
+          goals:
+            - robot: robot3
+              named_state: home
+            - robot: robot4
+              named_state: home
+            - robot: robot1
+              target:
+                reference: '{{shear_pick_a}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+            - robot: robot2
+              target:
+                reference: '{{shear_pick_b}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+  
+    shear_pair:
+      defaults:
+        first_approach: true
+        group: sa3_robots_1_2
+        pick_a_offset: [0, 0, 0]
+        pick_b_offset: [0, 0, 0]
+        inventory_a: web_ring
+        inventory_b: web_ring_2
+      steps:
+        - op: move
+          id: P1
+          motion: moveL
+          strategy: separate_merge
+          # Transit: LIN first; Pilz CIRC via-point second; OMPL joint last.
+          circ_via_world_x: {robot1: 0.235, robot2: 5.22}
+          fallbacks:
+            - {motion: moveC, strategy: separate_merge}
+            - {motion: moveJ, strategy: separate_merge}
+          group: sa3_robots_1_2
+          participants: &id001
+            - robot1
+            - robot2
+          goals:
+            - robot: robot1
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+            - robot: robot2
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+          enabled: '{{first_approach}}'
+        - op: move
+          id: P2
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: world
+                xyz: '{{pick_a_offset}}'
+                rpy: [0, 0, 0]
+            - robot: robot2
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: world
+                xyz: '{{pick_b_offset}}'
+                rpy: [0, 0, 0]
+          before:
+            - op: acm_allow
+              id: P2_allow_gripper_contact
+              pairs: [['{{object_a}}', robot1_tool_mount], 
+                      ['{{object_a}}', robot1_schunk_base], 
+                      ['{{object_b}}', robot2_tool_mount], 
+                      ['{{object_b}}', robot2_schunk_base]]
+          after:
+            - op: attach
+              id: P2_attach_a
+              object: '{{object_a}}'
+              link: robot1_tool_mount
+              placement_mode: preserve_world
+              touch_links: *id002
+            - op: attach
+              id: P2_attach_b
+              object: '{{object_b}}'
+              link: robot2_tool_mount
+              placement_mode: preserve_world
+              touch_links: *id003
+            - op: acm_allow
+              id: P2_allow_inventory_contact
+              pairs: [['{{object_a}}', '{{inventory_a}}'], 
+                      ['{{object_b}}', '{{inventory_b}}']]
+        - op: move
+          id: P3
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+            - robot: robot2
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+          after:
+            - op: acm_restore
+              id: P3_restore_inventory_contact
+              pairs: [['{{object_a}}', '{{inventory_a}}'], 
+                      ['{{object_b}}', '{{inventory_b}}']]
+        - op: move
+          id: T1
+          motion: moveL
+          strategy: separate_merge
+          # Transit: LIN first; Pilz CIRC via-point second; OMPL joint last.
+          circ_via_world_x: {robot1: 0.235, robot2: 5.22}
+          fallbacks:
+            - {motion: moveC, strategy: separate_merge}
+            - {motion: moveJ, strategy: separate_merge}
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              target:
+                reference: '{{place_a}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+            - robot: robot2
+              target:
+                reference: '{{place_b}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+        - op: move
+          id: G1
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              target:
+                reference: '{{place_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot2
+              target:
+                reference: '{{place_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+          after:
+            - op: detach
+              id: G1_detach_a
+              object: '{{object_a}}'
+              link: robot1_tool_mount
+            - op: detach
+              id: G1_detach_b
+              object: '{{object_b}}'
+              link: robot2_tool_mount
+            - op: acm_allow
+              id: G1_reallow_gripper_contact_after_detach
+              pairs: [['{{object_a}}', robot1_tool_mount], 
+                      ['{{object_a}}', robot1_schunk_base], 
+                      ['{{object_b}}', robot2_tool_mount], 
+                      ['{{object_b}}', robot2_schunk_base]]
+          before:
+            - op: acm_allow
+              id: G1_allow_jig_contact
+              pairs: [['{{object_a}}', jig_clamp], ['{{object_b}}', jig_clamp]]
+        - op: move
+          id: G2
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              target:
+                reference: '{{place_a}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+            - robot: robot2
+              target:
+                reference: '{{place_b}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+          after:
+            - op: acm_restore
+              id: G2_restore_gripper_contact_after_retract
+              pairs: [['{{object_a}}', robot1_tool_mount], 
+                      ['{{object_a}}', robot1_schunk_base], 
+                      ['{{object_b}}', robot2_tool_mount], 
+                      ['{{object_b}}', robot2_schunk_base]]
+
+
+            - op: acm_restore
+              id: G2_restore_jig_contact
+              pairs: [['{{object_a}}', jig_clamp], 
+                      ['{{object_b}}', jig_clamp ]]
+   
+    bottom_mat_pp:
+      defaults:
+        rebar: rebar_1A
+        gantry_link: gantry_part_link
+        g4_x: -6.0
+        g5_z: 1.2
+        up_z: 0.0
+      steps:
+        - op: gantry_send
+          id: G5_lower
+          request_id: bmat_g5
+          x: '{{g4_x}}'
+          z: '{{g5_z}}'
+          velocity: 2.45
+          acceleration: 2.0
+          wait: true
+          timeout: 120
+        - op: detach
+          id: G5_release
+          object: '{{rebar}}'
+          link: '{{gantry_link}}'
+        - op: move
+          id: R1
+          motion: moveJ
+          strategy: separate_merge
+          group: robot3_robot4_arms
+          participants: &id004
+            - robot3
+            - robot4
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: local
+                xyz: [-0.05, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: local
+                xyz: [-0.05, 0, 0]
+                rpy: [0, 0, 0]
+        - op: move
+          id: R2
+          motion: moveL
+          strategy: separate_merge
+          group: robot3_robot4_arms
+          participants: *id004
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+          before:
+            - op: acm_allow
+              id: R2_allow_grasp
+              pairs: [['{{rebar}}', robot3_end_effactor_ff]]
+          after:
+            - op: attach
+              id: R2_robot3_attach
+              object: '{{rebar}}'
+              link: robot3_end_effactor_ff
+              placement_mode: preserve_world
+              touch_links: *id005
+            - op: acm_restore
+              id: R2_restore_grasp
+              pairs: [['{{rebar}}', robot3_end_effactor_ff]]
+        - op: move
+          id: R3
+          motion: moveL
+          strategy: coordinated_cartesian
+          group: robot3_robot4_arms
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: local
+                xyz: [-0.05, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: local
+                xyz: [-0.05, 0, 0]
+                rpy: [0, 0, 0]
+        - op: gantry_send
+          id: G6_retract
+          request_id: bmat_g6
+          x: '{{g4_x}}'
+          z: '{{up_z}}'
+          velocity: 0.45
+          acceleration: 0.5
+          wait: false
+          timeout: 120
+        - op: gantry_wait
+          id: G6_wait
+          request_id: bmat_g6
+          timeout: 180
+        - op: move
+          id: R4
+          motion: moveJ
+          strategy: separate_merge
+          group: robot3_robot4_arms
+          participants: *id004
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{place_a}}'
+                offset_frame: local
+                xyz: [-0.1, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{place_b}}'
+                offset_frame: local
+                xyz: [-0.1, 0, 0]
+                rpy: [0, 0, 0]
+        - op: move
+          id: R5
+          motion: moveL
+          strategy: coordinated_cartesian
+          group: robot3_robot4_arms
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{place_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{place_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+          after:
+            - op: detach
+              id: R5_robot3_detach
+              object: '{{rebar}}'
+              link: robot3_end_effactor_ff
+        - op: move
+          id: R6
+          motion: moveL
+          strategy: coordinated_cartesian
+          group: robot3_robot4_arms
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{place_a}}'
+                offset_frame: local
+                xyz: [-0.1, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{place_b}}'
+                offset_frame: local
+                xyz: [-0.1, 0, 0]
+                rpy: [0, 0, 0]
+        - op: move
+          id: R7
+          motion: moveJ
+          strategy: combined
+          group: robot3_robot4_arms
+          goals:
+            - robot: robot3
+              named_state: home
+            - robot: robot4
+              named_state: home
+
+    gripper_change:
+      defaults:
+        source_a: robot1_schunk_base
+        source_b: robot2_schunk_base
+        target_a: robot1_tying_gun
+        target_b: robot2_tying_gun
+        source_dock_a: robot1_shuck_dock
+        source_dock_b: robot2_shuck_dock
+        target_dock_a: robot1_tyinggun_dock
+        target_dock_b: robot2_tyinggun_dock
+        approach_z: 0.5
+      steps:
+        - op: move
+          id: D1
+          motion: moveJ
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{source_dock_a}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: '{{source_dock_b}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+        - op: move
+          id: D2
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{source_dock_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: '{{source_dock_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+          after:
+            - op: detach
+              id: D2_detach_a
+              object: '{{source_a}}'
+              link: robot1_tool_mount
+            - op: detach
+              id: D2_detach_b
+              object: '{{source_b}}'
+              link: robot2_tool_mount
+            - op: acm_allow
+              id: D2_allow_source
+              pairs: [['{{source_a}}', robot1_tool_mount], ['{{source_b}}', robot2_tool_mount]]
+        - op: move
+          id: D3
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{source_dock_a}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: '{{source_dock_b}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+          after:
+            - op: acm_restore
+              id: D3_restore_source
+              pairs: [['{{source_a}}', robot1_tool_mount], ['{{source_b}}', robot2_tool_mount]]
+            - op: acm_allow
+              id: D3_allow_target
+              pairs: [['{{target_a}}', robot1_tool_mount], ['{{target_b}}', robot2_tool_mount]]
+        - op: move
+          id: D4
+          motion: moveJ
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{target_dock_a}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: '{{target_dock_b}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+        - op: move
+          id: D5
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{target_dock_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: '{{target_dock_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+          fallbacks:
+            - motion: moveL
+              strategy: coordinated_cartesian
+          after:
+            - op: attach
+              id: D5_attach_a
+              object: '{{target_a}}'
+              link: robot1_tool_mount
+              placement_mode: preserve_world
+              touch_links: *id002
+            - op: attach
+              id: D5_attach_b
+              object: '{{target_b}}'
+              link: robot2_tool_mount
+              placement_mode: preserve_world
+              touch_links: *id003
+        - op: move
+          id: D6
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{target_dock_a}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: '{{target_dock_b}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+          after:
+            - op: acm_restore
+              id: D6_restore_target
+              pairs: [['{{target_a}}', robot1_tool_mount], ['{{target_b}}', robot2_tool_mount ]]
+    
+    bottom_mat_and_gripper_change:
+      defaults:
+        rebar: rebar_1A
+        g4_x: -6.0
+        g5_z: 1.2
+        gantry_up_z: 0.0
+        gantry_link: gantry_part_link
+        source_dock_a: robot1_shuck_dock
+        source_dock_b: robot2_shuck_dock
+        target_dock_a: robot1_tyinggun_dock
+        target_dock_b: robot2_tyinggun_dock
+        approach_z: -0.5
+      steps:
+        - op: gantry_send
+          id: G5_lower
+          request_id: combo_g5
+          x: '{{g4_x}}'
+          z: '{{g5_z}}'
+          velocity: 0.45
+          acceleration: 0.5
+          wait: true
+          timeout: 120
+        - op: detach
+          id: G5_detach_gantry
+          object: '{{rebar}}'
+          link: '{{gantry_link}}'
+        - op: move
+          id: S1_R1_D1
+          motion: moveJ
+          strategy: separate_merge
+          group: sa3_all_robots
+          participants: &id006
+            - robot1
+            - robot2
+            - robot3
+            - robot4
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: local
+                xyz: [-0.05, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: local
+                xyz: [-0.05, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{source_dock_a}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: '{{source_dock_b}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+        - op: move
+          id: S2_R2_D2
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_all_robots
+          participants: *id006
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{source_dock_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: '{{source_dock_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+          before:
+            - op: acm_allow
+              id: S2_allow_rebar_grasp
+              pairs: [['{{rebar}}', robot3_end_effactor_ff]]
+          after:
+            - op: attach
+              id: S2_attach_rebar
+              object: '{{rebar}}'
+              link: robot3_end_effactor_ff
+              placement_mode: preserve_world
+              touch_links: *id005
+            - op: detach
+              id: S2_detach_schunk1
+              object: robot1_schunk_base
+              link: robot1_tool_mount
+            - op: detach
+              id: S2_detach_schunk2
+              object: robot2_schunk_base
+              link: robot2_tool_mount
+            - op: acm_restore
+              id: S2_restore_rebar_grasp
+              pairs: [['{{rebar}}', robot3_end_effactor_ff]]
+            - op: acm_allow
+              id: S2_allow_source
+              pairs: [[robot1_schunk_base, robot1_tool_mount], [robot2_schunk_base, robot2_tool_mount]]
+        - op: move
+          id: S3_R3_D3
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_all_robots
+          participants: *id006
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: local
+                xyz: [-0.05, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: local
+                xyz: [-0.05, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{source_dock_a}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: '{{source_dock_b}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+          after:
+            - op: acm_restore
+              id: S3_restore_source
+              pairs: [[robot1_schunk_base, robot1_tool_mount], [robot2_schunk_base, robot2_tool_mount]]
+        - op: gantry_send
+          id: G6_raised
+          request_id: combo_g6
+          x: '{{g4_x}}'
+          z: '{{gantry_up_z}}'
+          velocity: 0.45
+          acceleration: 0.5
+          wait: false
+          timeout: 120
+        - op: gantry_wait
+          id: G6_wait
+          request_id: combo_g6
+          timeout: 180
+        - op: move
+          id: S4_R4_D4
+          motion: moveJ
+          strategy: separate_merge
+          group: sa3_all_robots
+          participants: *id006
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{place_a}}'
+                offset_frame: local
+                xyz: [-0.1, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{place_b}}'
+                offset_frame: local
+                xyz: [-0.1, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{target_dock_a}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: '{{target_dock_b}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+          before:
+            - op: acm_allow
+              id: S4_allow_target
+              pairs: [[robot1_tying_gun, robot1_tool_mount], [robot2_tying_gun, robot2_tool_mount]]
+        - op: move
+          id: S5_R5_D5
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_all_robots
+          participants: *id006
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{place_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{place_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{target_dock_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: '{{target_dock_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+          fallbacks:
+            - motion: moveL
+              strategy: coordinated_cartesian
+          after:
+            - op: detach
+              id: S5_detach_rebar
+              object: '{{rebar}}'
+              link: robot3_end_effactor_ff
+            - op: attach
+              id: S5_attach_tying1
+              object: robot1_tying_gun
+              link: robot1_tool_mount
+              placement_mode: preserve_world
+              touch_links: *id002
+            - op: attach
+              id: S5_attach_tying2
+              object: robot2_tying_gun
+              link: robot2_tool_mount
+              placement_mode: preserve_world
+              touch_links: *id003
+        - op: move
+          id: S6_R6_D6
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_all_robots
+          participants: *id006
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{place_a}}'
+                offset_frame: local
+                xyz: [-0.1, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{place_b}}'
+                offset_frame: local
+                xyz: [-0.1, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{target_dock_a}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: '{{target_dock_b}}'
+                offset_frame: world
+                xyz: [0, 0, '{{approach_z}}']
+                rpy: [0, 0, 0]
+          after:
+            - op: acm_restore
+              id: S6_restore_target
+              pairs: [[robot1_tying_gun, robot1_tool_mount], [robot2_tying_gun, robot2_tool_mount]]
+        - op: move
+          id: S7_R34_HOME
+          motion: moveJ
+          strategy: combined
+          group: robot3_robot4_arms
+          goals:
+            - robot: robot3
+              named_state: home
+            - robot: robot4
+              named_state: home
+
+    tying_pair:
+      defaults:
+        approach_offset: [-0.2, 0, 0]
+      steps:
+        - op: move
+          id: T1
+          motion: moveJ
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              link: '@tying'
+              target:
+                reference: '{{tie_a}}'
+                offset_frame: local
+                xyz: '{{approach_offset}}'
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: '@tying'
+              target:
+                reference: '{{tie_b}}'
+                offset_frame: local
+                xyz: '{{approach_offset}}'
+                rpy: [0, 0, 0]
+        - op: move
+          id: T2
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              link: '@tying'
+              target:
+                reference: '{{tie_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: '@tying'
+              target:
+                reference: '{{tie_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+        - op: move
+          id: T3
+          motion: moveL
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: *id001
+          goals:
+            - robot: robot1
+              link: '@tying'
+              target:
+                reference: '{{tie_a}}'
+                offset_frame: local
+                xyz: '{{approach_offset}}'
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: '@tying'
+              target:
+                reference: '{{tie_b}}'
+                offset_frame: local
+                xyz: '{{approach_offset}}'
+                rpy: [0, 0, 0]
+   
+    final_assembly:
+      defaults:
+        main_object: rebar_1A
+        optional_child_a: rebar_3c
+        optional_child_b: rebar_4c
+        pick_a: sa3_pick_point_l
+        pick_b: sa3_pick_point_r
+        place_a: sa3_place_l
+        place_b: sa3_place_r
+      steps:
+        - op: move
+          id: P1
+          motion: moveJ
+          strategy: separate_merge
+          group: robot3_robot4_arms
+          participants: *id004
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: world
+                xyz: [-0.1, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: world
+                xyz: [0.15, 0, 0]
+                rpy: [0, 0, 0]
+        - op: move
+          id: P2
+          motion: moveL
+          strategy: coordinated_cartesian
+          group: robot3_robot4_arms
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+        - op: attach
+          id: P2_attach_main
+          object: '{{main_object}}'
+          link: robot3_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *id005
+        - op: attach
+          id: P2_attach_child3
+          object: '{{optional_child_a}}'
+          link: robot3_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *id005
+          optional: true
+        - op: attach
+          id: P2_attach_child4
+          object: '{{optional_child_b}}'
+          link: robot4_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *id007
+          optional: true
+        - op: move
+          id: P3
+          motion: moveL
+          strategy: coordinated_cartesian
+          group: robot3_robot4_arms
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{pick_a}}'
+                offset_frame: world
+                xyz: [0, -0.2, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{pick_b}}'
+                offset_frame: world
+                xyz: [0, -0.2, 0]
+                rpy: [0, 0, 0]
+        - op: move
+          id: G1
+          motion: moveJ
+          strategy: separate_merge
+          group: robot3_robot4_arms
+          participants: *id004
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{place_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0.3]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{place_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0.3]
+                rpy: [0, 0, 0]
+        - op: move
+          id: G2
+          motion: moveL
+          strategy: coordinated_cartesian
+          group: robot3_robot4_arms
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{place_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{place_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+        - op: detach
+          id: G2_detach_main
+          object: '{{main_object}}'
+          link: robot3_end_effactor_ff
+        - op: detach
+          id: G2_detach_child3
+          object: '{{optional_child_a}}'
+          link: robot3_end_effactor_ff
+          optional: true
+        - op: detach
+          id: G2_detach_child4
+          object: '{{optional_child_b}}'
+          link: robot4_end_effactor_ff
+          optional: true
+        - op: move
+          id: G3
+          motion: moveL
+          strategy: coordinated_cartesian
+          group: robot3_robot4_arms
+          goals:
+            - robot: robot3
+              link: robot3_end_effactor_ff
+              target:
+                reference: '{{place_a}}'
+                offset_frame: world
+                xyz: [-0.05, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: robot4
+              link: robot4_end_effactor_ff
+              target:
+                reference: '{{place_b}}'
+                offset_frame: world
+                xyz: [0.1, 0, 0]
+                rpy: [0, 0, 0]
+        - op: move
+          id: H1
+          motion: moveJ
+          strategy: combined
+          group: robot3_robot4_arms
+          goals:
+            - robot: robot3
+              named_state: home
+            - robot: robot4
+              named_state: home
+
+    shear_single:
+      defaults:
+        pick_offset: [0, 0, 0]
+        inventory: web_ring
+
+      steps:
+        # P1 - Pick approach
+        - op: move
+          id: P1
+          motion: moveL
+          strategy: separate_merge
+          circ_via_world_x: {robot1: 0.235}
+          fallbacks:
+            - {motion: moveC, strategy: separate_merge}
+            - {motion: moveJ, strategy: separate_merge}
+          group: robot1_arm
+          participants: [robot1]
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{pick}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+
+        # P2 - Pick rebar
+        - op: move
+          id: P2
+          motion: moveL
+          strategy: separate_merge
+          group: robot1_arm
+          participants: [robot1]
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{pick}}'
+                offset_frame: world
+                xyz: '{{pick_offset}}'
+                rpy: [0, 0, 0]
+          before:
+            - op: acm_allow
+              id: P2_allow_gripper_contact
+              pairs:
+                - ['{{object}}', robot1_tool_mount]
+                - ['{{object}}', robot1_schunk_base]
+          after:
+            - op: attach
+              id: P2_attach
+              object: '{{object}}'
+              link: robot1_tool_mount
+              placement_mode: preserve_world
+              touch_links:
+                - robot1_tool_mount
+                - robot1_J4_link
+                - robot1_J5_link
+                - robot1_J6_link
+
+            - op: acm_allow
+              id: P2_allow_inventory_contact
+              pairs:
+                - ['{{object}}', '{{inventory}}']
+
+        # P3 - Pick retract
+        - op: move
+          id: P3
+          motion: moveL
+          strategy: separate_merge
+          group: robot1_arm
+          participants: [robot1]
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{pick}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+          after:
+            - op: acm_restore
+              id: P3_restore_inventory_contact
+              pairs:
+                - ['{{object}}', '{{inventory}}']
+
+        # T1 - Place approach
+        - op: move
+          id: T1
+          motion: moveL
+          strategy: separate_merge
+          circ_via_world_x: {robot1: 0.235}
+          fallbacks:
+            - {motion: moveC, strategy: separate_merge}
+            - {motion: moveJ, strategy: separate_merge}
+          group: robot1_arm
+          participants: [robot1]
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{place}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+
+        # G1 - Place rebar
+        - op: move
+          id: G1
+          motion: moveL
+          strategy: separate_merge
+          group: robot1_arm
+          participants: [robot1]
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{place}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+          before:
+            - op: acm_allow
+              id: G1_allow_jig_contact
+              pairs:
+                - ['{{object}}', jig_clamp]
+          after:
+            - op: detach
+              id: G1_detach
+              object: '{{object}}'
+              link: robot1_tool_mount
+
+            - op: acm_allow
+              id: G1_reallow_gripper_contact_after_detach
+              pairs:
+                - ['{{object}}', robot1_tool_mount]
+                - ['{{object}}', robot1_schunk_base]
+
+        # G2 - Place retract
+        - op: move
+          id: G2
+          motion: moveL
+          strategy: separate_merge
+          group: robot1_arm
+          participants: [robot1]
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: '{{place}}'
+                offset_frame: world
+                xyz: [0, -0.25, 0]
+                rpy: [0, 0, 0]
+          after:
+            - op: acm_restore
+              id: G2_restore_gripper_contact_after_retract
+              pairs:
+                - ['{{object}}', robot1_tool_mount]
+                - ['{{object}}', robot1_schunk_base]
+
+            - op: acm_restore
+              id: G2_restore_jig_contact
+              pairs:
+                - ['{{object}}', jig_clamp]
+
+    flange_reverse_pp:
+      defaults:
+        robot_a: robot3
+        robot_b: robot4
+        group: robot3_robot4_arms
+      steps:
+        - op: move
+          id: B1
+          motion: movePTP
+          strategy: separate_merge
+          group: '{{group}}'
+          participants:
+            - '{{robot_a}}'
+            - '{{robot_b}}'
+          goals:
+            - robot: '{{robot_a}}'
+              target:
+                reference: '{{transfer_end_a}}'
+                xyz: [0, 0, 0]
+                offset_frame: world
+            - robot: '{{robot_b}}'
+              target:
+                reference: '{{transfer_end_b}}'
+                xyz: [0, 0, 0]
+                offset_frame: world
+        - op: move
+          id: B2
+          motion: movePTP
+          strategy: separate_merge
+          group: '{{group}}'
+          participants:
+            - '{{robot_a}}'
+            - '{{robot_b}}'
+          goals:
+            - robot: '{{robot_a}}'
+              target:
+                reference: '{{transfer_start_a}}'
+                xyz: [0, 0, 0]
+                offset_frame: world
+            - robot: '{{robot_b}}'
+              target:
+                reference: '{{transfer_start_b}}'
+                xyz: [0, 0, 0]
+                offset_frame: world
+        - op: move
+          id: P1
+          motion: moveL
+          strategy: separate_merge
+          group: '{{group}}'
+          participants:
+            - '{{robot_a}}'
+            - '{{robot_b}}'
+          goals:
+            - robot: '{{robot_a}}'
+              target:
+                reference: '{{approach_a}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+            - robot: '{{robot_b}}'
+              target:
+                reference: '{{approach_b}}'
+                offset_frame: world
+                xyz: [0, 0, 0]
+                rpy: [0, 0, 0]
+   
+    tying_single:
+      defaults:
+        approach_offset: [-0.2, 0, 0]
+      steps:
+        - goals:
+            - link: '@tying'
+              robot: robot1
+              target:
+                offset_frame: local
+                reference: '{{tie_a}}'
+                rpy: [0, 0, 0]
+                xyz: '{{approach_offset}}'
+          group: robot1_arm
+          id: T1
+          motion: moveJ
+          op: move
+          participants:
+            - robot1
+          strategy: separate_merge
+        - goals:
+            - link: '@tying'
+              robot: robot1
+              target:
+                offset_frame: world
+                reference: '{{tie_a}}'
+                rpy: [0, 0, 0]
+                xyz: [0, 0, 0]
+          group: robot1_arm
+          id: T2
+          motion: moveL
+          op: move
+          participants:
+            - robot1
+          strategy: separate_merge
+        - goals:
+            - link: '@tying'
+              robot: robot1
+              target:
+                offset_frame: local
+                reference: '{{tie_a}}'
+                rpy: [0, 0, 0]
+                xyz: '{{approach_offset}}'
+          group: robot1_arm
+          id: T3
+          motion: moveL
+          op: move
+          participants:
+            - robot1
+          strategy: separate_merge
