@@ -478,7 +478,7 @@ workcell:
     robot2_tyinggun_dock:
       parent: world
       child: robot2_tyinggun_dock
-      xyz: [5.9, 2.8, 1.3]
+      xyz: [5.9, 2.6, 1.3]
       rpy: [0.0, 1.57, 1.57]
     robot2_shuck_dock:
       parent: world

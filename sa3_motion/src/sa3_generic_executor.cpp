@@ -267,7 +267,94 @@ private:
     mg.setNumPlanningAttempts(static_cast<int>(num(planning,"planning_attempts",10)));
     mg.setMaxVelocityScalingFactor(vel);mg.setMaxAccelerationScalingFactor(acc);
   }
+  // Optional per-step MoveIt Cartesian planner for moveL + separate_merge.
+  // Unlike Pilz LIN, this uses MoveGroupInterface::computeCartesianPath().
+  // Keep start state identical across every independently planned robot.
+  Plan separateCartesian(const Goal& g, const YAML::Node& cfg,
+                         const moveit_msgs::msg::RobotState& start) {
+    if(!g.state.empty())throw std::runtime_error("Cartesian planner needs pose target: "+g.robot);
+    auto& mg=group(robotGroup_.at(g.robot));
+    mg.clearPoseTargets();mg.clearPathConstraints();mg.setPoseReferenceFrame("world");
+    mg.setStartState(start);
+    auto seed=mg.getCurrentState(10.0);
+    if(!seed)throw std::runtime_error("No robot state for Cartesian planner: "+g.robot);
+    moveit::core::robotStateMsgToRobotState(start,*seed);
+    seed->update();
+    const auto* tip=seed->getLinkModel(g.link);
+    if(!tip)throw std::runtime_error("Unknown Cartesian tip link: "+g.link);
+    const Eigen::Isometry3d begin=seed->getGlobalLinkTransform(tip);
+    const Eigen::Vector3d from=begin.translation();
+    const Eigen::Vector3d to(g.pose.position.x,g.pose.position.y,g.pose.position.z);
+    const Eigen::Quaterniond q0(begin.rotation());
+    Eigen::Quaterniond q1(g.pose.orientation.w,g.pose.orientation.x,
+                          g.pose.orientation.y,g.pose.orientation.z);
+    if(q1.norm()<1e-9)throw std::runtime_error("Invalid Cartesian goal quaternion: "+g.robot);
+    q1.normalize();
+    const auto cart=globalPlanning_["cartesian"];
+    const double translationStep=num(cfg,"cartesian_translation_step_m",
+                                     num(cart,"translation_step_m",0.05));
+    const double rotationStep=num(cfg,"cartesian_rotation_step_rad",
+                                  num(cart,"rotation_step_rad",0.05));
+    const double eefStep=num(cfg,"cartesian_eef_step_m",
+                             num(cart,"eef_step_m",0.05));
+    const double minFraction=num(cfg,"cartesian_min_fraction",
+                                 num(cart,"min_fraction",0.99));
+    if(!std::isfinite(translationStep)||translationStep<=0||
+       !std::isfinite(rotationStep)||rotationStep<=0||
+       !std::isfinite(eefStep)||eefStep<=0||
+       !std::isfinite(minFraction)||minFraction<=0||minFraction>1)
+      throw std::runtime_error("Invalid Cartesian sampling configuration");
+    const int samples=std::max(1,static_cast<int>(std::ceil(std::max(
+       (to-from).norm()/translationStep,q0.angularDistance(q1)/rotationStep))));
+    if(samples>2000)throw std::runtime_error("Cartesian path exceeds 2000 samples: "+g.robot);
+    std::vector<geometry_msgs::msg::Pose> waypoints;
+    waypoints.reserve(static_cast<size_t>(samples));
+    for(int k=1;k<=samples;++k){
+      const double u=static_cast<double>(k)/samples;
+      const Eigen::Vector3d p=from+(to-from)*u;
+      const Eigen::Quaterniond q=q0.slerp(u,q1).normalized();
+      geometry_msgs::msg::Pose pose;
+      pose.position.x=p.x();pose.position.y=p.y();pose.position.z=p.z();
+      pose.orientation.x=q.x();pose.orientation.y=q.y();
+      pose.orientation.z=q.z();pose.orientation.w=q.w();
+      waypoints.push_back(pose);
+    }
+    const double velocity=num(cfg,"velocity",0.5);
+    const double acceleration=num(cfg,"acceleration",num(globalPlanning_,"acceleration",0.45));
+    checkScale(velocity);checkScale(acceleration);
+    mg.setMaxVelocityScalingFactor(velocity);
+    mg.setMaxAccelerationScalingFactor(acceleration);
+    moveit_msgs::msg::RobotTrajectory trajectory;
+    moveit_msgs::msg::MoveItErrorCodes error;
+    const double fraction=mg.computeCartesianPath(waypoints,eefStep,0.0,
+                                                    trajectory,true,&error);
+    RCLCPP_INFO(n_->get_logger(),"[CARTESIAN] robot=%s samples=%d fraction=%.4f error=%d",
+      g.robot.c_str(),samples,fraction,error.val);
+    if(!std::isfinite(fraction)||fraction<minFraction||
+       trajectory.joint_trajectory.points.empty())
+      throw std::runtime_error("Cartesian path incomplete for "+g.robot+
+         " fraction="+std::to_string(fraction));
+    robot_trajectory::RobotTrajectory timed(mg.getRobotModel(),mg.getName());
+    timed.setRobotTrajectoryMsg(*seed,trajectory);
+    trajectory_processing::IterativeParabolicTimeParameterization parameterizer;
+    if(!parameterizer.computeTimeStamps(timed,velocity,acceleration))
+      throw std::runtime_error("Cartesian time parameterization failed for "+g.robot);
+    Plan plan;
+    plan.start_state_=start;
+    timed.getRobotTrajectoryMsg(plan.trajectory_);
+    if(plan.trajectory_.joint_trajectory.points.empty() ||
+       sec(plan.trajectory_.joint_trajectory.points.back())<=0)
+      throw std::runtime_error("Cartesian path has no executable duration for "+g.robot);
+    return plan;
+  }
+
   Plan separate(const Goal& g,const std::string& motion,const YAML::Node& cfg,const moveit_msgs::msg::RobotState& start){
+    // 'planner: cartesian' is opt-in; unspecified moveL remains Pilz LIN.
+    const std::string planner=str(cfg,"planner","pilz");
+    if(motion=="moveL" && planner=="cartesian")
+      return separateCartesian(g,cfg,start);
+    if(motion=="moveL" && planner!="pilz")
+      throw std::runtime_error("Unknown moveL planner: "+planner);
     auto& mg=group(robotGroup_.at(g.robot));configure(mg,motion,cfg);mg.setStartState(start);
     if(!g.state.empty()) {
       if(motion!="moveJ")throw std::runtime_error("Named target requires moveJ");
@@ -344,9 +431,64 @@ private:
     if(!current)throw std::runtime_error("No current state for merged planning");
     moveit_msgs::msg::RobotState start;moveit::core::robotStateToRobotStateMsg(*current,start);
     std::set<std::string> active;std::vector<JT> tracks;
-    for(const auto& g:goals) {
+    // Per-robot planner fallback is planning-only. All arms use the same start
+    // state and all successful tracks still execute as ONE combined trajectory.
+    // Robot3/4 can be strict moveL while robot1/2 fall back to moveJ.
+    const auto goalConfigs=need(cfg,"goals");
+    if(!goalConfigs.IsSequence() || goalConfigs.size()!=goals.size())
+      throw std::runtime_error("Merged goal configuration count mismatch");
+    for(size_t i=0;i<goals.size();++i) {
+      const auto& g=goals[i];
       if(!active.insert(g.robot).second)throw std::runtime_error("Duplicate goal robot: "+g.robot);
-      tracks.push_back(separate(g,motion,cfg,start).trajectory_.joint_trajectory);
+      const auto goalCfg=goalConfigs[i];
+      // The goal-level planner override, if supplied, applies only to this arm.
+      YAML::Node local=YAML::Clone(cfg);
+      if(goalCfg["planner"])local["planner"]=goalCfg["planner"].as<std::string>();
+      const std::string primary=str(goalCfg,"motion",motion);
+      if(primary!=motion)
+        throw std::runtime_error("Per-robot primary motion must match step motion for "+g.robot);
+      std::string failure;
+      bool succeeded=false;
+      // Primary plan is attempted first; fallback only after planning failure.
+      const auto tryPlan=[&](const std::string& selected,const YAML::Node& settings)->bool {
+        try {
+          auto planned=separate(g,selected,settings,start);
+          tracks.push_back(planned.trajectory_.joint_trajectory);
+          RCLCPP_INFO(n_->get_logger(),"[ARM PLAN SUCCESS] robot=%s motion=%s",
+                      g.robot.c_str(),selected.c_str());
+          return true;
+        }catch(const std::exception& e){
+          failure=e.what();
+          RCLCPP_WARN(n_->get_logger(),"[ARM PLAN FAILURE] robot=%s motion=%s: %s",
+                      g.robot.c_str(),selected.c_str(),failure.c_str());
+          return false;
+        }
+      };
+      succeeded=tryPlan(primary,local);
+      if(!succeeded && goalCfg["fallbacks"]) {
+        const auto fallbacks=goalCfg["fallbacks"];
+        if(!fallbacks.IsSequence())throw std::runtime_error("Goal fallbacks must be a list for "+g.robot);
+        for(const auto& fb:fallbacks){
+          const auto fallbackMotion=str(fb,"motion");
+          if(fallbackMotion!="moveJ")
+            throw std::runtime_error("Only moveJ per-robot fallback supported: "+g.robot);
+          YAML::Node backup=YAML::Clone(local);
+          // A moveJ fallback MUST use OMPL, not an inherited Cartesian backend.
+          backup["planner"]="ompl";
+          const auto movejPolicy=globalPlanning_["moveJ"];
+          const int retries=static_cast<int>(num(fb,"retries",num(movejPolicy,"retries",3)));
+          if(retries<1||retries>20)throw std::runtime_error("Robot moveJ fallback retries must be 1..20");
+          const double velocity=num(fb,"velocity",num(movejPolicy,"velocity",0.5));
+          checkScale(velocity);backup["velocity"]=velocity;
+          for(int attempt=1;attempt<=retries && !succeeded;++attempt){
+            RCLCPP_WARN(n_->get_logger(),"[ARM FALLBACK] robot=%s primary=%s fallback=moveJ attempt=%d/%d",
+                        g.robot.c_str(),primary.c_str(),attempt,retries);
+            succeeded=tryPlan("moveJ",backup);
+          }
+          if(succeeded)break;
+        }
+      }
+      if(!succeeded)throw std::runtime_error("All allowed planners failed for "+g.robot+": "+failure);
     }
     double duration=0;for(const auto& t:tracks)if(!t.points.empty())duration=std::max(duration,sec(t.points.back()));
     if(duration<=0)throw std::runtime_error("No executable track duration");
@@ -477,6 +619,8 @@ private:
         YAML::Node cfg=YAML::Clone(step);cfg["velocity"]=velocity;
         RCLCPP_INFO(n_->get_logger(),"[PLAN ATTEMPT] step=%s planner=%s strategy=%s velocity=%.2f attempt=%zu/%zu",
           str(step,"id").c_str(),mode.c_str(),path.c_str(),velocity,attempt+1,velocities.size());
+        if(mode=="moveL")RCLCPP_INFO(n_->get_logger(),"[MOVE L PLANNER] step=%s backend=%s",
+          str(step,"id").c_str(),str(cfg,"planner","pilz").c_str());
         bool planned=false;
         try {
           if(path=="separate_merge"){
@@ -680,8 +824,11 @@ private:
   }
   void gantry(const YAML::Node& op){
     if(dry_)return;
-    const std::string id=instance_+"__"+str(op,"request_id");
-    if(id==instance_+"__")throw std::runtime_error("Gantry command needs request_id");
+    // YAML step id is the public command name. The topic bridge still uses
+    // request_id internally to correlate controller status with this command.
+    const std::string stepId=str(op,"id");
+    if(stepId.empty())throw std::runtime_error("gantry_send requires id");
+    const std::string id=instance_+"__"+stepId;
     const double x=num(op,"x",0),z=num(op,"z",0);
     const double speed=num(op,"velocity",0.4),acc=num(op,"acceleration",0.4);
     if(!std::isfinite(x)||!std::isfinite(z)||!std::isfinite(speed)||!std::isfinite(acc)||speed<=0||acc<=0)
@@ -706,7 +853,8 @@ private:
     RCLCPP_INFO(n_->get_logger(),"[GANTRY TOPIC] requested id=%s x=%.3f z=%.3f speed=%.3f acc=%.3f",
       id.c_str(),x,z,speed,acc);
     waitGantryStatus(id,20.0,true);
-    if(flag(op,"wait",false))waitGantry(id,num(op,"timeout",120));
+    // Sequential by default. Explicit wait: false allows asynchronous execution.
+    if(flag(op,"wait",true))waitGantry(id,num(op,"timeout",120));
   }
   void waitGantry(const std::string& id,double timeout){
     if(dry_)return;
@@ -727,7 +875,13 @@ private:
       for(const auto& p:need(op,"pairs")){if(!p.IsSequence()||p.size()!=2)throw std::runtime_error("ACM pairs require [name,name]");
         setAcm(p[0].as<std::string>(),p[1].as<std::string>(),kind=="acm_allow",kind=="acm_restore");}
     }else if(kind=="gantry_send")gantry(op);
-    else if(kind=="gantry_wait")waitGantry(instance_+"__"+str(op,"request_id"),num(op,"timeout",120));
+    else if(kind=="gantry_wait") {
+      // Optional legacy async operation: target_id identifies the gantry_send
+      // step to join. Fall back to request_id for older YAML configurations.
+      const auto targetId=str(op,"target_id",str(op,"request_id"));
+      if(targetId.empty())throw std::runtime_error("gantry_wait requires target_id");
+      waitGantry(instance_+"__"+targetId,num(op,"timeout",120));
+    }
     else if(kind=="sleep") {if(!dry_)std::this_thread::sleep_for(std::chrono::duration<double>(num(op,"seconds",0)));}
     else throw std::runtime_error("Unknown action step operation: "+kind);
   }

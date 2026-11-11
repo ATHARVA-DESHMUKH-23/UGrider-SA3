@@ -60,7 +60,7 @@ def generate_launch_description():
     cfgdir = os.path.join(get_package_share_directory(PKG), 'config')
     args = [
         DeclareLaunchArgument('sequence_config', default_value=os.path.join(cfgdir, 'sa3_execution_sequence.yaml')),
-        DeclareLaunchArgument('action_library', default_value=os.path.join(cfgdir, 'sa3_action_library.yaml')),
+        DeclareLaunchArgument('action_library', default_value=os.path.join(cfgdir, 'sa3_execution_sequence.yaml')),
         DeclareLaunchArgument('dry_run', default_value='false'),
         DeclareLaunchArgument('simulation_confirmed', default_value='true'),
         DeclareLaunchArgument('workcell_config_path', default_value=''),

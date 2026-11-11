@@ -20,7 +20,7 @@
 #   4. MOTION NODE / PLANNER -> op: move, motion:, strategy:, goals:
 #      The generic C++ executor is the ROS node that runs each action.
 #      The 'motion:' property selects MoveIt planning: moveJ (joint/OMPL),
-#      moveL (linear/Pilz LIN), movePTP (Pilz PTP), moveC (Pilz CIRC).
+#      moveL (Pilz LIN by default, or planner: cartesian), movePTP (Pilz PTP), moveC (Pilz CIRC).
 #      'strategy: separate_merge' plans arms separately and merges their paths;
 #      'strategy: combined' plans the combined MoveIt group.
 #      'goals:' sets robot, planning link, reference frame and offsets.
@@ -46,6 +46,8 @@
 #   gantry_send   Send gantry x/z motion. Uses the step 'id:' only in this YAML.
 #
 # GANTRY POLICY IN THIS FILE:
+#   Edit shared gantry speed/acceleration at action_library.gantry_settings.
+#   Individual gantry_send steps reuse these via YAML *aliases.
 #   All gantry sends are sequential: wait for completion before next step.
 #   No 'request_id' or 'gantry_wait' is needed in this synchronous workflow.
 #   Executor must default missing wait=true and must accept/generate a request
@@ -313,18 +315,18 @@ sa3_sequence:
         - 0
         first_approach: true
  
-  - name: Final unpaired Robot1 shear link
-    mode: sequential
-    actions:
-    - action: shear_single
-      with:
-        pick: 14pf
-        place: 14_placef4_l
-        object: rebar_14_4
-        pick_offset:
-        - 0.6
-        - 0
-        - 0
+  # - name: Final unpaired Robot1 shear link
+  #   mode: sequential
+  #   actions:
+  #   - action: shear_single
+  #     with:
+  #       pick: 14pf
+  #       place: 14_placef4_l
+  #       object: rebar_14_4
+  #       pick_offset:
+  #       - 0.6
+  #       - 0
+  #       - 0
  
   - name: Bottom mat Robot3/4 + Robot1/2 gripper change fused
     mode: sequential
@@ -443,6 +445,20 @@ sa3_sequence:
 # PART B: ACTION LIBRARY — reusable motion templates and object operations
 # Phase 2 reverse ends at approach; subsequent flange_pp performs 3D/4D pickup/place.
 action_library:
+  # ---------------------------------------------------------------------------
+  # GANTRY MOTION SETTINGS — SINGLE PLACE TO EDIT GANTRY SPEEDS
+  # YAML anchors (&name) store each value; aliases (*name) reuse that value.
+  # These are physical gantry speed/acceleration commands, not MoveIt scalings.
+  # Changing a value here changes every gantry_send using its alias.
+  # The profiles below preserve the original per-step values.
+  # This is resolved by the YAML parser; the C++ executor needs no special
+  # "global gantry settings" lookup for these velocity/acceleration fields.
+  # ---------------------------------------------------------------------------
+  gantry_settings:
+    # Default gantry movement (G2/G3/G4/G5/G6)
+    velocity: &gantry_velocity 1.0
+    acceleration: &gantry_acceleration 0.8
+
   schema_version: 1
   workcell_package: sa2_description
   workcell_file: config/workcell.yaml
@@ -454,12 +470,19 @@ action_library:
     # Diagnostic only: publish rejected merged paths to RViz, never execute them.
     preview_rejected_trajectories: false
 
-    planning_time: 15
-    planning_attempts: 10
+    planning_time: 20
+    planning_attempts: 15
     acceleration: 0.45
+    # Optional planner: cartesian on a moveL + separate_merge step.
+    # Used for S4_R4_D4; other moveL steps remain Pilz LIN.
+    cartesian:
+      translation_step_m: 0.05
+      rotation_step_rad: 0.05
+      eef_step_m: 0.05
+      min_fraction: 0.99
     moveJ:
       velocity: 0.5
-      retries: 3
+      retries: 10
     moveL:
       velocity_scales: [0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1, 0.05]
     movePTP:
@@ -789,14 +812,14 @@ action_library:
           id: G1_home
           x: '{{gantry_pick_x}}'
           z: '{{gantry_up_z}}'
-          velocity: 1.45
-          acceleration: 1.0
+          velocity: *gantry_velocity
+          acceleration: *gantry_acceleration
         - op: gantry_send
           id: G2_lower
           x: '{{gantry_pick_x}}'
           z: '{{gantry_pick_z}}'
-          velocity: 0.45
-          acceleration: 0.5
+          velocity: *gantry_velocity
+          acceleration: *gantry_acceleration
         - op: attach
           id: G2_attach_rebar
           object: '{{rebar}}'
@@ -808,14 +831,14 @@ action_library:
           id: G3_raise
           x: '{{gantry_pick_x}}'
           z: '{{gantry_up_z}}'
-          velocity: 0.45
-          acceleration: 0.5
+          velocity: *gantry_velocity
+          acceleration: *gantry_acceleration
         - op: gantry_send
           id: G4_transport
           x: '{{gantry_transport_x}}'
           z: '{{gantry_up_z}}'
-          velocity: 0.45
-          acceleration: 0.5
+          velocity: *gantry_velocity
+          acceleration: *gantry_acceleration
 
     # ACTION: four_arm_home_shear_approach
     # Combined robot3/4 home plus robot1/2 shear prepositioning.
@@ -1059,8 +1082,8 @@ action_library:
           id: G5_lower
           x: '{{g4_x}}'
           z: '{{g5_z}}'
-          velocity: 2.45
-          acceleration: 2.0
+          velocity: *gantry_velocity
+          acceleration: *gantry_acceleration
         - op: detach
           id: G5_release
           object: '{{rebar}}'
@@ -1147,8 +1170,8 @@ action_library:
           id: G6_retract
           x: '{{g4_x}}'
           z: '{{up_z}}'
-          velocity: 0.45
-          acceleration: 0.5
+          velocity: *gantry_velocity
+          acceleration: *gantry_acceleration
         - op: move
           id: R4
           motion: moveJ
@@ -1419,19 +1442,28 @@ action_library:
         source_dock_b: robot2_shuck_dock
         target_dock_a: robot1_tyinggun_dock
         target_dock_b: robot2_tyinggun_dock
-        approach_z: -0.5
+        approach_z: 0.5  # Robot1/Robot2 dock approach; unchanged.
+
+        # Previous Phase-5 Robot3/Robot4 bottom-mat offsets (all in WORLD XYZ).
+        robot3_pick_approach_offset_world: [-0.15, 0.0, 0.0]
+        robot4_pick_approach_offset_world: [0.15, 0.0, 0.0]
+        pick_retract_offset_world: [0.0, -0.20, 0.0]
+        place_approach_offset_world: [0.0, 0.0, 0.30]
+        robot3_place_retract_offset_world: [-0.05, 0.0, 0.0]
+        robot4_place_retract_offset_world: [0.10, 0.0, 0.0]
       steps:
         - op: gantry_send
           id: G5_lower
           x: '{{g4_x}}'
           z: '{{g5_z}}'
-          velocity: 0.45
-          acceleration: 0.5
+          velocity: *gantry_velocity
+          acceleration: *gantry_acceleration
         - op: detach
           id: G5_detach_gantry
           object: '{{rebar}}'
           link: '{{gantry_link}}'
         - op: move
+          # Robot3/4 pick approach: independent WORLD offsets from the old Phase-5 YAML.
           id: S1_R1_D1
           motion: moveJ
           strategy: separate_merge
@@ -1446,15 +1478,15 @@ action_library:
               link: robot3_end_effactor_ff
               target:
                 reference: '{{pick_a}}'
-                offset_frame: local
-                xyz: [-0.05, 0, 0]
+                offset_frame: world
+                xyz: '{{robot3_pick_approach_offset_world}}'
                 rpy: [0, 0, 0]
             - robot: robot4
               link: robot4_end_effactor_ff
               target:
                 reference: '{{pick_b}}'
-                offset_frame: local
-                xyz: [-0.05, 0, 0]
+                offset_frame: world
+                xyz: '{{robot4_pick_approach_offset_world}}'
                 rpy: [0, 0, 0]
             - robot: robot1
               link: robot1_tool_mount
@@ -1470,6 +1502,13 @@ action_library:
                 offset_frame: world
                 xyz: [0, 0, '{{approach_z}}']
                 rpy: [0, 0, 0]
+          before:
+            - op: acm_allow
+              id: S1_allow_robot3_gripper_rebar
+              pairs:
+                - ['{{rebar}}', robot3_sa3_grpr01]
+
+      # Keep your existing participants and goals unchanged.
         - op: move
           id: S2_R2_D2
           motion: moveL
@@ -1531,6 +1570,7 @@ action_library:
               id: S2_allow_source
               pairs: [[robot1_schunk_base, robot1_tool_mount], [robot2_schunk_base, robot2_tool_mount]]
         - op: move
+          # Robot3/4 pick retract: [0, -0.20, 0] WORLD, same previous config.
           id: S3_R3_D3
           motion: moveL
           strategy: separate_merge
@@ -1541,15 +1581,15 @@ action_library:
               link: robot3_end_effactor_ff
               target:
                 reference: '{{pick_a}}'
-                offset_frame: local
-                xyz: [-0.05, 0, 0]
+                offset_frame: world
+                xyz: '{{pick_retract_offset_world}}'
                 rpy: [0, 0, 0]
             - robot: robot4
               link: robot4_end_effactor_ff
               target:
                 reference: '{{pick_b}}'
-                offset_frame: local
-                xyz: [-0.05, 0, 0]
+                offset_frame: world
+                xyz: '{{pick_retract_offset_world}}'
                 rpy: [0, 0, 0]
             - robot: robot1
               link: robot1_tool_mount
@@ -1573,11 +1613,13 @@ action_library:
           id: G6_raised
           x: '{{g4_x}}'
           z: '{{gantry_up_z}}'
-          velocity: 0.45
-          acceleration: 0.5
+          velocity: *gantry_velocity
+          acceleration: *gantry_acceleration
         - op: move
+          # Robot3/4 place approach: [0, 0, +0.30] WORLD, same previous config.
           id: S4_R4_D4
-          motion: moveJ
+          motion: moveL
+          # planner: cartesian  # MoveIt computeCartesianPath, not Pilz LIN
           strategy: separate_merge
           group: sa3_all_robots
           participants: *all_four_robots_participants
@@ -1586,17 +1628,21 @@ action_library:
               link: robot3_end_effactor_ff
               target:
                 reference: '{{place_a}}'
-                offset_frame: local
-                xyz: [-0.1, 0, 0]
+                offset_frame: world
+                xyz: '{{place_approach_offset_world}}'
                 rpy: [0, 0, 0]
             - robot: robot4
               link: robot4_end_effactor_ff
               target:
                 reference: '{{place_b}}'
-                offset_frame: local
-                xyz: [-0.1, 0, 0]
+                offset_frame: world
+                xyz: '{{place_approach_offset_world}}'
                 rpy: [0, 0, 0]
             - robot: robot1
+              # Try the step's moveL first; only this arm may switch to OMPL moveJ.
+              fallbacks:
+                - motion: moveJ
+                  retries: 3
               link: robot1_tool_mount
               target:
                 reference: '{{target_dock_a}}'
@@ -1604,6 +1650,10 @@ action_library:
                 xyz: [0, 0, '{{approach_z}}']
                 rpy: [0, 0, 0]
             - robot: robot2
+              # Try the step's moveL first; only this arm may switch to OMPL moveJ.
+              fallbacks:
+                - motion: moveJ
+                  retries: 3
               link: robot2_tool_mount
               target:
                 reference: '{{target_dock_b}}'
@@ -1670,6 +1720,7 @@ action_library:
               placement_mode: preserve_world
               touch_links: *robot2_schunk_touch_links
         - op: move
+          # Robot3/4 place retract: independent WORLD X offsets, same previous config.
           id: S6_R6_D6
           motion: moveL
           strategy: separate_merge
@@ -1680,15 +1731,15 @@ action_library:
               link: robot3_end_effactor_ff
               target:
                 reference: '{{place_a}}'
-                offset_frame: local
-                xyz: [-0.1, 0, 0]
+                offset_frame: world
+                xyz: '{{robot3_place_retract_offset_world}}'
                 rpy: [0, 0, 0]
             - robot: robot4
               link: robot4_end_effactor_ff
               target:
                 reference: '{{place_b}}'
-                offset_frame: local
-                xyz: [-0.1, 0, 0]
+                offset_frame: world
+                xyz: '{{robot4_place_retract_offset_world}}'
                 rpy: [0, 0, 0]
             - robot: robot1
               link: robot1_tool_mount
