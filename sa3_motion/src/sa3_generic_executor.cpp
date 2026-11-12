@@ -149,6 +149,11 @@ public:
     instance_=n_->declare_parameter<std::string>("instance_id","manual");
     dry_=n_->declare_parameter<bool>("dry_run",true);
     sim_=n_->declare_parameter<bool>("simulation_confirmed",false);
+    // Allow new MoveGroup action clients to stabilize after DDS discovery.
+    // Bounded startup delay only; planning/execution timeouts stay unchanged.
+    const auto settleMs=n_->declare_parameter<int>("moveit_client_settle_ms",500);
+    if(settleMs<0 || settleMs>5000)
+      throw std::runtime_error("moveit_client_settle_ms must be between 0 and 5000");
     if(lib.empty()||name_.empty())throw std::runtime_error("action_library_path and action_name required");
     YAML::Node root=YAML::LoadFile(lib);YAML::Node library=need(root,"action_library");
     fullGroup_=str(library,"collision_group","sa3_all_robots");
@@ -218,7 +223,32 @@ public:
     }
   }
 private:
-  MGI& group(const std::string& name){if(name.empty())throw std::runtime_error("Empty SRDF group");auto& ptr=groups_[name];if(!ptr)ptr=std::make_unique<MGI>(n_,name);return *ptr;}
+  MGI& group(const std::string& name){
+    if(name.empty())throw std::runtime_error("Empty SRDF group");
+    auto& ptr=groups_[name];
+    if(!ptr){
+      const auto begin=std::chrono::steady_clock::now();
+      RCLCPP_INFO(n_->get_logger(),"[MOVEIT CLIENT INIT] constructing group=%s",name.c_str());
+      ptr=std::make_unique<MGI>(n_,name);
+      const auto elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now()-begin).count();
+      RCLCPP_INFO(n_->get_logger(),"[MOVEIT CLIENT READY] group=%s init_ms=%ld",
+                  name.c_str(),static_cast<long>(elapsed));
+      // New SA3 action processes create fresh ROS 2 action clients. Give the
+      // discovery graph a brief stabilization window before the first request.
+      // This is a mitigation for startup races, not a fix for RMW/DDS failures.
+      if(!clientStartupSettled_){
+        const auto settleMs=n_->get_parameter("moveit_client_settle_ms").as_int();
+        if(settleMs>0){
+          RCLCPP_INFO(n_->get_logger(),"[MOVEIT CLIENT SETTLE] %ld ms before first request",
+                      static_cast<long>(settleMs));
+          std::this_thread::sleep_for(std::chrono::milliseconds(settleMs));
+        }
+        clientStartupSettled_=true;
+      }
+    }
+    return *ptr;
+  }
   geometry_msgs::msg::Pose tfPose(const std::string& frame){
     if(frame.empty())throw std::runtime_error("Empty target reference frame");
     auto t=tf_.lookupTransform("world",frame,tf2::TimePointZero,tf2::durationFromSec(10));
@@ -260,12 +290,43 @@ private:
     const auto planning=globalPlanning_;
     const auto pipeline=(motion=="moveL"||motion=="movePTP"||motion=="moveC")?"pilz_industrial_motion_planner":"ompl";
     mg.setPlanningPipelineId(pipeline);
-    mg.setPlannerId(motion=="moveL"?"LIN":motion=="movePTP"?"PTP":motion=="moveC"?"CIRC":"RRTConnectkConfigDefault");
+    mg.setPlannerId(motion=="moveL"?"LIN":motion=="movePTP"?"PTP":motion=="moveC"?"CIRC":str(cfg,"planner_id",str(planning["moveJ"],"planner_id","PRMstarkConfigDefault")));
     const double vel=num(cfg,"velocity",num(planning[motion],"velocity",0.5));
     const double acc=num(cfg,"acceleration",num(planning,"acceleration",0.35));checkScale(vel);checkScale(acc);
     mg.setPlanningTime(num(cfg,"planning_time",num(planning,"planning_time",15)));
     mg.setNumPlanningAttempts(static_cast<int>(num(planning,"planning_attempts",10)));
     mg.setMaxVelocityScalingFactor(vel);mg.setMaxAccelerationScalingFactor(acc);
+  }
+  // Planning-only fallback for moveJ. Reuse the exact goal and start state;
+  // never execute either candidate until a successful plan has been validated.
+  moveit::core::MoveItErrorCode planWithJointFallback(
+      MGI& mg, Plan& plan, const std::string& motion, const YAML::Node& cfg) {
+    auto status=mg.plan(plan);
+    if(motion!="moveJ" || status==moveit::core::MoveItErrorCode::SUCCESS)
+      return status;
+    const auto policy=globalPlanning_["moveJ"];
+    const std::string primary=str(cfg,"planner_id",str(policy,"planner_id","PRMstarkConfigDefault"));
+    const auto fallbacks=policy["fallback_planner_ids"];
+    if(!fallbacks)return status;
+    if(!fallbacks.IsSequence())
+      throw std::runtime_error("moveJ.fallback_planner_ids must be a list");
+    for(const auto& candidate:fallbacks){
+      const auto fallback=candidate.as<std::string>();
+      if(fallback.empty() || fallback==primary)continue;
+      RCLCPP_WARN(n_->get_logger(),
+        "[MOVEJ PLANNER FALLBACK] primary=%s failed code=%d; trying=%s",
+        primary.c_str(),status.val,fallback.c_str());
+      mg.setPlannerId(fallback);
+      plan=Plan{};
+      status=mg.plan(plan);
+      if(status==moveit::core::MoveItErrorCode::SUCCESS){
+        RCLCPP_INFO(n_->get_logger(),"[MOVEJ PLANNER FALLBACK SUCCESS] planner=%s",fallback.c_str());
+        return status;
+      }
+      RCLCPP_WARN(n_->get_logger(),"[MOVEJ PLANNER FALLBACK FAILED] planner=%s code=%d",
+                  fallback.c_str(),status.val);
+    }
+    return status;
   }
   // Optional per-step MoveIt Cartesian planner for moveL + separate_merge.
   // Unlike Pilz LIN, this uses MoveGroupInterface::computeCartesianPath().
@@ -406,7 +467,7 @@ private:
       RCLCPP_INFO(n_->get_logger(),"[CIRC] robot=%s interim_world=[%.3f, %.3f, %.3f]",
         g.robot.c_str(),via.x(),via.y(),via.z());
     }
-    Plan plan;auto status=mg.plan(plan);mg.clearPoseTargets();mg.clearPathConstraints();
+    Plan plan;auto status=planWithJointFallback(mg,plan,motion,cfg);mg.clearPoseTargets();mg.clearPathConstraints();
     if(status!=moveit::core::MoveItErrorCode::SUCCESS)
       throw std::runtime_error("Individual planning failed for "+g.robot+" code="+std::to_string(status.val));
     return plan;
@@ -421,7 +482,7 @@ private:
       else if(!target->setFromIK(jm,g.pose,g.link,num(cfg,"ik_timeout",1.0)))throw std::runtime_error("IK failed for "+g.robot);}
     mg.setStartStateToCurrentState();
     if(!mg.setJointValueTarget(*target))throw std::runtime_error("Combined goal rejected");
-    Plan plan;auto code=mg.plan(plan);
+    Plan plan;auto code=planWithJointFallback(mg,plan,"moveJ",cfg);
     if(code!=moveit::core::MoveItErrorCode::SUCCESS)throw std::runtime_error("Combined planning failed code="+std::to_string(code.val));
     return plan;
   }
@@ -866,8 +927,44 @@ private:
     const auto id=str(op,"id",str(op,"op")),kind=str(op,"op");
     RCLCPP_INFO(n_->get_logger(),"[ACTION STEP] %s / %s",name_.c_str(),id.c_str());
     if(kind=="move"){
+      // Run pre-motion scene operations ONCE, even if planning is retried.
       if(op["before"])for(const auto& item:op["before"])stepRun(item);
-      motion(op);
+      // step_retries means EXTRA full planning rounds after the first one.
+      // Each round retains the existing per-planner velocity/fallback attempts.
+      // Never replay a robot trajectory after execution has been submitted.
+      const int extraRetries=op["step_retries"]
+        ? op["step_retries"].as<int>()
+        : static_cast<int>(num(globalPlanning_,"step_retries",3));
+      const double delay=op["retry_delay_s"]
+        ? op["retry_delay_s"].as<double>()
+        : num(globalPlanning_,"retry_delay_s",0.5);
+      if(extraRetries<0||extraRetries>20)throw std::runtime_error("step_retries must be 0..20");
+      if(!std::isfinite(delay)||delay<0||delay>60)throw std::runtime_error("retry_delay_s must be 0..60");
+      for(int round=0;round<=extraRetries;++round){
+        RCLCPP_INFO(n_->get_logger(),"[STEP ATTEMPT] action=%s step=%s round=%d/%d",
+          name_.c_str(),id.c_str(),round+1,extraRetries+1);
+        try {
+          motion(op);
+          RCLCPP_INFO(n_->get_logger(),"[STEP SUCCESS] action=%s step=%s round=%d/%d",
+            name_.c_str(),id.c_str(),round+1,extraRetries+1);
+          break;
+        }catch(const std::exception& e){
+          const std::string reason=e.what();
+          // Only retry errors thrown BEFORE MoveIt execution is called.
+          // In particular, 'MoveIt execution uncertain/failed' must NOT replay.
+          const bool planningFailed=reason.rfind("All pre-execution planning candidates failed:",0)==0;
+          if(!planningFailed||round==extraRetries){
+            RCLCPP_ERROR(n_->get_logger(),"[STEP FAILED] action=%s step=%s round=%d/%d: %s",
+              name_.c_str(),id.c_str(),round+1,extraRetries+1,reason.c_str());
+            throw;
+          }
+          RCLCPP_WARN(n_->get_logger(),
+            "[STEP RETRY] action=%s step=%s failed round=%d/%d; retrying only this step: %s",
+            name_.c_str(),id.c_str(),round+1,extraRetries+1,reason.c_str());
+          if(delay>0)std::this_thread::sleep_for(std::chrono::duration<double>(delay));
+        }
+      }
+      // Run post-motion scene operations ONCE, only after motion succeeds.
       if(op["after"])for(const auto& item:op["after"])stepRun(item);
     }else if(kind=="attach")attachObject(op);
     else if(kind=="detach")detachObject(op);
@@ -888,6 +985,7 @@ private:
   rclcpp::Node::SharedPtr n_;tf2_ros::Buffer tf_;std::shared_ptr<tf2_ros::TransformListener> listener_;
   moveit::planning_interface::PlanningSceneInterface scene_;
   std::map<std::string,std::unique_ptr<MGI>> groups_;
+  bool clientStartupSettled_{false};
   rclcpp::Client<moveit_msgs::srv::GetStateValidity>::SharedPtr validity_;
   rclcpp::Client<moveit_msgs::srv::GetPlanningScene>::SharedPtr getScene_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr gantryCmd_,gantryCancel_;

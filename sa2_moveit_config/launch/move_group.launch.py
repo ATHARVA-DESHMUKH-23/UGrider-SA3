@@ -217,6 +217,36 @@ def generate_launch_description():
 
         .to_moveit_configs()
     )
+
+    # =========================================================
+    # REGISTER OMPL PRM* AND RRTCONNECT IN LAUNCH (NO NEW YAML)
+    # =========================================================
+
+    ompl_config = moveit_config.planning_pipelines.setdefault("ompl", {})
+    planner_configs = ompl_config.setdefault("planner_configs", {})
+    planner_configs["PRMstarkConfigDefault"] = {
+        "type": "geometric::PRMstar",
+    }
+    planner_configs["RRTConnectkConfigDefault"] = {
+        "type": "geometric::RRTConnect",
+        "range": 0.0,
+    }
+
+    for group in (
+        "robot1_arm",
+        "robot2_arm",
+        "robot3_arm",
+        "robot4_arm",
+        "sa3_robots_1_2",
+        "robot3_robot4_arms",
+        "sa3_all_robots",
+    ):
+        group_config = ompl_config.setdefault(group, {})
+        enabled_planners = group_config.setdefault("planner_configs", [])
+        for planner_id in ("PRMstarkConfigDefault", "RRTConnectkConfigDefault"):
+            if planner_id not in enabled_planners:
+                enabled_planners.append(planner_id)
+
     # =========================================================
     # TRAJECTORY EXECUTION CONFIGURATION
     # =========================================================

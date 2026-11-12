@@ -1,5 +1,7 @@
 # =============================================================================
 # SA3 ROBOT ASSEMBLY — SEQUENCE + ACTION LIBRARY
+# SIMULATION-ONLY TRIAL: shear_single G1 permits jig_clamp <-> robot1_J6_link.
+# DO NOT deploy on hardware without verifying no damaging physical contact.
 # =============================================================================
 # HOW TO READ THIS FILE (OUTSIDE -> INSIDE):
 #
@@ -36,6 +38,12 @@
 #   &robot1_robot2_participants defines a YAML anchor; *robot1_robot2_participants
 #   reuses the same list. Anchors are not robots or executor step IDs.
 #   A leading '#' comments out that line, so it is NOT executed.
+#
+# MOTION STEP RETRIES:
+#   action_library.planning.step_retries: 3 = 1 initial planning round + 3 retries.
+#   Optional per-move-step overrides: step_retries: 0..20, retry_delay_s: 0.5.
+#   'before:' is executed ONCE; 'after:' runs ONCE after motion success.
+#   On exhausted retries, action aborts. Execution failures never auto-replay.
 #
 # OPERATIONS:
 #   move          Plan and execute arm motion (motion/strategy/goals).
@@ -315,18 +323,18 @@ sa3_sequence:
         - 0
         first_approach: true
  
-  # - name: Final unpaired Robot1 shear link
-  #   mode: sequential
-  #   actions:
-  #   - action: shear_single
-  #     with:
-  #       pick: 14pf
-  #       place: 14_placef4_l
-  #       object: rebar_14_4
-  #       pick_offset:
-  #       - 0.6
-  #       - 0
-  #       - 0
+  - name: Final unpaired Robot1 shear link
+    mode: sequential
+    actions:
+    - action: shear_single
+      with:
+        pick: 14pf
+        place: 14_placef4_l
+        object: rebar_14_4
+        pick_offset:
+        - 0.6
+        - 0
+        - 0
  
   - name: Bottom mat Robot3/4 + Robot1/2 gripper change fused
     mode: sequential
@@ -341,7 +349,7 @@ sa3_sequence:
  
   - name: Tying all shear links (19 Robot1 / 17 Robot2 positions)
     mode: sequential
-    enabled: false
+    enabled: true
     actions:
     - action: tying_pair
       with:
@@ -420,7 +428,7 @@ sa3_sequence:
  
   - name: Tying bottom mat (three paired tie positions)
     mode: sequential
-    enabled: false
+    enabled: true
     actions:
     - action: tying_pair
       with:
@@ -437,7 +445,7 @@ sa3_sequence:
  
   - name: Pick and place final assembly
     mode: sequential
-    enabled: false
+    enabled: true
     actions:
     - action: final_assembly
       with: {}
@@ -465,6 +473,11 @@ action_library:
   collision_group: sa3_all_robots
   acm_lock: /tmp/sa3_action_engine_acm.lock
   planning:
+    # After one full planning round fails, retry just that MOVE step 3 more times.
+    # Existing moveL/moveJ velocity retries and fallback planners remain unchanged.
+    # Does not retry physical execution or scene/gantry side effects.
+    step_retries: 3
+    retry_delay_s: 0.5
 # Debug in confirmed simulation only. Set true for full-cell safety validation.
     full_cell_collision_check: false
     # Diagnostic only: publish rejected merged paths to RViz, never execute them.
@@ -481,6 +494,8 @@ action_library:
       eef_step_m: 0.05
       min_fraction: 0.99
     moveJ:
+      planner_id: PRMstarkConfigDefault  # OMPL PRM* for all moveJ steps
+      fallback_planner_ids: [RRTConnectkConfigDefault]  # Try only if PRM* plan fails
       velocity: 0.5
       retries: 10
     moveL:
@@ -1619,10 +1634,14 @@ action_library:
           # Robot3/4 place approach: [0, 0, +0.30] WORLD, same previous config.
           id: S4_R4_D4
           motion: moveL
-          # planner: cartesian  # MoveIt computeCartesianPath, not Pilz LIN
           strategy: separate_merge
           group: sa3_all_robots
           participants: *all_four_robots_participants
+          # If Pilz LIN cannot solve IK, try synchronized Cartesian planning.
+          # Both strategies retain Cartesian-style end-effector movement.
+          fallbacks:
+            - motion: moveL
+              strategy: coordinated_cartesian
           goals:
             - robot: robot3
               link: robot3_end_effactor_ff
@@ -1852,6 +1871,29 @@ action_library:
         place_a: sa3_place_l
         place_b: sa3_place_r
       steps:
+        # After bottom-mat tying, park Robot1/2 above their tying-gun docks
+        # before Robot3/4 approach. These are pre-dock poses, not dock contact.
+        - op: move
+          id: PARK_R1_R2_NEAR_DOCK
+          motion: moveJ
+          strategy: separate_merge
+          group: sa3_robots_1_2
+          participants: [robot1, robot2]
+          goals:
+            - robot: robot1
+              link: robot1_tool_mount
+              target:
+                reference: robot1_tyinggun_dock
+                offset_frame: world
+                xyz: [0, 0, 0.5]
+                rpy: [0, 0, 0]
+            - robot: robot2
+              link: robot2_tool_mount
+              target:
+                reference: robot2_tyinggun_dock
+                offset_frame: world
+                xyz: [0, 0, 0.5]
+                rpy: [0, 0, 0]
         - op: move
           id: P1
           motion: moveJ
@@ -1913,6 +1955,110 @@ action_library:
           placement_mode: preserve_world
           touch_links: *robot4_rebar_touch_links
           optional: true
+        # Rigidly carry the placed shear-link rebars with the bottom mat.
+        # The left-side objects follow Robot3; the right-side objects follow Robot4.
+        - op: attach
+          id: P2_attach_rebar_5a
+          object: rebar_5a
+          link: robot3_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot3_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_13_1
+          object: rebar_13_1
+          link: robot3_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot3_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_13_2
+          object: rebar_13_2
+          link: robot3_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot3_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_13_3
+          object: rebar_13_3
+          link: robot3_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot3_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_13_4
+          object: rebar_13_4
+          link: robot3_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot3_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_14_1
+          object: rebar_14_1
+          link: robot3_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot3_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_14_2
+          object: rebar_14_2
+          link: robot3_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot3_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_14_3
+          object: rebar_14_3
+          link: robot3_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot3_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_14_4
+          object: rebar_14_4
+          link: robot3_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot3_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_6
+          object: rebar_6
+          link: robot4_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot4_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_13_1_R
+          object: rebar_13_1_R
+          link: robot4_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot4_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_13_2_R
+          object: rebar_13_2_R
+          link: robot4_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot4_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_13_3_R
+          object: rebar_13_3_R
+          link: robot4_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot4_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_14_1_R
+          object: rebar_14_1_R
+          link: robot4_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot4_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_14_2_R
+          object: rebar_14_2_R
+          link: robot4_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot4_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_14_3_R
+          object: rebar_14_3_R
+          link: robot4_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot4_rebar_touch_links
+        - op: attach
+          id: P2_attach_rebar_14_4_R
+          object: rebar_14_4_R
+          link: robot4_end_effactor_ff
+          placement_mode: preserve_world
+          touch_links: *robot4_rebar_touch_links
         - op: move
           id: P3
           motion: moveL
@@ -1988,6 +2134,75 @@ action_library:
           object: '{{optional_child_b}}'
           link: robot4_end_effactor_ff
           optional: true
+        # Release the remaining shear-link rebars at the assembly destination.
+        - op: detach
+          id: G2_detach_rebar_5a
+          object: rebar_5a
+          link: robot3_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_13_1
+          object: rebar_13_1
+          link: robot3_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_13_2
+          object: rebar_13_2
+          link: robot3_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_13_3
+          object: rebar_13_3
+          link: robot3_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_13_4
+          object: rebar_13_4
+          link: robot3_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_14_1
+          object: rebar_14_1
+          link: robot3_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_14_2
+          object: rebar_14_2
+          link: robot3_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_14_3
+          object: rebar_14_3
+          link: robot3_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_14_4
+          object: rebar_14_4
+          link: robot3_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_6
+          object: rebar_6
+          link: robot4_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_13_1_R
+          object: rebar_13_1_R
+          link: robot4_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_13_2_R
+          object: rebar_13_2_R
+          link: robot4_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_13_3_R
+          object: rebar_13_3_R
+          link: robot4_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_14_1_R
+          object: rebar_14_1_R
+          link: robot4_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_14_2_R
+          object: rebar_14_2_R
+          link: robot4_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_14_3_R
+          object: rebar_14_3_R
+          link: robot4_end_effactor_ff
+        - op: detach
+          id: G2_detach_rebar_14_4_R
+          object: rebar_14_4_R
+          link: robot4_end_effactor_ff
         - op: move
           id: G3
           motion: moveL
@@ -2068,6 +2283,7 @@ action_library:
               pairs:
                 - ['{{object}}', robot1_tool_mount]
                 - ['{{object}}', robot1_schunk_base]
+                - ['{{object}}', robot1_J6_link]
           after:
             - op: attach
               id: P2_attach
@@ -2146,6 +2362,8 @@ action_library:
               id: G1_allow_jig_contact
               pairs:
                 - ['{{object}}', jig_clamp]
+                # SIMULATION-ONLY TRIAL: allow Robot1 wrist contact ONLY if verified intentional.
+                - [jig_clamp, robot1_J6_link]
           after:
             - op: detach
               id: G1_detach
@@ -2184,6 +2402,7 @@ action_library:
               id: G2_restore_jig_contact
               pairs:
                 - ['{{object}}', jig_clamp]
+                - [jig_clamp, robot1_J6_link]
 
     # ACTION: flange_reverse_pp
     # Move both flange arms back through transfer points to pickup approach.
